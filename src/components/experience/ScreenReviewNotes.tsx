@@ -15,7 +15,7 @@
 // first. Presentational only; all mutations flow back through the callbacks and
 // persist on the screenEdits `review` overlay.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
     AlertTriangle, Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ArrowRight,
 } from 'lucide-react';
@@ -23,7 +23,14 @@ import type { ScreenRiskDetail } from '../../types';
 import type {
     ScreenReviewIssue, ScreenReviewIssueCategory, ScreenReviewIssueSeverity,
 } from '../../lib/screenReviewWorkflow';
+import {
+    screenIssueMateriality,
+    type FlagPlanningConcernResult,
+    type ScreenNotePlanningRequest,
+} from '../../lib/planning/flagToPlan';
 import type { ScreenDetailTab } from './ScreenDetailTabs';
+
+export type { ScreenNotePlanningRequest } from '../../lib/planning/flagToPlan';
 
 /** Stable key for a risk (so a resolution survives re-renders / re-order). */
 function riskKey(description: string): string {
@@ -70,12 +77,15 @@ interface Props {
     onResolveRisk: (key: string, resolution: string | null) => void;
     onNavigate: (tab: ScreenDetailTab) => void;
     onEdit: () => void;
+    onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
+    onReviewPlanningRecord?: (recordId: string) => void;
     readOnly?: boolean;
 }
 
 export function ScreenReviewNotes({
     issues, risks, dismissed, riskResolutions,
     onDismissIssue, onResolveRisk, onNavigate, onEdit, readOnly,
+    onFlagToPlan, onReviewPlanningRecord,
 }: Props) {
     // Risk-category issues are rendered as first-class risk rows below, so drop
     // the summary issue to avoid saying the same thing twice. Handoff-category
@@ -102,6 +112,19 @@ export function ScreenReviewNotes({
     const itemCount = actionableIssues.length + openRisks.length;
     const [open, setOpen] = useState(false);
     const [showAddressed, setShowAddressed] = useState(false);
+    const [flagResults, setFlagResults] = useState<ReadonlyMap<string, FlagPlanningConcernResult>>(
+        () => new Map(),
+    );
+    const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
+
+    const keepReviewing = (noteId: string) => {
+        setFlagResults(current => {
+            const next = new Map(current);
+            next.delete(noteId);
+            return next;
+        });
+        window.requestAnimationFrame(() => triggerRefs.current.get(noteId)?.focus());
+    };
 
     // Nothing to review → a quiet, positive line rather than an empty panel.
     if (itemCount === 0 && infoCount === 0 && addressedCount === 0 && resolvedRisks.length === 0) {
@@ -153,17 +176,23 @@ export function ScreenReviewNotes({
                         <ul className="space-y-2.5">
                             {visibleIssues.map(issue => {
                                 const action = issueAction(issue.category);
+                                const issueFlagResult = flagResults.get(issue.id);
                                 return (
                                     <li key={issue.id} className="flex items-start gap-2.5">
                                         <span className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${SEVERITY_DOT[issue.severity]}`} aria-hidden />
                                         <div className="min-w-0 flex-1">
-                                            <p className="text-xs font-medium text-neutral-800">{issue.title}</p>
+                                            <p
+                                                id={`screen-review-note-${issue.id}`}
+                                                className="text-xs font-medium text-neutral-800"
+                                            >
+                                                {issue.title}
+                                            </p>
                                             <p className="text-[11px] text-neutral-600 mt-0.5">{issue.description}</p>
                                             {issue.recommendedAction && (
                                                 <p className="text-[11px] text-neutral-500 mt-0.5">{issue.recommendedAction}</p>
                                             )}
                                             {!readOnly && (
-                                                <div className="mt-1.5 flex items-center gap-3">
+                                                <div className="mt-1.5 flex flex-wrap items-center gap-3">
                                                     {action.kind === 'edit' ? (
                                                         <button
                                                             type="button"
@@ -188,8 +217,89 @@ export function ScreenReviewNotes({
                                                     >
                                                         <Check size={11} /> Mark addressed
                                                     </button>
+                                                    {onFlagToPlan && (
+                                                        <button
+                                                            ref={(element) => {
+                                                                if (element) triggerRefs.current.set(issue.id, element);
+                                                                else triggerRefs.current.delete(issue.id);
+                                                            }}
+                                                            type="button"
+                                                            disabled={Boolean(issueFlagResult)}
+                                                            aria-describedby={`screen-review-note-${issue.id}`}
+                                                            onClick={() => {
+                                                                const result = onFlagToPlan({
+                                                                    noteId: issue.id,
+                                                                    title: issue.title,
+                                                                    statement: issue.description,
+                                                                    materiality: screenIssueMateriality(issue.severity),
+                                                                });
+                                                                setFlagResults(current => (
+                                                                    new Map(current).set(issue.id, result)
+                                                                ));
+                                                            }}
+                                                            className="min-h-11 inline-flex items-center text-[11px] font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-default disabled:text-neutral-400"
+                                                        >
+                                                            Flag to plan
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
+                                            {(issueFlagResult?.status === 'created'
+                                                || issueFlagResult?.status === 'existing') ? (
+                                                    <div
+                                                        role="status"
+                                                        aria-live="polite"
+                                                        className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2"
+                                                    >
+                                                        <p className="text-xs font-medium text-emerald-900">
+                                                            {issueFlagResult.status === 'created'
+                                                                ? 'Added to the plan'
+                                                                : 'Already in the plan'}
+                                                        </p>
+                                                        <div className="mt-1 flex flex-wrap gap-2">
+                                                            <button
+                                                                type="button"
+                                                                aria-label={`Keep reviewing — ${issue.title}`}
+                                                                aria-describedby={`screen-review-note-${issue.id}`}
+                                                                onClick={() => keepReviewing(issue.id)}
+                                                                className="min-h-11 px-2 text-[11px] font-medium text-neutral-600 hover:text-neutral-800"
+                                                            >
+                                                                Keep reviewing
+                                                            </button>
+                                                            {onReviewPlanningRecord && (
+                                                                <button
+                                                                    type="button"
+                                                                    aria-label={`Review now — ${issue.title}`}
+                                                                    aria-describedby={`screen-review-note-${issue.id}`}
+                                                                    onClick={() => onReviewPlanningRecord(issueFlagResult.planningRecordId)}
+                                                                    className="min-h-11 px-2 text-[11px] font-medium text-indigo-700 hover:text-indigo-900"
+                                                                >
+                                                                    Review now
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : issueFlagResult?.status === 'rejected' ? (
+                                                    <div
+                                                        role="alert"
+                                                        className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2"
+                                                    >
+                                                        <p className="text-xs text-amber-900">
+                                                            {issueFlagResult.reason === 'source_changed'
+                                                                ? 'The screen source changed before this note could be added. Refresh the screen and try again.'
+                                                                : 'This screen source is no longer available.'}
+                                                        </p>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={`Keep reviewing — ${issue.title}`}
+                                                            aria-describedby={`screen-review-note-${issue.id}`}
+                                                            onClick={() => keepReviewing(issue.id)}
+                                                            className="mt-1 min-h-11 px-2 text-[11px] font-medium text-neutral-600 hover:text-neutral-800"
+                                                        >
+                                                            Keep reviewing
+                                                        </button>
+                                                    </div>
+                                                ) : null}
                                         </div>
                                     </li>
                                 );

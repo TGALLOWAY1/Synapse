@@ -129,6 +129,20 @@ describe('buildScreenReviewModel', () => {
         expect(model.userStatus).toBe('draft');
         expect(model.systemReadiness).toBe('ready');
     });
+
+    it('preserves legacy review metadata without deriving unused checklist progress', () => {
+        const model = buildScreenReviewModel(cleanSignals({
+            reviewMeta: {
+                checklist: { purposeMatchesPrd: true },
+                notes: 'Legacy note',
+            },
+        }));
+
+        expect(model).not.toHaveProperty('checklist');
+        expect(model).not.toHaveProperty('checklistProgress');
+        expect(model.reviewMeta?.notes).toBe('Legacy note');
+        expect(model.reviewMeta?.checklist?.purposeMatchesPrd).toBe(true);
+    });
 });
 
 describe('review freshness', () => {

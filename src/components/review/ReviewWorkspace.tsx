@@ -28,6 +28,7 @@ import type {
 } from './AssumptionValidationPanel';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 import { MIN_CLOSURE_REASON_LENGTH } from '../../lib/planning';
+import type { BatchVerdictCandidate, BatchVerdictResult } from '../../lib/planning';
 
 export type ReviewSpecialistOption = {
     id: string;
@@ -139,18 +140,10 @@ export interface ReviewWorkspaceProps {
     initialDecisionId?: string;
     initialIssueId?: string;
     initialFindingId?: string;
-    /** When false, the optional specialist critique is gated: its start surface
-     * is replaced by a prompt to address open decisions first. Omitted/true
-     * keeps the current behavior (critique runnable). Never gates the Decision
-     * Center, history, or an already-completed run. */
-    critiqueUnlocked?: boolean;
-    /** Count of still-open surfaced decisions, shown in the gate copy. */
+    /** Count of still-open planning items. These remain advisory and never
+     * disable specialist critique actions. */
     openDecisionCount?: number;
-    /** Defers every still-open surfaced decision at once — the gate's escape
-     * hatch so an unsure user can proceed to the optional critique. */
-    onDeferOpenDecisions?: () => void;
-    /** Jumps to the Explore/Build stage. Surfaced by the Decision Center and
-     * the critique gate so open decisions never read as blocking assets. */
+    /** Jumps to the Explore/Build stage from the Decision Center. */
     onContinueToExplore?: () => void;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
@@ -195,6 +188,9 @@ export interface ReviewWorkspaceProps {
         revisitCondition?: string;
     }) => void;
     onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
+    recommendationBatchBusy?: boolean;
+    recommendationBatchResult?: BatchVerdictResult;
+    onAcceptRecommendations?: (candidates: BatchVerdictCandidate[]) => void;
     readOnly?: boolean;
 }
 
@@ -229,48 +225,12 @@ function StatusIcon({ status }: { status: ReviewSpecialistProgress['status'] }) 
     return <Circle size={15} className="text-neutral-300" aria-label="Queued" />;
 }
 
-function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpenDecisions, onContinueToExplore }: {
-    openDecisionCount: number;
-    readOnly?: boolean;
-    onGoToDecisions: () => void;
-    onDeferOpenDecisions?: () => void;
-    onContinueToExplore?: () => void;
-}) {
+function CritiqueOpenItemsSuggestion({ count, className = '' }: { count: number; className?: string }) {
+    if (count <= 0) return null;
     return (
-        <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
-            <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
-                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500">
-                    <Clock3 size={20} />
-                </div>
-                <h1 className="text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">Answer your open decisions first</h1>
-                <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    The specialist critique is optional and works best once your draft has no open decisions.
-                    {openDecisionCount > 0
-                        ? ` ${openDecisionCount} decision${openDecisionCount === 1 ? '' : 's'} still ${openDecisionCount === 1 ? 'needs' : 'need'} an answer.`
-                        : ''} Answer them in the Decision Center — or defer them all and come back to the critique whenever you're ready.
-                </p>
-                {!readOnly && (
-                    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                        <button type="button" onClick={onGoToDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">
-                            Open Decision Center <ArrowRight size={14} className="shrink-0" />
-                        </button>
-                        {onDeferOpenDecisions && openDecisionCount > 0 && (
-                            <button type="button" onClick={onDeferOpenDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 text-sm font-semibold text-neutral-700 hover:bg-neutral-50">
-                                <Clock3 size={14} /> Defer the remaining {openDecisionCount} and continue
-                            </button>
-                        )}
-                    </div>
-                )}
-                {onContinueToExplore && (
-                    <p className="mt-4 text-xs text-neutral-500">
-                        Only this critique waits on decisions — your design assets don't.{' '}
-                        <button type="button" onClick={onContinueToExplore} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
-                            Continue to Explore
-                        </button>
-                    </p>
-                )}
-            </div>
-        </div>
+        <p className={`text-xs leading-5 text-amber-800 ${className}`} role="note">
+            {count} open item{count === 1 ? '' : 's'} — critiquing now may re-raise {count === 1 ? 'it' : 'them'}.
+        </p>
     );
 }
 
@@ -281,6 +241,7 @@ function ReviewSetup({
     missingSources,
     busy,
     readOnly,
+    openDecisionCount,
     onStart,
 }: {
     projectName: string;
@@ -289,6 +250,7 @@ function ReviewSetup({
     missingSources: string[];
     busy?: boolean;
     readOnly?: boolean;
+    openDecisionCount: number;
     onStart: ReviewWorkspaceProps['onStartReview'];
 }) {
     const [selected, setSelected] = useState(() => new Set(panel.filter(p => p.recommended !== false).map(p => p.id)));
@@ -313,6 +275,7 @@ function ReviewSetup({
                     A small panel of specialists will independently inspect {projectName} for contradictions, unsupported
                     assumptions, and implementation risks. Each finding becomes a new decision you choose to act on or set aside.
                 </p>
+                <CritiqueOpenItemsSuggestion count={openDecisionCount} className="mt-2" />
             </div>
 
             <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
@@ -388,11 +351,13 @@ function ReviewSetup({
     );
 }
 
-function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: {
+function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis, openDecisionCount, readOnly }: {
     run: ReviewRunView;
     onCancel: () => void;
     onRetrySpecialist: (id: string) => void;
     onRetrySynthesis: () => void;
+    openDecisionCount: number;
+    readOnly?: boolean;
 }) {
     const completed = run.specialists.filter(s => s.status === 'complete').length;
     const failed = run.specialists.filter(s => s.status === 'failed').length;
@@ -409,8 +374,11 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                             </h1>
                         </div>
                         <p className="mt-2 text-sm text-neutral-500">Reviewing {run.sourceLabel}. Completed work is preserved if another specialist fails.</p>
+                        {(run.status === 'interrupted' || run.status === 'failed') && (
+                            <CritiqueOpenItemsSuggestion count={openDecisionCount} className="mt-2" />
+                        )}
                     </div>
-                    {active && <button type="button" onClick={onCancel} className="min-h-10 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel review</button>}
+                    {active && !readOnly && <button type="button" onClick={onCancel} className="min-h-10 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel review</button>}
                 </div>
 
                 <div className="mt-5 h-2 overflow-hidden rounded-full bg-neutral-100" aria-label={`${completed} of ${run.specialists.length} specialists complete`}>
@@ -433,7 +401,7 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                                     <p className="mt-1 text-xs leading-5 text-emerald-700">{specialist.coverageSummary}</p>
                                 )}
                             </div>
-                            {specialist.status === 'failed' && (
+                            {specialist.status === 'failed' && !readOnly && (
                                 <button type="button" onClick={() => onRetrySpecialist(specialist.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">
                                     <RefreshCcw size={12} /> Retry
                                 </button>
@@ -447,7 +415,7 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                         {failed} specialist{failed === 1 ? '' : 's'} failed. The review can still finish with clearly marked coverage gaps.
                     </div>
                 )}
-                {(run.status === 'interrupted' || run.status === 'failed') && (
+                {(run.status === 'interrupted' || run.status === 'failed') && !readOnly && (
                     <div className="mt-5 flex justify-end">
                         <button type="button" onClick={onRetrySynthesis} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
                             <RefreshCcw size={14} /> Resume review
@@ -734,7 +702,7 @@ function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChang
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, readOnly, critiqueLocked, initialIssueId, initialFindingId }: {
+function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, openDecisionCount, readOnly, initialIssueId, initialFindingId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
@@ -742,11 +710,8 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
     onReopenIssue: ReviewWorkspaceProps['onReopenIssue'];
     onNewReview: () => void;
     onRetryCoverage: () => void;
+    openDecisionCount: number;
     readOnly?: boolean;
-    /** When true, re-running critique work is gated behind open decisions; the
-     * findings stay fully visible and triageable, but the "review again" /
-     * "retry coverage" affordances are hidden. */
-    critiqueLocked?: boolean;
     initialIssueId?: string;
     initialFindingId?: string;
 }) {
@@ -835,7 +800,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <div className="flex-1">
                         <span>Review complete with a coverage gap: {failed} specialist{failed === 1 ? '' : 's'} did not finish. Successful findings were still validated and synthesized.</span>
-                        {!readOnly && !critiqueLocked && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
+                        {!readOnly && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
                     </div>
                 </div>
             )}
@@ -846,7 +811,8 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
                 <div className="space-y-2">
-                    {!readOnly && !critiqueLocked && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
+                    {!readOnly && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
+                    <CritiqueOpenItemsSuggestion count={openDecisionCount} />
                 <div className="grid grid-cols-3 gap-2 text-center sm:flex">
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length + untriagedFindings.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-amber-700">{blocking}</div><div className="text-[11px] text-neutral-500">Build blockers</div></div>
@@ -885,7 +851,8 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
 }
 
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
-    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? (props.critiqueUnlocked === false ? 'decisions' : 'review'));
+    const openDecisionCount = props.openDecisionCount ?? 0;
+    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? (openDecisionCount > 0 ? 'decisions' : 'review'));
     const [lastInitialTab, setLastInitialTab] = useState(props.initialTab);
     if (props.initialTab !== lastInitialTab) {
         setLastInitialTab(props.initialTab);
@@ -900,7 +867,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
             <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
                 <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
-                    <button type="button" aria-label={props.planningRecords.length > 0 ? `Decision Center, ${props.planningRecords.length} records` : 'Decision Center'} onClick={() => setTab('decisions')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Decisions</span><span aria-hidden="true" className="hidden sm:inline">Decision Center</span> {props.planningRecords.length > 0 && <span aria-hidden="true" className="ml-1 text-xs text-neutral-400">{props.planningRecords.length}</span>}</button>
+                    <button type="button" aria-label="Decision Center" onClick={() => setTab('decisions')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Decisions</span><span aria-hidden="true" className="hidden sm:inline">Decision Center</span></button>
                     {/* Visible labels stay one naming family across breakpoints —
                         "Decision Center" is the documented product name, and the
                         other two tabs read identically on mobile and desktop
@@ -940,6 +907,9 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
                         onReopenAssumptionOutcome={props.onReopenAssumptionOutcome}
                         onContinueToExplore={props.onContinueToExplore}
+                        recommendationBatchBusy={props.recommendationBatchBusy}
+                        recommendationBatchResult={props.recommendationBatchResult}
+                        onAcceptRecommendations={props.onAcceptRecommendations}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -969,20 +939,9 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         </div>
                     </div>
                 ) : !activeRun ? (
-                    props.critiqueUnlocked === false ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
-                    ) : (
-                        <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
-                    )
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} openDecisionCount={openDecisionCount} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
                 ) : isInProgress ? (
-                    // A stalled (interrupted/failed) run's only actions are resume/retry —
-                    // restarting critique work — so gate it behind decisions too. A live
-                    // in-flight run keeps showing progress (it was started when unlocked).
-                    props.critiqueUnlocked === false && (activeRun.status === 'interrupted' || activeRun.status === 'failed') ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
-                    ) : (
-                        <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
-                    )
+                    <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} openDecisionCount={openDecisionCount} readOnly={props.readOnly} />
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
                     <ReviewResults
                         run={activeRun}
@@ -991,16 +950,14 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onTriageFinding={props.onTriageFinding}
                         onReopenIssue={props.onReopenIssue}
                         readOnly={props.readOnly}
-                        critiqueLocked={props.critiqueUnlocked === false}
+                        openDecisionCount={openDecisionCount}
                         initialIssueId={props.initialIssueId}
                         initialFindingId={props.initialFindingId}
                         onNewReview={() => setStartingNewReview(true)}
                         onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)}
                     />
-                ) : props.critiqueUnlocked === false ? (
-                    <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
                 ) : (
-                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} openDecisionCount={openDecisionCount} onStart={props.onStartReview} />
                 )}
             </div>
         </div>

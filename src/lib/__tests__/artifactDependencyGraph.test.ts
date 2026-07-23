@@ -330,6 +330,30 @@ describe('evaluateDependencyGraph', () => {
         expect(statusOf(evals, 'mockup')).toBe('generating');
     });
 
+    it('treats validation-blocked outputs as troubled and propagates that state downstream', () => {
+        const input = healthyInput();
+        input.snapshots.screen_inventory = snapshot('screen_inventory', {
+            metadata: {
+                validationBlockers: [{
+                    code: 'output_structure_incomplete',
+                    message: 'No screens were produced.',
+                }],
+            },
+        });
+        const durable = evaluateDependencyGraph(graph, input);
+        expect(statusOf(durable, 'screen_inventory')).toBe('needs_review');
+        expect(durable.get('user_flows')?.impactedBy).toContain('screen_inventory');
+        expect(computeRecommendedUpdates(graph, durable)).toEqual(expect.arrayContaining([
+            'screen_inventory',
+            'user_flows',
+        ]));
+
+        const transient = healthyInput();
+        transient.slotStatus = { data_model: 'needs_review' };
+        expect(statusOf(evaluateDependencyGraph(graph, transient), 'data_model'))
+            .toBe('needs_review');
+    });
+
     it('propagates upstream trouble downstream as impactedBy', () => {
         const input = healthyInput();
         // design_system missing → the mockup (its only consumer) is impacted

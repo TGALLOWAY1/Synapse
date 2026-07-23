@@ -29,7 +29,7 @@
 // alarming ("Review recommended", not "Invalid").
 
 import type {
-    Feature, ScreenItem, ScreenState, ScreenReviewChecklist, ScreenReviewMeta, ScreenReviewSignature,
+    Feature, ScreenItem, ScreenState, ScreenReviewMeta, ScreenReviewSignature,
     LegacyScreenPriority, ScreenPriority,
 } from '../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from './screenExperience';
@@ -415,27 +415,8 @@ export interface ScreenReviewModel {
     acceptedOverWarnings: boolean;
     /** Re-review status vs. the sign-off signature (see compareReviewFreshness). */
     freshness: ScreenReviewFreshnessStatus;
-    checklist: ScreenReviewChecklist;
-    /** Ticked / total checklist items. */
-    checklistProgress: { checked: number; total: number };
     reviewMeta?: ScreenReviewMeta;
 }
-
-const CHECKLIST_ITEM_KEYS: Array<keyof ScreenReviewChecklist> = [
-    'purposeMatchesPrd', 'entryExitPathsReviewed', 'statesReviewed', 'risksReviewed',
-    'mockupsReviewed', 'mobileReviewed', 'acceptanceCriteriaReviewed', 'developerHandoffReviewed',
-];
-
-export const CHECKLIST_LABELS: Record<keyof ScreenReviewChecklist, string> = {
-    purposeMatchesPrd: 'Purpose matches the PRD',
-    entryExitPathsReviewed: 'Entry and exit paths are correct',
-    statesReviewed: 'Required states are complete',
-    risksReviewed: 'Risks and edge cases are handled',
-    mockupsReviewed: 'Mockups match the intended layout',
-    mobileReviewed: 'Mobile / responsive behavior reviewed',
-    acceptanceCriteriaReviewed: 'Acceptance criteria are sufficient',
-    developerHandoffReviewed: 'Developer handoff details are sufficient',
-};
 
 function systemReadinessFrom(issues: readonly ScreenReviewIssue[]): SystemReadinessStatus {
     if (issues.some(i => i.severity === 'blocking')) return 'blocked';
@@ -453,8 +434,6 @@ export function buildScreenReviewModel(signals: ScreenReviewSignals): ScreenRevi
     const userStatus = signals.userStatus;
     const signedOff = userStatus === 'accepted' || userStatus === 'implementation_ready';
     const acceptedOverWarnings = signedOff && (blockingCount > 0 || reviewCount > 0);
-    const checklist = signals.reviewMeta?.checklist ?? {};
-    const checked = CHECKLIST_ITEM_KEYS.filter(k => checklist[k] === true).length;
     return {
         userStatus,
         systemReadiness,
@@ -464,8 +443,6 @@ export function buildScreenReviewModel(signals: ScreenReviewSignals): ScreenRevi
         infoCount,
         acceptedOverWarnings,
         freshness: compareReviewFreshness(signals.reviewMeta?.signature, signals.screen),
-        checklist,
-        checklistProgress: { checked, total: CHECKLIST_ITEM_KEYS.length },
         reviewMeta: signals.reviewMeta,
     };
 }
@@ -823,6 +800,4 @@ const EMPTY_REVIEW_MODEL: ScreenReviewModel = {
     infoCount: 0,
     acceptedOverWarnings: false,
     freshness: 'unknown',
-    checklist: {},
-    checklistProgress: { checked: 0, total: CHECKLIST_ITEM_KEYS.length },
 };

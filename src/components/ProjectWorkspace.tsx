@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { ConfirmDialog } from './common/ConfirmDialog';
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
@@ -31,7 +31,7 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
-import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -53,6 +53,9 @@ import {
     commitmentRemainsCurrent,
     compareReadinessReviewCurrentness,
     compareReadinessReviewProjections,
+    assumptionDefaultBatchCandidate,
+    deferBatchCandidate,
+    deriveAssumptionArrival,
     deriveAnswerableAssumptionRecords,
     derivePlanningAttention,
     derivePlanningReadiness,
@@ -62,30 +65,58 @@ import {
     hasReadinessProvenanceForSpine,
     planningContentHash,
     projectDecision,
+    type PlanningAttentionItem,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
-import { PreBuildCheckModal } from './planning/PreBuildCheckModal';
+import { GlobalNextActionStrip } from './planning/GlobalNextActionStrip';
+import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
+import { AssumptionArrivalCard } from './planning/AssumptionArrivalCard';
 import { useDecisionImpactActions } from './review/useDecisionImpactActions';
+import { useBatchVerdictCoordinator } from './review/useBatchVerdictCoordinator';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
 import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
     PLANNING_NAVIGATION_QUERY_PARAM,
+    dispatchPlanningAttentionItem,
     parsePlanningNavigationIntent,
+    planningReturnTargetForSurface,
+    planningStageForDestination,
+    resolveActivePlanningScreen,
     validatePlanningDestination,
     withPlanningNavigationIntent,
     type PlanningArtifactRegionTarget,
-    type PlanningNavigationIntent,
     type PlanningDestination,
+    type PlanningNavigationIntent,
     type PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
+import { parseScreenInventory } from '../lib/screenInventoryNormalize';
+import { readArtifactValidationDisposition } from '../lib/artifactValidationPolicy';
+import {
+    deriveWorkflowCheckpointSummary,
+    type WorkflowCheckpointArtifactInput,
+    type WorkflowCheckpointPlanningVerdict,
+} from '../lib/workflowCheckpointSummary';
+import { WorkflowCheckpointSummaryCard } from './workflow/WorkflowCheckpointSummaryCard';
 
 const EMPTY_PROJECT_LIST: never[] = [];
 
+const validationWarningsFrom = (metadata: Record<string, unknown>): string[] => {
+    const value = metadata.validationWarnings;
+    if (!Array.isArray(value)) return [];
+    return value.flatMap(item => (
+        typeof item === 'string' && item.trim() ? [item.trim()] : []
+    ));
+};
+
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
+    return <ProjectWorkspaceSession key={projectId ?? 'invalid-project'} projectId={projectId} />;
+}
+
+function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const capabilities = useProjectCapabilities(projectId);
@@ -109,11 +140,29 @@ export function ProjectWorkspace() {
     const canEditPlan = !!projectId && canPerformProjectAction(projectId, 'persist');
     // The sharpen flow records verdicts through the same append-only
     // decision-event path the Decision Center uses (user-only authority).
-    const { handleDecisionAction: handleSharpenDecision } = useDecisionImpactActions({
+    const {
+        handleDecisionAction: handleSharpenDecision,
+        handlePreviewImpact: handleSharpenPreviewImpact,
+    } = useDecisionImpactActions({
         projectId: projectId ?? '',
         canWrite: canEditPlan,
         planningRecords,
     });
+    const {
+        busy: assumptionBatchBusy,
+        result: assumptionBatchResult,
+        runBatch: runAssumptionBatch,
+        clearResult: clearAssumptionBatchResult,
+    } = useBatchVerdictCoordinator({
+        projectId: projectId ?? '',
+        canWrite: canEditPlan,
+        prepareImpact: handleSharpenPreviewImpact,
+    });
+    const [assumptionArrival, setAssumptionArrival] = useState<{
+        projectId: string;
+        spineVersionId: string;
+        recordIds: string[];
+    } | null>(null);
     const reviewRuns = useProjectStore((s) => (projectId ? s.reviewRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const specialistRuns = useProjectStore((s) => (projectId ? s.specialistRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const reviewIssues = useProjectStore((s) => (projectId ? s.reviewIssues[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
@@ -121,14 +170,132 @@ export function ProjectWorkspace() {
     const readinessReviews = useProjectStore((s) => (projectId ? s.readinessReviews[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const readinessCommitmentEvents = useProjectStore((s) => (projectId ? s.readinessCommitmentEvents[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const navigationArtifacts = useProjectStore((s) => (projectId ? s.artifacts[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const planningArtifactVersions = useProjectStore((s) => (projectId ? s.artifactVersions[projectId] : undefined));
     const downstreamUpdatePlans = useProjectStore((s) => (projectId ? s.downstreamUpdatePlans[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const planningSourceSpine = useProjectStore((s) => projectId
         ? (s.spineVersions[projectId] ?? EMPTY_PROJECT_LIST).find(spine => spine.isLatest)
         : undefined);
+    const checkpointArtifactInputs = useMemo<WorkflowCheckpointArtifactInput[]>(() => {
+        const currentJob = assetJob?.spineVersionId === planningSourceSpine?.id
+            ? assetJob
+            : undefined;
+        const versions = planningArtifactVersions ?? [];
+        const visibleCoreArtifacts = CORE_ARTIFACT_DISPLAY_ORDER
+            .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
+            .flatMap(meta => {
+                const artifact = navigationArtifacts.find(candidate => (
+                    candidate.status !== 'archived'
+                    && candidate.type === 'core_artifact'
+                    && candidate.subtype === meta.subtype
+                ));
+                return artifact ? [artifact] : [];
+            });
+        const visibleMockupArtifacts = navigationArtifacts
+            .filter(artifact => artifact.status !== 'archived' && artifact.type === 'mockup')
+            .slice()
+            .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+        const generationSlotsAttached = new Set<ArtifactSlotKey>();
+        const inputs: WorkflowCheckpointArtifactInput[] = [
+            ...visibleCoreArtifacts,
+            ...visibleMockupArtifacts,
+        ].flatMap(artifact => {
+            const preferred = versions.find(version => (
+                version.artifactId === artifact.id && version.isPreferred
+            ));
+            if (!preferred) return [];
+            const nodeId: ArtifactSlotKey = artifact.type === 'mockup'
+                ? 'mockup'
+                : artifact.subtype!;
+            const slot = currentJob?.slots[nodeId];
+            const generationFailureStatus = slot?.status === 'error' || slot?.status === 'interrupted'
+                ? slot.status
+                : undefined;
+            const includeGenerationFailure = !!generationFailureStatus
+                && !generationSlotsAttached.has(nodeId);
+            if (includeGenerationFailure) generationSlotsAttached.add(nodeId);
+            return [{
+                artifactId: artifact.id,
+                label: artifact.type === 'mockup' ? 'Mockups' : getArtifactMeta(artifact.subtype!).title,
+                visible: true,
+                destination: { kind: 'artifact' as const, artifactId: artifact.id, nodeId },
+                validationDisposition: readArtifactValidationDisposition(preferred.metadata),
+                validationWarnings: validationWarningsFrom(preferred.metadata),
+                ...(includeGenerationFailure ? {
+                    generationStatus: generationFailureStatus,
+                    generationError: slot?.error?.message,
+                } : {}),
+            }];
+        });
+
+        if (currentJob) {
+            const visibleSlots = new Set<ArtifactSlotKey>([
+                ...CORE_ARTIFACT_DISPLAY_ORDER
+                    .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
+                    .map(meta => meta.subtype),
+                'mockup',
+            ]);
+            for (const nodeId of Object.keys(currentJob.slots) as ArtifactSlotKey[]) {
+                const slot = currentJob.slots[nodeId];
+                if (
+                    !slot
+                    || (slot.status !== 'error' && slot.status !== 'interrupted')
+                    || !visibleSlots.has(nodeId)
+                    || generationSlotsAttached.has(nodeId)
+                ) continue;
+                inputs.push({
+                    artifactId: `generation:${currentJob.spineVersionId}:${currentJob.startedAt}:${nodeId}`,
+                    label: nodeId === 'mockup' ? 'Mockups' : getArtifactMeta(nodeId).title,
+                    visible: true,
+                    destination: { kind: 'artifact', nodeId },
+                    generationStatus: slot.status,
+                    generationError: slot.error?.message,
+                });
+            }
+        }
+        return inputs;
+    }, [assetJob, navigationArtifacts, planningArtifactVersions, planningSourceSpine?.id]);
     useEffect(() => {
         if (!projectId || !planningSourceSpine?.structuredPRD || !canPerformProjectAction(projectId, 'persist')) return;
-        useProjectStore.getState().importPlanningAssumptions(projectId, planningSourceSpine.id, planningSourceSpine.structuredPRD, planningSourceSpine.preflightSession);
-    }, [planningSourceSpine?.id, planningSourceSpine?.structuredPRD, planningSourceSpine?.preflightSession, projectId]);
+        const imported = useProjectStore.getState().importPlanningAssumptions(
+            projectId,
+            planningSourceSpine.id,
+            planningSourceSpine.structuredPRD,
+            planningSourceSpine.preflightSession,
+        );
+        // A Strict Mode repeat sees the now-idempotent import and returns an
+        // empty list. Preserve the first exact arrival instead of clearing it.
+        if (imported.importedAssumptionIds.length) {
+            clearAssumptionBatchResult();
+            setAssumptionArrival({
+                projectId,
+                spineVersionId: planningSourceSpine.id,
+                recordIds: imported.importedAssumptionIds,
+            });
+        }
+    }, [clearAssumptionBatchResult, planningSourceSpine?.id, planningSourceSpine?.structuredPRD, planningSourceSpine?.preflightSession, projectId]);
+    const assumptionArrivalSummary = useMemo(() => (
+        assumptionArrival
+            && assumptionArrival.projectId === projectId
+            && assumptionArrival.spineVersionId === planningSourceSpine?.id
+            ? deriveAssumptionArrival(planningRecords, assumptionArrival.recordIds)
+            : undefined
+    ), [assumptionArrival, planningRecords, planningSourceSpine?.id, projectId]);
+    // Keep immutable Careful-sync snapshots ready in the background whenever
+    // output inputs drift. The derivation emits nothing for aligned outputs and
+    // deduplicates matching snapshots, so rerunning on source changes is
+    // deterministic and does not create review decisions or apply work.
+    useEffect(() => {
+        if (!projectId || !planningSourceSpine?.structuredPRD || !capabilities.canPersistWorkflowState) return;
+        useProjectStore.getState().generateDownstreamUpdatePlans(projectId);
+    }, [
+        capabilities.canPersistWorkflowState,
+        navigationArtifacts,
+        planningArtifactVersions,
+        planningRecords,
+        planningSourceSpine?.id,
+        planningSourceSpine?.structuredPRD,
+        projectId,
+    ]);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -161,6 +328,35 @@ export function ProjectWorkspace() {
     // right when output generation starts. Never blocks generation.
     const [showPreBuildCheck, setShowPreBuildCheck] = useState(false);
     const preBuildCheckOffered = useRef(false);
+    // Generation completion is presentation-only. A summary is eligible only
+    // when this mounted workspace observed the exact transient job move from
+    // active to settled; a settled job encountered on mount is intentionally
+    // ignored.
+    const [completedGenerationJobKey, setCompletedGenerationJobKey] = useState<string>();
+    const [dismissedGenerationJobKey, setDismissedGenerationJobKey] = useState<string>();
+    const previousAssetJobRef = useRef<{ key?: string; active: boolean }>({ active: false });
+    const assetJobKey = assetJob
+        ? `${assetJob.spineVersionId}:${assetJob.startedAt}`
+        : undefined;
+    const assetJobSlots = assetJob ? Object.values(assetJob.slots) : [];
+    const assetJobActive = assetJobSlots.some(
+        slot => slot?.status === 'queued' || slot?.status === 'generating',
+    );
+    const assetJobSettled = assetJobSlots.length > 0 && assetJobSlots.every(
+        slot => slot && slot.status !== 'queued' && slot.status !== 'generating',
+    );
+    useEffect(() => {
+        const previous = previousAssetJobRef.current;
+        if (
+            assetJobKey
+            && assetJobSettled
+            && previous.key === assetJobKey
+            && previous.active
+        ) {
+            setCompletedGenerationJobKey(assetJobKey);
+        }
+        previousAssetJobRef.current = { key: assetJobKey, active: assetJobActive };
+    }, [assetJobActive, assetJobKey, assetJobSettled]);
     // Incomplete-PRD generation gate: explicit confirmation required before a
     // non-final partial PRD may drive output generation.
     const [showIncompleteGenerateConfirm, setShowIncompleteGenerateConfirm] = useState(false);
@@ -200,17 +396,56 @@ export function ProjectWorkspace() {
     // their existing persisted currentStage behavior.
     const [readOnlyStage, setReadOnlyStage] = useState<PipelineStage | null>(null);
 
+    const navigationScreens = useMemo(() => {
+        const idsByArtifactId = new Map<string, ReadonlySet<string>>();
+        const labels = new Map<string, string>();
+        if (!projectId) return { idsByArtifactId, labels };
+
+        for (const artifact of navigationArtifacts) {
+            if (artifact.subtype !== 'screen_inventory') continue;
+            idsByArtifactId.set(artifact.id, new Set());
+            const versions = getArtifactVersions(projectId, artifact.id);
+            const version = versions.find(item => item.id === artifact.currentVersionId)
+                ?? versions.find(item => item.isPreferred);
+            const inventory = version ? parseScreenInventory(version.content) : null;
+            if (!inventory) continue;
+
+            const screens = inventory.sections.flatMap(section => section.screens);
+            idsByArtifactId.set(
+                artifact.id,
+                new Set(screens.flatMap(screen => screen.id ? [screen.id] : [])),
+            );
+            screens.forEach(screen => {
+                if (screen.id) labels.set(`${artifact.id}:${screen.id}`, screen.name);
+            });
+        }
+
+        return { idsByArtifactId, labels };
+    }, [getArtifactVersions, navigationArtifacts, projectId]);
+
     const planningIntent = useMemo(
         () => parsePlanningNavigationIntent(searchParams.get(PLANNING_NAVIGATION_QUERY_PARAM)),
         [searchParams],
     );
 
+    const applyPresentationStage = useCallback((stage: PipelineStage) => {
+        if (!projectId) return;
+        if (capabilities.canPersistWorkflowState) setProjectStage(projectId, stage);
+        else setReadOnlyStage(stage);
+    }, [capabilities.canPersistWorkflowState, projectId, setProjectStage]);
+
     const writePlanningIntent = (intent?: PlanningNavigationIntent, replace = false) => {
         if (!intent) lastPlanningIntentRef.current = undefined;
         setSearchParams(current => {
             const next = withPlanningNavigationIntent(current, intent);
-            const screenId = intent?.destination.kind === 'artifact' ? intent.destination.region?.screenId : undefined;
-            if (!screenId) {
+            if (intent?.destination.kind === 'screen') {
+                next.set('screen', intent.destination.screenId);
+                if (intent.destination.tab && intent.destination.tab !== 'overview') {
+                    next.set('screenTab', intent.destination.tab);
+                } else {
+                    next.delete('screenTab');
+                }
+            } else {
                 next.delete('screen');
                 next.delete('screenTab');
             }
@@ -243,6 +478,7 @@ export function ProjectWorkspace() {
             readinessReviewIds: new Set(readinessReviews.map(review => review.id)),
             artifactIds: new Set(navigationArtifacts.map(artifact => artifact.id)),
             updatePlanIds: new Set(downstreamUpdatePlans.map(plan => plan.id)),
+            screenIdsByArtifactId: navigationScreens.idsByArtifactId,
         });
         // The applied key covers the intent AND its validated destination: a
         // deep link whose target had not loaded yet (falling back to the PRD)
@@ -253,7 +489,7 @@ export function ProjectWorkspace() {
         lastAppliedPlanningIntentRef.current = serializedIntent;
         if (destination.kind === 'prd') {
             setSelectedReadinessReviewId(null);
-            setProjectStage(projectId, 'prd');
+            applyPresentationStage('prd');
             if (destination.anchorId) window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
                 document.getElementById(destination.anchorId!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }));
@@ -265,7 +501,7 @@ export function ProjectWorkspace() {
             setReviewInitialRunId(undefined);
             setReviewInitialIssueId(undefined);
             setReviewInitialFindingId(undefined);
-            setProjectStage(projectId, 'review');
+            applyPresentationStage('review');
             return;
         }
         if (destination.kind === 'challenge') {
@@ -274,12 +510,37 @@ export function ProjectWorkspace() {
             setReviewInitialRunId(destination.reviewId);
             setReviewInitialIssueId(destination.issueId);
             setReviewInitialFindingId(destination.findingId);
-            setProjectStage(projectId, 'review');
+            applyPresentationStage('review');
             return;
         }
         if (destination.kind === 'readiness') {
             setReadinessInitialConcernId(destination.concernId);
             setSelectedReadinessReviewId(destination.reviewId);
+            return;
+        }
+        if (destination.kind === 'history') {
+            applyPresentationStage('history');
+            return;
+        }
+        if (destination.kind === 'workspace') {
+            applyPresentationStage('workspace');
+            return;
+        }
+        if (destination.kind === 'screen') {
+            setFinalizeAutoOpen(false);
+            setWorkspaceInitialNode(destination.nodeId ?? 'screen_inventory');
+            setWorkspaceInitialArtifactId(destination.artifactId);
+            setSearchParams(current => {
+                const next = new URLSearchParams(current);
+                next.set('screen', destination.screenId);
+                if (destination.tab && destination.tab !== 'overview') {
+                    next.set('screenTab', destination.tab);
+                } else {
+                    next.delete('screenTab');
+                }
+                return next;
+            }, { replace: true });
+            applyPresentationStage('workspace');
             return;
         }
         if (destination.kind === 'artifact') {
@@ -289,7 +550,7 @@ export function ProjectWorkspace() {
             setWorkspaceInitialRegion(destination.region);
             setWorkspaceInitialUpdatePlanId(undefined);
             setWorkspaceInitialUpdatePlanItemId(undefined);
-            setProjectStage(projectId, 'workspace');
+            applyPresentationStage('workspace');
             return;
         }
         const plan = downstreamUpdatePlans.find(candidate => candidate.id === destination.planId);
@@ -298,8 +559,8 @@ export function ProjectWorkspace() {
         setWorkspaceInitialArtifactId(destination.artifactId ?? plan?.artifact.artifactId);
         setWorkspaceInitialUpdatePlanId(destination.planId);
         setWorkspaceInitialUpdatePlanItemId(destination.itemId);
-        setProjectStage(projectId, 'workspace');
-    }, [downstreamUpdatePlans, navigationArtifacts, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setProjectStage]);
+        applyPresentationStage('workspace');
+    }, [applyPresentationStage, downstreamUpdatePlans, navigationArtifacts, navigationScreens.idsByArtifactId, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setSearchParams]);
 
     // Position the portaled overflow menu relative to its trigger button.
     useLayoutEffect(() => {
@@ -413,13 +674,11 @@ export function ProjectWorkspace() {
     const pipelineStage = capabilities.canPersistWorkflowState
         ? project?.currentStage || 'prd'
         : readOnlyStage ?? project?.currentStage ?? 'prd';
-    const setPipelineStage = (stage: PipelineStage) => {
-        if (projectId) setProjectStage(projectId, stage);
-    };
+    const setPipelineStage = applyPresentationStage;
     const handlePipelineStageChange = (stage: PipelineStage) => {
-        // Land on the Decision Center first when decisions are still open — the
-        // specialist critique (Findings) is gated until they are addressed.
-        if (stage === 'review') setReviewInitialTab(critiqueUnlocked ? 'review' : 'decisions');
+        // Keep decisions-first orientation when planning items are open. The
+        // Findings tab remains available and critique actions are never gated.
+        if (stage === 'review') setReviewInitialTab(planningReadiness.openDecisionCount > 0 ? 'decisions' : 'review');
         writePlanningIntent(undefined);
         setPipelineStage(stage);
     };
@@ -504,6 +763,27 @@ export function ProjectWorkspace() {
             safetyBoundaries: activeSpine.safetyReview?.detectedConcerns ?? [],
         }).contextSignature
         : undefined;
+    // Export and generation checkpoints always describe the latest planning
+    // spine, even while the user is inspecting history. Keep this context
+    // independent from the active presentation spine so a historical view
+    // cannot suppress or confer current authority.
+    const checkpointChallengeContextSignature = project && planningSourceSpine?.structuredPRD
+        ? buildReviewContextManifest({
+            projectId,
+            projectName: project.name,
+            platform: project.platform,
+            productCategory: project.productCategory,
+            spine: {
+                versionId: planningSourceSpine.id,
+                schemaVersion: planningSourceSpine.prdVersion,
+                content: planningSourceSpine.responseText,
+                structuredPRD: planningSourceSpine.structuredPRD,
+                canonicalSpine: planningSourceSpine.canonicalSpine,
+            },
+            artifacts: currentReviewArtifacts,
+            safetyBoundaries: planningSourceSpine.safetyReview?.detectedConcerns ?? [],
+        }).contextSignature
+        : undefined;
     // Readiness only counts consequential unresolved alignment. Historical
     // version drift, legacy provenance gaps, and changes outside an output's
     // main planning inputs stay visible for review without blocking build.
@@ -539,6 +819,31 @@ export function ProjectWorkspace() {
         downstreamUpdatePlanSummary,
         currentArtifactRefs: currentReadinessArtifactRefs,
         currentChallengeContextSignature,
+    } : undefined;
+    const checkpointReadinessReviewInput = planningSourceSpine ? {
+        projectId,
+        spine: {
+            versionId: planningSourceSpine.id,
+            content: planningSourceSpine.responseText,
+            structuredPRD: planningSourceSpine.structuredPRD,
+            incompleteSectionCount: planningSourceSpine.generationMeta?.failedSections?.length ?? 0,
+            isCommitted: planningSourceSpine.isFinal,
+            safetyReview: planningSourceSpine.safetyReview && {
+                status: planningSourceSpine.safetyReview.status,
+                classification: planningSourceSpine.safetyReview.classification,
+                detectedConcerns: planningSourceSpine.safetyReview.detectedConcerns,
+                reviewedAt: planningSourceSpine.safetyReview.reviewedAt,
+            },
+        },
+        planningRecords,
+        reviewRuns,
+        specialistRuns,
+        reviewIssues,
+        reviewFindings,
+        outputAlignment,
+        downstreamUpdatePlanSummary: getDownstreamUpdatePlanSummary(projectId),
+        currentArtifactRefs: currentReadinessArtifactRefs,
+        currentChallengeContextSignature: checkpointChallengeContextSignature,
     } : undefined;
     const readinessWithCurrentness = readinessReviewInput
         ? readinessReviews.map(review => ({
@@ -580,11 +885,8 @@ export function ProjectWorkspace() {
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     };
     const planningReadiness = derivePlanningReadiness(planningReadinessInput);
-    // The optional specialist critique (Challenge → Findings) stays locked until
-    // every surfaced decision is addressed (answered or deferred/skipped).
-    const critiqueUnlocked = planningReadiness.openDecisionCount === 0;
     // Items the advisory pre-build check surfaces when output generation starts
-    // — same boundary as the critique gate (risks stay advisory-only).
+    // (risks stay advisory-only).
     const openPlanningItems = planningRecords.filter(record =>
         ['decision', 'open_question', 'conflict', 'assumption'].includes(record.type)
         && ['open', 'proposed'].includes(projectDecision(record).status));
@@ -593,7 +895,165 @@ export function ProjectWorkspace() {
         reviewIssues,
         outputAlignments: outputAlignment.outputs,
     });
+    const openPlanningRecordIds = new Set(openPlanningItems.map(record => record.id));
+    const preBuildAttentionItem = [
+        planningAttention.primary,
+        ...planningAttention.secondary,
+    ].find((item): item is PlanningAttentionItem => {
+        if (!item || item.destination.kind !== 'planning_record') return false;
+        return openPlanningRecordIds.has(item.destination.recordId);
+    });
+    const preBuildRecordId = preBuildAttentionItem?.destination.kind === 'planning_record'
+        ? preBuildAttentionItem.destination.recordId
+        : undefined;
+    const preBuildPlanningRecord = preBuildRecordId
+        ? openPlanningItems.find(record => record.id === preBuildRecordId)
+        : undefined;
+
+    const checkpointStrictChallenge = checkpointReadinessReviewInput
+        ? deriveReadinessChallengeState(checkpointReadinessReviewInput)
+        : undefined;
+    const checkpointCommittedReadiness = checkpointReadinessReviewInput
+        ? readinessReviews
+            .map(review => ({
+                review,
+                currentness: compareReadinessReviewCurrentness(
+                    review,
+                    checkpointReadinessReviewInput,
+                ),
+                commitment: deriveReadinessCommitmentState(review, readinessCommitmentEvents),
+            }))
+            .filter(item => (
+                commitmentRemainsCurrent(item.currentness)
+                && item.commitment.activeCommit
+                && item.review.spineVersionId === planningSourceSpine?.id
+            ))
+            .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0]
+        : undefined;
+    const readinessAuthorization = checkpointCommittedReadiness?.commitment.authorization;
+    const checkpointPlanningVerdict: WorkflowCheckpointPlanningVerdict =
+        checkpointCommittedReadiness?.commitment.activeCommit && readinessAuthorization
+            ? {
+                kind: 'finalized',
+                label: checkpointCommittedReadiness.review.conclusion === 'ready_to_build'
+                    ? 'Plan finalized'
+                    : 'Proceeding with accepted risk',
+                acceptedRisks: [...new Set(
+                    checkpointCommittedReadiness.review.concerns
+                        .filter(concern => readinessAuthorization.acceptedConcernIds.includes(concern.id))
+                        .map(concern => concern.title),
+                )],
+                rationale: readinessAuthorization.rationale,
+                containment: readinessAuthorization.containmentPlan,
+            }
+            : {
+                kind: 'working_plan',
+                label: 'Working plan',
+            };
+    const currentSubstantiveReviewId = checkpointStrictChallenge?.substantive?.id;
+    const blockingCritiqueIssueIds = new Set(
+        checkpointStrictChallenge?.blockingIssues.map(issue => issue.id) ?? [],
+    );
+    const checkpointIssueRows = currentSubstantiveReviewId
+        ? reviewIssues
+            .filter(issue => (
+                issue.reviewId === currentSubstantiveReviewId
+                && (
+                    issue.status === 'open'
+                    || issue.status === 'deferred'
+                    || blockingCritiqueIssueIds.has(issue.id)
+                )
+            ))
+            .map(issue => ({
+                issueId: issue.id,
+                label: issue.title,
+                detail: issue.summary,
+                severity: issue.severity,
+                implementationImpact: issue.implementationImpact,
+                destination: {
+                    kind: 'challenge' as const,
+                    reviewId: currentSubstantiveReviewId,
+                    issueId: issue.id,
+                },
+            }))
+        : [];
+    const checkpointFindingRows = checkpointStrictChallenge?.untriagedFindings.map(finding => ({
+        issueId: `finding:${finding.id}`,
+        label: finding.title,
+        detail: finding.summary,
+        severity: 'high' as const,
+        implementationImpact: 'resolve_before_build' as const,
+        destination: {
+            kind: 'challenge' as const,
+            reviewId: finding.reviewId,
+            findingId: finding.id,
+        },
+    })) ?? [];
+    const checkpointCritiqueIssues = [...checkpointIssueRows, ...checkpointFindingRows];
+    const checkpointArtifacts = checkpointArtifactInputs.map(artifact => {
+        const alignment = outputAlignment.outputs.find(output => (
+            output.artifactId === artifact.artifactId
+        ));
+        return alignment ? {
+            ...artifact,
+            alignment: {
+                state: alignment.state,
+                summary: alignment.summary,
+                blocksBuildReadiness: alignment.blocksBuildReadiness,
+            },
+        } : artifact;
+    });
+    const generationCheckpointSummary = deriveWorkflowCheckpointSummary({
+        context: 'generation',
+        planningVerdict: checkpointPlanningVerdict,
+        artifacts: checkpointArtifacts,
+        critiqueIssues: checkpointCritiqueIssues,
+    });
+    const exportCheckpointSummary = deriveWorkflowCheckpointSummary({
+        context: 'export',
+        planningVerdict: checkpointPlanningVerdict,
+        artifacts: checkpointArtifacts,
+        critiqueIssues: checkpointCritiqueIssues,
+    });
+    const showGenerationCheckpoint = pipelineStage === 'workspace'
+        && assetJob?.spineVersionId === activeSpine?.id
+        && assetJobKey === completedGenerationJobKey
+        && assetJobKey !== dismissedGenerationJobKey;
     const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
+    const recordsForIds = (ids: string[]) => {
+        const requested = new Set(ids);
+        return planningRecords.filter(record => requested.has(record.id));
+    };
+    const acceptArrivalDefaults = (ids: string[]) => {
+        void runAssumptionBatch(recordsForIds(ids).flatMap(record => {
+            const candidate = assumptionDefaultBatchCandidate(record, planningSourceSpine?.id);
+            return candidate ? [candidate] : [];
+        }));
+    };
+    const reviewArrivalEach = (ids: string[]) => {
+        setSharpenQueueIds(recordsForIds(ids).map(record => record.id));
+    };
+    const deferArrival = (ids: string[]) => {
+        void runAssumptionBatch(recordsForIds(ids).flatMap(record => {
+            const candidate = deferBatchCandidate(record, planningSourceSpine?.id);
+            return candidate ? [candidate] : [];
+        }));
+    };
+    const activeScreenId = pipelineStage === 'workspace' ? searchParams.get('screen') : undefined;
+    const activeScreenReturn = resolveActivePlanningScreen({
+        screenId: activeScreenId,
+        rawTab: searchParams.get('screenTab'),
+        idsByArtifactId: navigationScreens.idsByArtifactId,
+        labels: navigationScreens.labels,
+        preferredArtifactId: planningIntent?.destination.kind === 'screen'
+            && planningIntent.destination.screenId === activeScreenId
+            ? planningIntent.destination.artifactId
+            : undefined,
+    });
+    const activeSurfaceReturnTarget = planningReturnTargetForSurface({
+        stage: pipelineStage,
+        screen: activeScreenReturn,
+    });
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
         ? compareReadinessReviewCurrentness(selectedReadinessReview, readinessReviewInput)
@@ -1033,7 +1493,7 @@ export function ProjectWorkspace() {
         // Validation belongs at the start of implementation: surface still-open
         // planning questions once, right when outputs are about to generate.
         // Advisory only — "Generate anyway" always proceeds.
-        if (!preBuildCheckOffered.current && openPlanningItems.length > 0) {
+        if (!preBuildCheckOffered.current && preBuildAttentionItem && preBuildPlanningRecord) {
             preBuildCheckOffered.current = true;
             setShowFinalizeSuccess(false);
             setShowPreBuildCheck(true);
@@ -1134,24 +1594,27 @@ export function ProjectWorkspace() {
     // so resolving a decision in Challenge never strands the user there.
     const planReturnTarget: PlanningReturnTarget = { destination: { kind: 'prd' }, label: 'Back to Plan' };
 
-    const handlePlanningNextAction = () => {
-        const kind = planningReadiness.nextAction.kind;
-        if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId, planReturnTarget);
-        if (kind === 'challenge_plan') return openChallenge(undefined, undefined, undefined, planReturnTarget);
-        if (kind === 'align_outputs') {
-            if (planningReadiness.nextAction.nodeId) setWorkspaceInitialNode(planningReadiness.nextAction.nodeId);
-            if (planningReadiness.nextAction.artifactId) setWorkspaceInitialArtifactId(planningReadiness.nextAction.artifactId);
-            return setPipelineStage('workspace');
-        }
-        if (kind === 'commit_plan') return handleToggleFinal();
-        const anchor = kind === 'confirm_scope' ? 'prd-features' : 'prd-coreProblem';
-        document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const openPlanningAttention = (item: PlanningAttentionItem) => {
+        dispatchPlanningAttentionItem(item, {
+            onCommit: handleToggleFinal,
+            onNavigate: destination => {
+                const leavesSurface = planningStageForDestination(destination)
+                    !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+                writePlanningIntent({
+                    destination,
+                    ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
+                });
+            },
+        });
     };
 
-    const openPlanningAttention = (destination: PlanningDestination) => {
-        writePlanningIntent(destination.kind === 'prd'
-            ? { destination }
-            : { destination, returnTo: planReturnTarget });
+    const openCheckpointDestination = (destination: PlanningDestination) => {
+        const leavesSurface = planningStageForDestination(destination)
+            !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+        writePlanningIntent({
+            destination,
+            ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
+        });
     };
 
     const handleExport = () => {
@@ -1376,14 +1839,6 @@ export function ProjectWorkspace() {
                     </p>
                 </ConfirmDialog>
             )}
-            {showPreBuildCheck && (
-                <PreBuildCheckModal
-                    items={openPlanningItems.map(record => ({ id: record.id, title: record.title, type: record.type }))}
-                    onGenerateAnyway={() => { setShowPreBuildCheck(false); proceedToAssetGeneration(); }}
-                    onReviewFirst={() => { setShowPreBuildCheck(false); openDecisionCenter(openPlanningItems[0]?.id, planReturnTarget); }}
-                    onClose={() => setShowPreBuildCheck(false)}
-                />
-            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsGenerated={assetsReady}
@@ -1395,7 +1850,14 @@ export function ProjectWorkspace() {
                 />
             )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
-            {isExportOpen && projectId && <ExportModal projectId={projectId} planningReady={currentCommittedReadiness?.review.conclusion === 'ready_to_build'} onClose={() => setIsExportOpen(false)} />}
+            {isExportOpen && projectId && (
+                <ExportModal
+                    projectId={projectId}
+                    checkpointSummary={exportCheckpointSummary}
+                    onNavigateCheckpoint={openCheckpointDestination}
+                    onClose={() => setIsExportOpen(false)}
+                />
+            )}
             {showPrdHistory && (
                 <VersionHistoryPanel
                     title="PRD version history"
@@ -1451,6 +1913,29 @@ export function ProjectWorkspace() {
                 />
             </div>
 
+            {showPreBuildCheck && preBuildAttentionItem && preBuildPlanningRecord && (
+                <PreBuildCheckpointCard
+                    primaryItem={{
+                        id: preBuildPlanningRecord.id,
+                        title: preBuildAttentionItem.title,
+                    }}
+                    onGenerate={() => {
+                        setShowPreBuildCheck(false);
+                        proceedToAssetGeneration();
+                    }}
+                    onReview={() => {
+                        setShowPreBuildCheck(false);
+                        openPlanningAttention(preBuildAttentionItem);
+                    }}
+                    onCancel={() => setShowPreBuildCheck(false)}
+                />
+            )}
+
+            <GlobalNextActionStrip
+                attention={planningAttention}
+                onOpen={openPlanningAttention}
+            />
+
             {/* One workspace-level explanation; individual artifacts stay free
                 of repetitive read-only warnings. */}
             {capabilities.isReadOnly && (
@@ -1491,6 +1976,17 @@ export function ProjectWorkspace() {
                                 <button type="button" onClick={() => setPipelineStage('prd')} className="ml-2 font-semibold underline underline-offset-2">Return to the plan</button>
                             </div>
                         )}
+                        {showGenerationCheckpoint && (
+                            <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+                                <div className="mx-auto max-w-6xl">
+                                    <WorkflowCheckpointSummaryCard
+                                        summary={generationCheckpointSummary}
+                                        onOpen={row => openCheckpointDestination(row.destination)}
+                                        onDismiss={() => setDismissedGenerationJobKey(assetJobKey)}
+                                    />
+                                </div>
+                            </div>
+                        )}
                         <ArtifactWorkspace
                             projectId={projectId}
                             spineVersionId={activeSpine.id}
@@ -1523,7 +2019,6 @@ export function ProjectWorkspace() {
                         initialReviewId={reviewInitialRunId}
                         initialIssueId={reviewInitialIssueId}
                         initialFindingId={reviewInitialFindingId}
-                        critiqueUnlocked={critiqueUnlocked}
                         onContinueToExplore={() => handlePipelineStageChange('workspace')}
                     />
                 ) : (
@@ -1710,40 +2205,71 @@ export function ProjectWorkspace() {
                                             </div>
                                         ) : activeSpine.structuredPRD ? (
                                             <>
-                                                {!isOldVersion && (sharpenQueueIds ? (
-                                                    <SharpenPlanFlow
-                                                        records={sharpenQueueIds.flatMap(id => {
-                                                            const match = planningRecords.find(record => record.id === id);
-                                                            return match ? [match] : [];
-                                                        })}
-                                                        onDecide={handleSharpenDecision}
-                                                        onClose={() => setSharpenQueueIds(null)}
-                                                        onOpenRecord={recordId => {
-                                                            setSharpenQueueIds(null);
-                                                            openDecisionCenter(recordId, planReturnTarget);
-                                                        }}
-                                                    />
-                                                ) : (
-                                                    <PlanningStateBar
-                                                        readiness={planningReadiness}
-                                                        // Avoid duplicating the executive summary: StructuredPRDView's
-                                                        // Overview already renders `executiveSummary` just below, so only
-                                                        // surface the vision here as a fallback when there's no summary.
-                                                        planSummary={activeSpine.structuredPRD.executiveSummary ? undefined : activeSpine.structuredPRD.vision}
-                                                        committed={isCurrentPlanCommitted}
-                                                        legacyCommitted={isLegacyPlanCommitted}
-                                                        onNextAction={handlePlanningNextAction}
-                                                        onReviewReadiness={openCurrentReadinessCheckpoint}
-                                                        onOpenDecisions={() => openDecisionCenter(undefined, planReturnTarget)}
-                                                        onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
-                                                        attention={planningAttention}
-                                                        onOpenAttention={openPlanningAttention}
-                                                        answerableCount={answerableAssumptions.length}
-                                                        onStartSharpen={canEditPlan && answerableAssumptions.length > 0
-                                                            ? () => setSharpenQueueIds(answerableAssumptions.map(record => record.id))
-                                                            : undefined}
-                                                    />
-                                                ))}
+                                                {!isOldVersion && (
+                                                    <>
+                                                        {assumptionBatchResult
+                                                            && assumptionArrivalSummary
+                                                            && assumptionArrivalSummary.pendingRecords.length === 0 && (
+                                                            <p
+                                                                className="sr-only"
+                                                                role="status"
+                                                                aria-live="polite"
+                                                            >
+                                                                Assumption batch complete.{' '}
+                                                                {assumptionBatchResult.succeeded.length} recorded,{' '}
+                                                                {assumptionBatchResult.skipped.length} skipped, and{' '}
+                                                                {assumptionBatchResult.failed.length} failed.
+                                                                {(assumptionBatchResult.impactPreviewFailures?.length ?? 0) > 0
+                                                                    ? ` ${assumptionBatchResult.impactPreviewFailures!.length} optional impact preview failed.`
+                                                                    : ''}
+                                                            </p>
+                                                        )}
+                                                        {!sharpenQueueIds
+                                                            && assumptionArrivalSummary
+                                                            && assumptionArrivalSummary.pendingRecords.length > 0 && (
+                                                            <AssumptionArrivalCard
+                                                                summary={assumptionArrivalSummary}
+                                                                busy={assumptionBatchBusy}
+                                                                readOnly={!canEditPlan}
+                                                                batchResult={assumptionBatchResult}
+                                                                onAcceptDefaults={acceptArrivalDefaults}
+                                                                onReviewEach={reviewArrivalEach}
+                                                                onLater={deferArrival}
+                                                            />
+                                                        )}
+                                                        {sharpenQueueIds ? (
+                                                            <SharpenPlanFlow
+                                                                records={sharpenQueueIds.flatMap(id => {
+                                                                    const match = planningRecords.find(record => record.id === id);
+                                                                    return match ? [match] : [];
+                                                                })}
+                                                                onDecide={handleSharpenDecision}
+                                                                onClose={() => setSharpenQueueIds(null)}
+                                                                onOpenRecord={recordId => {
+                                                                    setSharpenQueueIds(null);
+                                                                    openDecisionCenter(recordId, planReturnTarget);
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <PlanningStateBar
+                                                                readiness={planningReadiness}
+                                                                // Avoid duplicating the executive summary: StructuredPRDView's
+                                                                // Overview already renders `executiveSummary` just below, so only
+                                                                // surface the vision here as a fallback when there's no summary.
+                                                                planSummary={activeSpine.structuredPRD.executiveSummary ? undefined : activeSpine.structuredPRD.vision}
+                                                                committed={isCurrentPlanCommitted}
+                                                                legacyCommitted={isLegacyPlanCommitted}
+                                                                onReviewReadiness={openCurrentReadinessCheckpoint}
+                                                                onOpenDecisions={() => openDecisionCenter(undefined, planReturnTarget)}
+                                                                onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
+                                                                answerableCount={answerableAssumptions.length}
+                                                                onStartSharpen={canEditPlan && answerableAssumptions.length > 0
+                                                                    ? () => setSharpenQueueIds(answerableAssumptions.map(record => record.id))
+                                                                    : undefined}
+                                                            />
+                                                        )}
+                                                    </>
+                                                )}
                                                 <StructuredPRDView
                                                     projectId={projectId}
                                                     spineId={activeSpine.id}

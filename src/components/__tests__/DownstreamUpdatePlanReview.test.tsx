@@ -236,7 +236,7 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(within(possible).getByRole('button', { name: 'Add context' })).toBeInTheDocument();
     });
 
-    it('separates approval from guarded application and creates a child artifact version for one state', async () => {
+    it('applies an approved change and presents its automatic aligned verification as one result', async () => {
         renderReview();
         const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
         fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
@@ -251,11 +251,12 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(useProjectStore.getState().artifactVersions[projectId]).toHaveLength(1);
 
         fireEvent.click(await within(definite).findByRole('button', { name: 'Apply approved change' }));
-        expect(await within(definite).findByText(/Alignment still requires verification/)).toBeInTheDocument();
+        expect(await within(definite).findByRole('status')).toHaveTextContent('Applied — verification passed');
         expect(await within(definite).findByText('Completed · applied')).toBeInTheDocument();
-        expect(within(definite).getByText(/Completed for this proposal/)).toBeInTheDocument();
+        expect(within(definite).queryByText(/separate step|verification remains separate/i)).not.toBeInTheDocument();
         expect(within(definite).queryByText(/Historical proposal/)).not.toBeInTheDocument();
         expect(within(definite).queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
+        expect(within(definite).queryByRole('button', { name: /Verify (again|current output)/ })).not.toBeInTheDocument();
         const versions = useProjectStore.getState().artifactVersions[projectId];
         expect(versions).toHaveLength(2);
         expect(versions[1].parentVersionId).toBe(version.id);
@@ -264,6 +265,90 @@ describe('DownstreamUpdatePlanReview', () => {
             .toEqual(JSON.parse(version.content).sections[0].screens[1]);
         expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId] ?? [])
             .toEqual([expect.objectContaining({ result: 'aligned', authoredBy: 'synapse' })]);
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId] ?? [])
+            .toEqual([]);
+    });
+
+    it('applies an approved change and presents advisory automatic verification without a redundant Verify action', async () => {
+        const currentPlan = makePlan();
+        const { integrityHash: _integrityHash, ...unsealed } = currentPlan;
+        void _integrityHash;
+        const advisoryPlan = sealDownstreamUpdatePlan({
+            ...unsealed,
+            items: unsealed.items.map(item => item.id === 'definite-item'
+                ? {
+                    ...item,
+                    evidence: [
+                        ...item.evidence,
+                        {
+                            id: 'incomplete-evidence',
+                            kind: 'missing_provenance' as const,
+                            quality: 'incomplete' as const,
+                            summary: 'A related dependency could not be fully inspected.',
+                        },
+                    ],
+                }
+                : item),
+        });
+        useProjectStore.setState({ downstreamUpdatePlans: { [projectId]: [advisoryPlan] } });
+
+        renderReview();
+        const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
+        fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
+        fireEvent.click(await within(definite).findByRole('button', { name: 'Accept proposal' }));
+        fireEvent.click(await within(definite).findByRole('button', { name: 'Apply approved change' }));
+
+        expect(await within(definite).findByRole('status')).toHaveTextContent('Applied — verification needs your eye');
+        expect(within(definite).getByText(/Synapse verification: review recommended/i)).toBeInTheDocument();
+        expect(within(definite).queryByRole('button', { name: /Verify (again|current output)/ })).not.toBeInTheDocument();
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId] ?? [])
+            .toEqual([expect.objectContaining({
+                result: 'review_recommended',
+                subject: expect.objectContaining({ kind: 'application' }),
+            })]);
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId] ?? [])
+            .toEqual([]);
+    });
+
+    it('keeps manual verification available after an external artifact edit', async () => {
+        renderReview();
+        const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
+        fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
+        expect(await within(definite).findByText('Proposed change')).toBeInTheDocument();
+
+        const manuallyUpdated: ArtifactVersion = {
+            ...version,
+            id: 'screens-manual-v2',
+            versionNumber: 2,
+            parentVersionId: version.id,
+            content: JSON.stringify({ sections: [{ title: 'Core', screens: [
+                {
+                    id: 'workspace', name: 'Shared workspace', priority: 'P0', purpose: 'Create locally',
+                    states: [],
+                    coreUIElements: ['Local editor'],
+                },
+                JSON.parse(version.content).sections[0].screens[1],
+            ] }] }),
+            isPreferred: true,
+            createdAt: 20,
+        };
+        useProjectStore.setState({
+            artifacts: { [projectId]: [{ ...artifact, currentVersionId: manuallyUpdated.id }] },
+            artifactVersions: { [projectId]: [{ ...version, isPreferred: false }, manuallyUpdated] },
+        });
+
+        const verify = await within(definite).findByRole('button', { name: 'Verify current output' });
+        fireEvent.click(verify);
+        await waitFor(() => expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId])
+            .toEqual([expect.objectContaining({
+                result: 'aligned',
+                subject: expect.objectContaining({
+                    kind: 'manual_update',
+                    targetArtifactVersionId: manuallyUpdated.id,
+                }),
+            })]));
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId] ?? [])
+            .toEqual([]);
     });
 
     it('previews the exact user-edited operation and content before guarded application', async () => {

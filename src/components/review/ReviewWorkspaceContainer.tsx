@@ -8,6 +8,7 @@ import { useReviewIssueActions } from './useReviewIssueActions';
 import { useDecisionOptionSuggestions } from './useDecisionOptionSuggestions';
 import { useAssumptionValidationActions } from './useAssumptionValidationActions';
 import { useDecisionImpactActions } from './useDecisionImpactActions';
+import { useBatchVerdictCoordinator } from './useBatchVerdictCoordinator';
 import { buildReviewRunViews } from './reviewRunViews';
 import { buildPlanningRecordViews } from './planningRecordViews';
 import { projectDecision } from '../../lib/planning/decisionProjection';
@@ -19,18 +20,13 @@ interface Props {
     initialReviewId?: string;
     initialIssueId?: string;
     initialFindingId?: string;
-    /** When false, the specialist critique stays gated until every surfaced
-     * decision is addressed; only the critique run is blocked, never the
-     * Decision Center or history. */
-    critiqueUnlocked: boolean;
-    /** Jumps to the Explore/Build stage — surfaced in the Decision Center and
-     * critique gate so open decisions never read as blocking design assets. */
+    /** Jumps to the Explore/Build stage from the Decision Center. */
     onContinueToExplore?: () => void;
 }
 
-// Record types the plan surfaces as decisions to engage with. Kept in sync with
-// the `openDecisions` predicate in planningReadiness.ts (risks are excluded).
-const GATE_RECORD_TYPES = new Set(['decision', 'open_question', 'conflict', 'assumption']);
+// Open planning items are useful context before critique, but never a gate.
+// Keep this predicate aligned with planningReadiness.ts (risks are excluded).
+const CRITIQUE_ADVISORY_RECORD_TYPES = new Set(['decision', 'open_question', 'conflict', 'assumption']);
 
 // Cap on how many open choices get recommendations prepared per pass — bounds
 // model spend on projects with a large backlog; the rest prepare on open.
@@ -42,7 +38,7 @@ const MAX_EAGER_OPTION_PREPARATIONS = 6;
 // loop under React 19.
 const EMPTY_PROJECT_COLLECTION: never[] = [];
 
-export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId, critiqueUnlocked, onContinueToExplore }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId, onContinueToExplore }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_PROJECT_COLLECTION);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_PROJECT_COLLECTION);
@@ -57,11 +53,6 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const { latestSpine, manifests, currentManifest, manifestForReview, panel } = useReviewContextManifest({
         projectId, project, spines, artifacts, artifactVersions, reviewRuns,
     });
-
-    useEffect(() => {
-        if (!canWrite || !latestSpine?.structuredPRD) return;
-        useProjectStore.getState().importPlanningAssumptions(projectId, latestSpine.id, latestSpine.structuredPRD);
-    }, [canWrite, latestSpine?.id, latestSpine?.structuredPRD, projectId]);
 
     const { activeRunId, setActiveRunId, busy, handleStart, handleRetrySpecialist, handleResumeReview, cancelRun } = useReviewRunController({
         projectId, canWrite, initialReviewId, currentManifest, manifests, manifestForReview, panel, reviewRuns, specialistRuns,
@@ -115,6 +106,11 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         handleRequestAlignmentProposal,
         handleApplyToPlan,
     } = useDecisionImpactActions({ projectId, canWrite, planningRecords });
+    const recommendationBatch = useBatchVerdictCoordinator({
+        projectId,
+        canWrite,
+        prepareImpact: handlePreviewImpact,
+    });
 
     const runViews = buildReviewRunViews({
         reviewRuns,
@@ -127,18 +123,10 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
 
     const planningViews = buildPlanningRecordViews({ planningRecords, latestSpine, alignmentAnalysis, optionSuggestions });
 
-    // Escape hatch for the critique gate: defer every still-open surfaced
-    // decision at once so a user who is unsure can move on to the optional
-    // critique. Deferring records a real user verdict event (auditable) and
-    // clears the gate on the next render.
-    const openGateRecords = planningRecords.filter(record => (
-        GATE_RECORD_TYPES.has(record.type)
+    const openCritiqueAdvisoryRecords = planningRecords.filter(record => (
+        CRITIQUE_ADVISORY_RECORD_TYPES.has(record.type)
         && ['open', 'proposed'].includes(projectDecision(record).status)
     ));
-    const deferOpenDecisions = () => {
-        if (!canWrite) return;
-        openGateRecords.forEach(record => handleDecisionAction(record.id, 'defer'));
-    };
 
     if (!project || !currentManifest) return <div className="p-6 text-sm text-neutral-500">A structured working plan is needed before Synapse can challenge it.</div>;
     return <ReviewWorkspace
@@ -147,9 +135,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         initialDecisionId={initialRecordId}
         initialIssueId={initialIssueId}
         initialFindingId={initialFindingId}
-        critiqueUnlocked={critiqueUnlocked}
-        openDecisionCount={openGateRecords.length}
-        onDeferOpenDecisions={deferOpenDecisions}
+        openDecisionCount={openCritiqueAdvisoryRecords.length}
         onContinueToExplore={onContinueToExplore}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
@@ -173,6 +159,9 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onReopenPlanningRecord={recordId => useProjectStore.getState().updatePlanningRecordStatusByUser(projectId, recordId, 'open')}
         onDecidePlanningRecord={handleDecisionAction}
         onPrepareDecisionOptions={recordId => void prepareDecisionOptions(recordId)}
+        recommendationBatchBusy={recommendationBatch.busy}
+        recommendationBatchResult={recommendationBatch.result}
+        onAcceptRecommendations={candidates => void recommendationBatch.runBatch(candidates)}
         onPreviewPlanningRecordImpact={handlePreviewImpact}
         onApplyPlanningRecordToPlan={handleApplyToPlan}
         onReviewAlignmentProposal={handleAlignmentProposalReview}

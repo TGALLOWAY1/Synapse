@@ -46,4 +46,15 @@ describe('buildAgentHandoff', () => {
         expect(out).toContain('Exploratory handoff');
         expect(out).toContain('has not been committed as implementation-ready');
     });
+
+    it('uses an exact checkpoint instead of stacking the blanket exploratory warning', () => {
+        const out = buildAgentHandoff({
+            projectName: 'Acme',
+            artifacts: [],
+            exploratory: true,
+            checkpointMarkdown: '## Workflow Checkpoint\n\n**Plan status:** Working plan',
+        });
+        expect(out).toContain('**Plan status:** Working plan');
+        expect(out).not.toContain('Exploratory handoff');
+    });
 });

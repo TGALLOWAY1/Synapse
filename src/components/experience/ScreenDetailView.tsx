@@ -48,8 +48,12 @@ import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore'
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenConfirmPanel } from './ScreenConfirmPanel';
-import { ScreenReviewNotes } from './ScreenReviewNotes';
+import {
+    ScreenReviewNotes,
+    type ScreenNotePlanningRequest,
+} from './ScreenReviewNotes';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
+import type { FlagPlanningConcernResult } from '../../lib/planning/flagToPlan';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreenImageGalleryContext } from '../renderers/ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -119,6 +123,12 @@ interface Props {
     /** Opens the User Flows artifact (the flow document lives there — the Flow
      * tab only shows this screen's slice of it). */
     onOpenUserFlows?: () => void;
+    /** Creates or reuses a planning record for one visible review note. */
+    onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
+    /** Opens the exact planning record returned by onFlagToPlan. */
+    onReviewPlanningRecord?: (recordId: string) => void;
+    /** Exact artifact-version + screen identity for note-result state. */
+    planningSourceScopeKey?: string;
 }
 
 export function ScreenDetailView({
@@ -126,7 +136,7 @@ export function ScreenDetailView({
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
-    onOpenUserFlows,
+    onOpenUserFlows, onFlagToPlan, onReviewPlanningRecord, planningSourceScopeKey,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -295,6 +305,7 @@ export function ScreenDetailView({
 
     const reviewNotes = (
         <ScreenReviewNotes
+            key={planningSourceScopeKey}
             issues={reviewModel.issues}
             risks={risks}
             dismissed={dismissed}
@@ -303,6 +314,8 @@ export function ScreenDetailView({
             onResolveRisk={handleResolveRisk}
             onNavigate={(tab) => onTabChange(tab)}
             onEdit={() => { onTabChange('overview'); setEditing(true); }}
+            onFlagToPlan={onFlagToPlan}
+            onReviewPlanningRecord={onReviewPlanningRecord}
             readOnly={!onSaveScreenEdit}
         />
     );

@@ -82,6 +82,29 @@ describe('SharpenPlanFlow', () => {
         expect(onOpenRecord).toHaveBeenCalledWith('a-1');
     });
 
+    it('uses an exact frozen arrival scope', () => {
+        const onDecide = vi.fn();
+        render(
+            <SharpenPlanFlow
+                records={[records[1]]}
+                onDecide={onDecide}
+                onClose={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByText('Question 1 of 1')).toBeInTheDocument();
+        expect(screen.queryByText(/LLM API providers will maintain pricing/)).toBeNull();
+        expect(screen.getByText(/Users will type explanations/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Sounds right' }));
+        expect(onDecide).toHaveBeenCalledTimes(1);
+        expect(onDecide).toHaveBeenCalledWith(
+            'a-2',
+            'confirm',
+            records[1].statement,
+            undefined,
+        );
+    });
+
     it('closes immediately when there is nothing to ask', () => {
         const onClose = vi.fn();
         render(<SharpenPlanFlow records={[]} onDecide={vi.fn()} onClose={onClose} />);

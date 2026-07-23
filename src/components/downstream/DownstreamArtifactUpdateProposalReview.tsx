@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, FileEdit, Loader2, RefreshCw, SearchCheck, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, FileEdit, Loader2, RefreshCw, SearchCheck, ShieldCheck, Sparkles } from 'lucide-react';
 import {
     latestDownstreamArtifactUpdateReview,
     latestDownstreamArtifactUpdateVerificationReview,
@@ -217,6 +217,11 @@ export function DownstreamArtifactUpdateProposalReview({
     const verificationReview = verification
         ? latestDownstreamArtifactUpdateVerificationReview(verification, verificationEvents)
         : undefined;
+    const applicationVerification = application
+        && verification?.subject?.kind === 'application'
+        && verification.subject.applicationId === application.id
+        ? verification
+        : undefined;
     // These subscriptions are part of proposal currentness even when visible
     // artifact text is unchanged: authority or spine changes must close review.
     void spineVersions;
@@ -318,9 +323,14 @@ export function DownstreamArtifactUpdateProposalReview({
         setBusy(true);
         const result = applyProposal(projectId, proposal.id);
         setBusy(false);
-        setMessage(result.status === 'applied'
-            ? { kind: 'success', text: 'Applied as a new output version. Alignment still requires verification.' }
-            : { kind: 'error', text: result.reason === 'stale'
+        if (result.status === 'applied') {
+            // Apply atomically persists its application-bound verification.
+            // Let the subscribed lifecycle state render one durable combined
+            // result instead of announcing a now-obsolete second step.
+            setMessage(undefined);
+            return;
+        }
+        setMessage({ kind: 'error', text: result.reason === 'stale'
                 ? 'Nothing changed. The proposal is stale and must be prepared again against the current output.'
                 : 'Nothing changed. The approved proposal could not be applied safely.' });
     };
@@ -413,7 +423,19 @@ export function DownstreamArtifactUpdateProposalReview({
             </div>
 
             {!application && !currentness?.current && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">Historical proposal — its planning source or artifact binding changed. It cannot be approved or applied.</p>}
-            {application && <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-900">Completed for this proposal. The approved change was applied to a new artifact version; verification is the next separate step.</p>}
+            {application && (
+                <p role="status" className={`mt-2 rounded-md border px-2.5 py-2 text-xs font-semibold ${
+                    applicationVerification && applicationVerification.result !== 'aligned'
+                        ? 'border-amber-200 bg-amber-50 text-amber-950'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                }`}>
+                    {applicationVerification
+                        ? applicationVerification.result === 'aligned'
+                            ? 'Applied — verification passed'
+                            : 'Applied — verification needs your eye'
+                        : 'Applied in a new output version'}
+                </p>
+            )}
             {corruptedLifecycle && <p role="alert" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">One or more saved lifecycle records failed integrity checks and are not shown as applied or aligned.</p>}
             <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-2">
                 <div className="min-w-0 rounded-md border border-neutral-200 bg-white p-2.5">
@@ -460,7 +482,6 @@ export function DownstreamArtifactUpdateProposalReview({
             </details>
 
             {review && <p className="mt-2 text-xs text-neutral-600"><strong>Latest user choice:</strong> {review.action.replaceAll('_', ' ')}</p>}
-            {application && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><Check size={14} /> Applied in a new output version. Verification remains separate.</p>}
             {verification && (
                 <div className={`mt-2 rounded-md border px-2.5 py-2 text-xs leading-relaxed ${verification.result === 'aligned'
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
@@ -499,7 +520,10 @@ export function DownstreamArtifactUpdateProposalReview({
             )}
             {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={`mt-2 rounded-md px-2.5 py-2 text-xs ${message.kind === 'error' ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'}`}>{message.text}</p>}
 
-            {currentArtifactVersionId && currentArtifactVersionId !== plan.artifact.artifactVersionId && (!verification || verification.result !== 'aligned') && (
+            {currentArtifactVersionId
+                && currentArtifactVersionId !== plan.artifact.artifactVersionId
+                && !applicationVerification
+                && (!verification || verification.result !== 'aligned') && (
                 <button type="button" disabled={busy} onClick={verify} className="mt-3 inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 disabled:opacity-50">
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <SearchCheck size={14} />} {verification ? 'Verify again' : 'Verify current output'}
                 </button>

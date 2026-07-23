@@ -72,11 +72,19 @@ confirmation ("Generate assets from an incomplete PRD?") whenever a non-final
 spine has `generationMeta.failedSections` — `startAssetGeneration`'s
 `acknowledgeIncomplete` flag may only ever carry a real user acknowledgement.
 When output generation starts while planning items are still open,
-`handleGenerateAssets` then offers the advisory `PreBuildCheckModal` once per
-workspace session ("Review decisions first" / "Generate anyway") — validation
-surfaces at the start of implementation, and generating always proceeds; the
-hard generation gate stays safety/PRD-only plus the incomplete-PRD
-acknowledgement (`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+`handleGenerateAssets` then offers the inline advisory
+`PreBuildCheckpointCard` once per workspace session below the stage rail. It
+names one exact, ranked planning item and offers Review first / Generate
+outputs / Not now. Generating always proceeds; the hard generation gate stays
+safety/PRD-only plus the incomplete-PRD acknowledgement
+(`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+
+After a job observed active in the current session settles,
+`WorkflowCheckpointSummaryCard` presents one non-persisted completion summary:
+ready-output count plus current generation failures, validation dispositions
+(including accepted issues and advisory warnings), critique findings, and
+alignment notes. It is keyed by the transient job's spine/`startedAt`, is
+dismissible, and does not reappear from stale persisted state after reload.
 
 ### Consolidated Implementation Plan (Development section)
 
@@ -198,22 +206,36 @@ stale and why, and the safe update order. See
   React entry (used by DependencyGraphView, ArtifactWorkspace, ExportModal).
   **`DEPENDENCY_STATUS_LABELS`** is the ONLY status-label map; `isStaleStatus`
   (needs_update | update_recommended) and `hasDesignTokenDrift` are the shared
-  predicates; `FreshnessBadge` is the inline badge (renders only for stale
-  statuses). Staleness itself is deterministic: spine-ref drift and recorded
+  staleness predicates; `needs_review` is handled explicitly as a separate
+  validation-blocked status. `FreshnessBadge` is the inline badge for stale
+  statuses. Staleness itself is deterministic: spine-ref drift and recorded
   dependency-ref drift → `needs_update`; the mockup design-tokensHash rule (a
   `design_tokens_changed` reason) uses hash comparison over version-id
   comparison — a token-identical regen keeps mockups current; missing/error/
-  generating come from artifact presence + live job slots. Upstream trouble
-  propagates downstream as `impactedBy` (blue "Impacted" pill).
+  generating come from artifact presence + live job slots. A live or durable
+  blocking validation disposition is `needs_review`; it remains separate from
+  planning alignment, propagates downstream as trouble, and cannot be cleared
+  with Mark current. Upstream trouble propagates downstream as `impactedBy`
+  (blue "Impacted" pill).
   **System freshness (`DependencyNodeStatus`) is a SEPARATE vocabulary from the
   user review/readiness statuses** (`screenReadiness` / `screenReviewWorkflow`)
   — never merge them.
-- **Actions reuse existing flows.** Single update → `retrySlot`; batch →
-  `artifactJobController.regenerateSlots(slots, args)`, a thin wrapper over
-  the existing `executeJob` (dependency-layer order, mockup last — no second
-  pipeline). It no-ops while a run is active; the UI disables update buttons
-  off live job state. `computeUpdateOrder`/`computeRecommendedUpdates` supply
-  the topological order. **Hidden closure rule:** graph batches only name
+- **One two-speed `Sync outputs` entry reuses existing flows.** Quick sync
+  presents every affected visible output together with Regenerate / Mark
+  current / Later choices, revalidates the exact spine and preferred versions,
+  and submits one dependency-safe
+  `artifactJobController.regenerateSlots(slots, args)` batch. Careful sync is
+  advanced disclosure over the existing immutable per-region downstream update
+  plans; those plans are prepared idempotently in the background when inputs
+  drift but never apply changes or verdicts automatically. A dependent cannot
+  be marked current while a troubled upstream is skipped or regenerated.
+  Manual edits are called out because regeneration appends a version rather
+  than overwriting the preferred one. Active jobs, project capabilities,
+  generation gates, the design preset, and the key requirement are rechecked
+  before writes. The batch wrapper still delegates to `executeJob`
+  (dependency-layer order, mockup last — no second pipeline). It no-ops while a
+  run is active. `computeUpdateOrder`/`computeRecommendedUpdates` supply the
+  topological order. **Hidden closure rule:** graph batches only name
   visible nodes, so `regenerateSlots` expands them via
   `expandWithHiddenDependencyClosure` (`coreArtifactPipeline.ts`) — a hidden
   subtype is pulled in when a requested slot consumes it and its inputs are
@@ -226,7 +248,8 @@ stale and why, and the safe update order. See
   `planSlotRetry(slot, isHealthy)` (`coreArtifactPipeline.ts`), which walks the
   slot's dependency closure (including hidden deps like `component_inventory`)
   and, when a dependency is unhealthy (`isDependencyHealthy`: not done for the
-  spine, or its preferred version carries `validationBlockers`), routes to
+  spine, or its preferred version has a non-accepted validation disposition),
+  routes to
   `regenerateSlots([…unhealthy deps, slot])` so the upstreams regenerate first —
   reusing the same graph-driven `executeJob` path — instead of saving a
   downstream result built from invalid dependency state. Routes only when no run
@@ -258,4 +281,3 @@ criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
 button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
 `sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
 up in `deleteProject`.
-

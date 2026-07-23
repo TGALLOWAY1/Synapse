@@ -1,8 +1,32 @@
-import type { ArtifactSlotKey } from '../../types';
+import type { ArtifactSlotKey, PipelineStage } from '../../types';
 import type { ImplementationPlanNavigationTarget } from './implementationPlanNavigation';
+import type { PlanningAttentionItem } from './planningAttention';
 
 /** Presentation-only navigation. These values must never participate in
  * planning authority, provenance, readiness hashes, or persisted project data. */
+export type PlanningScreenTab = 'overview' | 'flow' | 'mockups';
+
+export type PlanningScreenDestination = {
+    kind: 'screen';
+    artifactId?: string;
+    nodeId?: 'screen_inventory' | 'mockup';
+    screenId: string;
+    tab?: PlanningScreenTab;
+    label: string;
+    planId?: never;
+    itemId?: never;
+};
+
+export type ActivePlanningStage = 'prd' | 'review' | 'workspace' | 'history';
+
+type PlanningSurfaceDestination = {
+    kind: 'workspace' | 'history';
+    artifactId?: never;
+    nodeId?: never;
+    planId?: never;
+    itemId?: never;
+};
+
 export type PlanningArtifactRegionTarget = {
     planId: string;
     itemId: string;
@@ -22,6 +46,8 @@ export type PlanningDestination =
     | { kind: 'planning_record'; recordId: string }
     | { kind: 'challenge'; reviewId?: string; issueId?: string; findingId?: string }
     | { kind: 'readiness'; reviewId: string; concernId?: string }
+    | PlanningScreenDestination
+    | PlanningSurfaceDestination
     | {
         kind: 'artifact';
         artifactId?: string;
@@ -55,6 +81,69 @@ const nonEmpty = (value: unknown): value is string =>
 const optionalString = (value: unknown): value is string | undefined =>
     value === undefined || nonEmpty(value);
 
+export function isPlanningScreenTab(value: unknown): value is PlanningScreenTab {
+    return typeof value === 'string' && ['overview', 'flow', 'mockups'].includes(value);
+}
+
+export function dispatchPlanningAttentionItem(
+    item: PlanningAttentionItem,
+    {
+        onCommit,
+        onNavigate,
+    }: {
+        onCommit: () => void;
+        onNavigate: (destination: PlanningDestination) => void;
+    },
+): void {
+    if (item.condition === 'ready_to_commit') {
+        onCommit();
+        return;
+    }
+    onNavigate(item.destination);
+}
+
+export function resolveActivePlanningScreen({
+    screenId,
+    rawTab,
+    idsByArtifactId,
+    labels,
+    preferredArtifactId,
+}: {
+    screenId: string | null | undefined;
+    rawTab: string | null | undefined;
+    idsByArtifactId: ReadonlyMap<string, ReadonlySet<string>>;
+    labels: ReadonlyMap<string, string>;
+    preferredArtifactId?: string;
+}): Omit<PlanningScreenDestination, 'kind'> | undefined {
+    if (!nonEmpty(screenId)) return undefined;
+
+    const hasPreferredArtifactId = typeof preferredArtifactId === 'string'
+        && preferredArtifactId.length > 0;
+    if (hasPreferredArtifactId
+        && (!nonEmpty(preferredArtifactId)
+            || !idsByArtifactId.get(preferredArtifactId)?.has(screenId))) {
+        return undefined;
+    }
+    const matchingArtifactIds = hasPreferredArtifactId
+        ? [preferredArtifactId]
+        : Array.from(idsByArtifactId.entries())
+            .filter(([artifactId, ids]) => nonEmpty(artifactId) && ids.has(screenId))
+            .map(([artifactId]) => artifactId);
+    if (matchingArtifactIds.length !== 1) return undefined;
+
+    const artifactId = matchingArtifactIds[0];
+    const label = labels.get(`${artifactId}:${screenId}`);
+    if (!nonEmpty(label)) return undefined;
+
+    return {
+        artifactId,
+        nodeId: 'screen_inventory',
+        screenId,
+        tab: isPlanningScreenTab(rawTab) ? rawTab : 'overview',
+        label,
+    };
+}
+
 function isArtifactSlotKey(value: unknown): value is ArtifactSlotKey {
     return typeof value === 'string' && [
         'screen_inventory',
@@ -66,6 +155,20 @@ function isArtifactSlotKey(value: unknown): value is ArtifactSlotKey {
         'design_system',
         'mockup',
     ].includes(value);
+}
+
+function isPlanningScreenDestination(value: unknown): value is PlanningScreenDestination {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<PlanningScreenDestination>;
+    return candidate.kind === 'screen'
+        && optionalString(candidate.artifactId)
+        && (candidate.nodeId === undefined || ['screen_inventory', 'mockup'].includes(candidate.nodeId))
+        && nonEmpty(candidate.screenId)
+        && (candidate.tab === undefined || isPlanningScreenTab(candidate.tab))
+        && nonEmpty(candidate.label)
+        && candidate.planId === undefined
+        && candidate.itemId === undefined
+        && Boolean(candidate.artifactId || candidate.nodeId);
 }
 
 function isImplementationTarget(value: unknown): value is ImplementationPlanNavigationTarget {
@@ -110,6 +213,13 @@ export function isPlanningDestination(value: unknown): value is PlanningDestinat
     }
     if (candidate.kind === 'readiness') {
         return nonEmpty(candidate.reviewId) && optionalString(candidate.concernId);
+    }
+    if (candidate.kind === 'screen') return isPlanningScreenDestination(candidate);
+    if (candidate.kind === 'workspace' || candidate.kind === 'history') {
+        return candidate.artifactId === undefined
+            && candidate.nodeId === undefined
+            && candidate.planId === undefined
+            && candidate.itemId === undefined;
     }
     if (candidate.kind === 'artifact') {
         return optionalString(candidate.artifactId)
@@ -169,6 +279,7 @@ export type PlanningNavigationValidationContext = {
     readinessReviewIds?: ReadonlySet<string>;
     artifactIds?: ReadonlySet<string>;
     updatePlanIds?: ReadonlySet<string>;
+    screenIdsByArtifactId?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 /** Missing or stale presentation targets fail to a safe readable surface. A
@@ -177,6 +288,26 @@ export function validatePlanningDestination(
     destination: PlanningDestination,
     context: PlanningNavigationValidationContext,
 ): PlanningDestination {
+    if (destination.kind === 'screen') {
+        if (!destination.artifactId && !destination.nodeId) return { kind: 'workspace' };
+        if (destination.artifactId
+            && context.artifactIds
+            && !context.artifactIds.has(destination.artifactId)) {
+            return destination.nodeId
+                ? { kind: 'artifact', nodeId: destination.nodeId }
+                : { kind: 'workspace' };
+        }
+        if (destination.artifactId
+            && context.screenIdsByArtifactId?.has(destination.artifactId)
+            && !context.screenIdsByArtifactId.get(destination.artifactId)?.has(destination.screenId)) {
+            return {
+                kind: 'artifact',
+                artifactId: destination.artifactId,
+                nodeId: destination.nodeId,
+            };
+        }
+        return destination;
+    }
     if (destination.kind === 'planning_record'
         && context.planningRecordIds && !context.planningRecordIds.has(destination.recordId)) {
         return { kind: 'prd' };
@@ -201,4 +332,35 @@ export function validatePlanningDestination(
             : { kind: 'prd' };
     }
     return destination;
+}
+
+export function planningStageForDestination(destination: PlanningDestination): ActivePlanningStage {
+    if (destination.kind === 'prd' || destination.kind === 'readiness') return 'prd';
+    if (destination.kind === 'decision_center'
+        || destination.kind === 'planning_record'
+        || destination.kind === 'challenge') return 'review';
+    if (destination.kind === 'history') return 'history';
+    return 'workspace';
+}
+
+export function planningReturnTargetForSurface({
+    stage,
+    screen,
+}: {
+    stage: PipelineStage;
+    screen?: Omit<PlanningScreenDestination, 'kind'>;
+}): PlanningReturnTarget {
+    if (stage === 'workspace' && screen) {
+        return { destination: { ...screen, kind: 'screen' }, label: `Back to ${screen.label}` };
+    }
+    if (stage === 'review') {
+        return { destination: { kind: 'challenge' }, label: 'Back to Challenge' };
+    }
+    if (stage === 'workspace' || stage === 'mockups' || stage === 'artifacts') {
+        return { destination: { kind: 'workspace' }, label: 'Back to Build' };
+    }
+    if (stage === 'history') {
+        return { destination: { kind: 'history' }, label: 'Back to History' };
+    }
+    return { destination: { kind: 'prd' }, label: 'Back to Plan' };
 }

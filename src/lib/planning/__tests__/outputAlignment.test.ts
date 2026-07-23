@@ -84,6 +84,26 @@ describe('deriveProjectOutputAlignment', () => {
         });
     });
 
+    it('keeps validation review separate from planning alignment', () => {
+        const a = artifact('data', 'data_model');
+        const result = deriveProjectOutputAlignment({
+            artifacts: [a],
+            artifactVersions: [version(a.id, 's1', 'Output body', {
+                validationBlockers: [{
+                    code: 'data_model_api_surface_missing',
+                    message: 'No API surface.',
+                }],
+            })],
+            spineVersions: [spine('s1', prd(), true)],
+        });
+
+        expect(result.outputs[0]).toMatchObject({
+            state: 'aligned',
+            summary: 'This output reflects the current planning foundation.',
+            blocksBuildReadiness: false,
+        });
+    });
+
     it('treats a relevant plan change as possibly affected, not definitely invalid', () => {
         const a = artifact('data', 'data_model');
         const result = deriveProjectOutputAlignment({

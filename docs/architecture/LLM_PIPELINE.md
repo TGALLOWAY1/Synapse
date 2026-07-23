@@ -136,9 +136,11 @@
       `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
       **Decision feedback (assumptions, decision log, deferred scope, risks) is
       NOT a PRD sub-tab** — it lives in the **Decision Center** (Challenge
-      stage); the PRD view routes to it via the `onOpenDecisions` callback (the
-      "N planning items need review" section badges and the Overview deferred
-      link). Keeping the interactive PRD to prose-only views means "Select text
+      stage); the PRD view routes to it via the `onOpenDecisions` callback (an
+      exact **Review planning item** section action and the Overview deferred
+      link). Aggregate attention lives in the workspace's global next-action
+      strip rather than being echoed inside every PRD section. Keeping the
+      interactive PRD to prose-only views means "Select text
       to edit" applies only to the PRD, and decision feedback happens in one
       place. **Overview** = product brief (executive summary, problem/thesis,
       vision, principles, JTBD/users, success metrics, a **compact Scope** block —
@@ -830,4 +832,3 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   unknowns. `prdService` appends `buildClarificationPromptBlock()` (the
   authoritative-intent instruction; skipped → open unknowns) to the prompt
   **after** the safety gate, so every section receives it via `ctx.idea`.
-

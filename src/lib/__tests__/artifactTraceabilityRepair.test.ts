@@ -111,8 +111,8 @@ describe('repairTraceability — data_model', () => {
     it('enriches a structurally-valid data model and clears the traceability blocker', () => {
         // Precondition: the artifact trips ONLY the traceability blocker.
         const before = detectArtifactBlockers('data_model', dataModelContent, prd);
-        expect(before.some(b => /traceability/i.test(b))).toBe(true);
-        expect(before.some(b => /API surface/i.test(b))).toBe(false);
+        expect(before.some(b => b.code === 'prd_traceability_unverified')).toBe(true);
+        expect(before.some(b => b.code === 'data_model_api_surface_missing')).toBe(false);
 
         const repair = repairTraceability('data_model', dataModelContent, prd);
         expect(repair.repaired).toBe(true);
@@ -156,7 +156,7 @@ describe('repairTraceability — user_flows', () => {
 - Network error → retry.
 `;
         const before = detectArtifactBlockers('user_flows', flows, prd);
-        expect(before.some(b => /traceability/i.test(b))).toBe(true);
+        expect(before.some(b => b.code === 'prd_traceability_unverified')).toBe(true);
 
         const repair = repairTraceability('user_flows', flows, prd);
         expect(repair.repaired).toBe(true);
@@ -174,7 +174,7 @@ describe('repairTraceability — failure cases', () => {
         expect(repair.warnings.length).toBeGreaterThan(0);
         // Blocker survives a failed repair.
         const after = detectArtifactBlockers('user_flows', repair.content, prd);
-        expect(after.some(b => /traceability/i.test(b))).toBe(true);
+        expect(after.some(b => b.code === 'prd_traceability_unverified')).toBe(true);
     });
 
     it('fails when the PRD has no features', () => {

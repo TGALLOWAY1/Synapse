@@ -271,7 +271,9 @@ describe('ReviewWorkspace', () => {
         const onConfirmPlanningRecord = vi.fn();
         render(<ReviewWorkspace {...baseProps({ planningRecords: records, onConfirmPlanningRecord })} />);
 
-        fireEvent.click(screen.getByRole('button', { name: /Decision Center/ }));
+        const decisionCenterTab = screen.getByRole('button', { name: 'Decision Center' });
+        expect(decisionCenterTab).not.toHaveTextContent('1');
+        fireEvent.click(decisionCenterTab);
         expect(screen.getAllByText('Needs your decision').length).toBeGreaterThan(0);
         const save = screen.getByRole('button', { name: 'Save decision' });
         expect(save).toBeDisabled();
@@ -382,7 +384,7 @@ describe('ReviewWorkspace', () => {
         expect(onTriageFinding).toHaveBeenCalledWith('review-1', 'finding-exact');
     });
 
-    describe('critique gate (Findings after decisions)', () => {
+    describe('non-blocking critique suggestion', () => {
         it('renders the Decision Center first, then Findings, then History', () => {
             render(<ReviewWorkspace {...baseProps()} />);
             const tabs = screen.getAllByRole('button', { name: /Decision Center|Review findings|Review history/ });
@@ -391,61 +393,48 @@ describe('ReviewWorkspace', () => {
             ]);
         });
 
-        it('keeps the critique runnable when critiqueUnlocked is omitted (default)', () => {
+        it('keeps the critique runnable and omits the suggestion when no items are open', () => {
             render(<ReviewWorkspace {...baseProps()} />);
             expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
+            expect(screen.queryByText(/open items? — critiquing now may re-raise/)).not.toBeInTheDocument();
         });
 
-        it('lands on the Decision Center and gates the critique when decisions are open', () => {
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 3 })} />);
+        it('orients to the Decision Center but keeps critique enabled when items are open', () => {
+            render(<ReviewWorkspace {...baseProps({ openDecisionCount: 3 })} />);
             expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
 
             fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
-            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: 'Start specialist review' })).not.toBeInTheDocument();
+            expect(screen.getByText('3 open items — critiquing now may re-raise them.')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeEnabled();
         });
 
-        it('returns to the Decision Center from the gate', () => {
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 2 })} />);
-            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
-            fireEvent.click(screen.getByRole('button', { name: /Open Decision Center/ }));
-            expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
+        it('uses singular suggestion copy for one open item', () => {
+            render(<ReviewWorkspace {...baseProps({ initialTab: 'review', openDecisionCount: 1 })} />);
+            expect(screen.getByText('1 open item — critiquing now may re-raise it.')).toBeInTheDocument();
         });
 
-        it('defers the remaining open decisions from the gate', () => {
-            const onDeferOpenDecisions = vi.fn();
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 2, onDeferOpenDecisions })} />);
-            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
-            fireEvent.click(screen.getByRole('button', { name: /Defer the remaining 2 and continue/ }));
-            expect(onDeferOpenDecisions).toHaveBeenCalledTimes(1);
-        });
-
-        it('still shows an already-completed run while the gate is active', () => {
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [completeRun()], activeRunId: 'review-1' })} />);
+        it('shows an already-completed run while items are open', () => {
+            render(<ReviewWorkspace {...baseProps({ openDecisionCount: 2, initialTab: 'review', runs: [completeRun()], activeRunId: 'review-1' })} />);
             expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
-            expect(screen.queryByRole('heading', { name: 'Answer your open decisions first' })).not.toBeInTheDocument();
+            expect(screen.getByText('2 open items — critiquing now may re-raise them.')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Review current plan' })).toBeEnabled();
         });
 
-        it('gates resume of an interrupted run behind decisions', () => {
+        it('keeps an interrupted run resumable while items are open', () => {
             const run = completeRun({ status: 'interrupted' });
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
-            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: /Resume review/ })).not.toBeInTheDocument();
+            render(<ReviewWorkspace {...baseProps({ openDecisionCount: 2, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('button', { name: /Resume review/ })).toBeEnabled();
+            expect(screen.getByText('2 open items — critiquing now may re-raise them.')).toBeInTheDocument();
         });
 
-        it('gates retry of a failed run behind decisions', () => {
+        it('keeps a failed run resumable while items are open', () => {
             const run = completeRun({ status: 'failed' });
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
-            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+            render(<ReviewWorkspace {...baseProps({ openDecisionCount: 1, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('button', { name: /Resume review/ })).toBeEnabled();
+            expect(screen.getByText('1 open item — critiquing now may re-raise it.')).toBeInTheDocument();
         });
 
-        it('keeps an interrupted run resumable when decisions are addressed', () => {
-            const run = completeRun({ status: 'interrupted' });
-            render(<ReviewWorkspace {...baseProps({ initialTab: 'review', runs: [run], activeRunId: run.id })} />);
-            expect(screen.getByRole('button', { name: /Resume review/ })).toBeInTheDocument();
-        });
-
-        it('hides re-run affordances on a partial run while gated but keeps findings visible', () => {
+        it('keeps partial-coverage retry and re-review enabled while items are open', () => {
             const run = completeRun({
                 status: 'partial',
                 specialists: [
@@ -453,10 +442,20 @@ describe('ReviewWorkspace', () => {
                     { ...panel[1], status: 'failed', error: 'Timed out' },
                 ],
             });
-            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            render(<ReviewWorkspace {...baseProps({ openDecisionCount: 2, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
             expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: 'Retry failed coverage' })).not.toBeInTheDocument();
-            expect(screen.queryByRole('button', { name: 'Review current plan' })).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Retry failed coverage' })).toBeEnabled();
+            expect(screen.getByRole('button', { name: 'Review current plan' })).toBeEnabled();
+        });
+
+        it('preserves read-only guards while showing open-item context', () => {
+            render(<ReviewWorkspace {...baseProps({ readOnly: true, initialTab: 'review', openDecisionCount: 2 })} />);
+            expect(screen.getByText('2 open items — critiquing now may re-raise them.')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Reviews are read-only in this example' })).toBeDisabled();
+
+            const run = completeRun({ status: 'interrupted' });
+            render(<ReviewWorkspace {...baseProps({ readOnly: true, initialTab: 'review', openDecisionCount: 2, runs: [run], activeRunId: run.id })} />);
+            expect(screen.queryByRole('button', { name: /Resume review/ })).not.toBeInTheDocument();
         });
     });
 });
