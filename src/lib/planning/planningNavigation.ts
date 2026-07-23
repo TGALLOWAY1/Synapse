@@ -117,9 +117,14 @@ export function resolveActivePlanningScreen({
 }): Omit<PlanningScreenDestination, 'kind'> | undefined {
     if (!nonEmpty(screenId)) return undefined;
 
-    const preferredMatches = nonEmpty(preferredArtifactId)
-        && idsByArtifactId.get(preferredArtifactId)?.has(screenId);
-    const matchingArtifactIds = preferredMatches
+    const hasPreferredArtifactId = typeof preferredArtifactId === 'string'
+        && preferredArtifactId.length > 0;
+    if (hasPreferredArtifactId
+        && (!nonEmpty(preferredArtifactId)
+            || !idsByArtifactId.get(preferredArtifactId)?.has(screenId))) {
+        return undefined;
+    }
+    const matchingArtifactIds = hasPreferredArtifactId
         ? [preferredArtifactId]
         : Array.from(idsByArtifactId.entries())
             .filter(([artifactId, ids]) => nonEmpty(artifactId) && ids.has(screenId))

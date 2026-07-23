@@ -177,6 +177,22 @@ describe('planning navigation presentation contract', () => {
         });
     });
 
+    it('does not substitute another artifact when the exact preferred artifact is stale', () => {
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'flow',
+            preferredArtifactId: 'artifact-stale',
+            idsByArtifactId: new Map([
+                ['artifact-stale', new Set(['scr-home'])],
+                ['artifact-other', new Set(['scr-checkout'])],
+            ]),
+            labels: new Map([
+                ['artifact-stale:scr-home', 'Home'],
+                ['artifact-other:scr-checkout', 'Checkout'],
+            ]),
+        })).toBeUndefined();
+    });
+
     it('returns no exact screen for absent or unparseable inventory maps', () => {
         const labels = new Map([['artifact-screens:scr-checkout', 'Checkout']]);
 
