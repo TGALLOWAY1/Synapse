@@ -348,6 +348,14 @@ describe('DecisionCenter', () => {
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 
+    it('defaults an empty Decision Center to Needs attention, not the empty log', () => {
+        // With no records at all, landing on "Needs attention" reads as
+        // "you're all caught up" rather than the dead-end empty log.
+        render(<DecisionCenter records={[]} {...callbacks()} />);
+        expect(screen.getByText('Nothing needs an answer')).toBeInTheDocument();
+        expect(screen.queryByText('No resolved planning history yet')).toBeNull();
+    });
+
     it('marks a deferred record with a chip in Resolved & history', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'deferred' }]} {...callbacks()} />);
         fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));

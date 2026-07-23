@@ -257,7 +257,15 @@ export function DecisionCenter({
     onAddAssetItemToPlan,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
-    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsVerdict(initialRecord) ? 'needs_review' : 'log') : records.some(needsVerdict) ? 'needs_review' : 'log');
+    const [view, setView] = useState<'needs_review' | 'log'>(() => {
+        if (initialRecord) return needsVerdict(initialRecord) ? 'needs_review' : 'log';
+        if (records.some(needsVerdict)) return 'needs_review';
+        // Nothing needs an answer. Land on the log only when there is resolved
+        // history to show; with no records at all, "Needs attention" reads as
+        // "you're all caught up" rather than the dead-end empty "No resolved
+        // planning history yet".
+        return records.length > 0 ? 'log' : 'needs_review';
+    });
     // The attention queue holds only records that still need an answer. An
     // answered material assumption moves to "Resolved & history" (labeled
     // "Answered · not validated") — validation stays available there, but it
