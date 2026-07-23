@@ -34,7 +34,7 @@
 | | Feature | What it gives you |
 |---|---|---|
 | 🧠 | **Spec in seconds, generated in parallel** | Describe your product in a sentence. Synapse writes a full, structured PRD — with sections generating concurrently so you watch it build in real time instead of waiting on one long stream. |
-| ✍️ | **Refine by highlighting** | Select any passage and choose **Clarify · Expand · Specify · Alternative · Replace**. A focused AI thread reworks just that span and merges it back — no regenerating the whole document. |
+| ✍️ | **Refine by highlighting** | Select any passage and choose **Clarify · Expand · Specify · Alternative · Replace · Critique** — each a specialized action, not a generic prompt. A focused AI thread reworks just that span and merges it back — no regenerating the whole document. Stage several edits and apply them together as one reviewed version. |
 | ✅ | **Feature-by-feature approval** | Features are broken into systems and individual cards with success criteria, edge cases, and failure modes. Confirm the ones you agree with; the plan tracks what's settled and what still needs a look. |
 | ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and its recommended answer preselected — approve it in one click or record your own. Preview the exact impact on the plan and apply it explicitly — your call, never a silent rewrite. Open decisions never block your design assets. |
 | 🎨 | **One plan → every asset** | When you're ready, generate the whole build foundation from the same source of truth: screen inventory, data model, user flows, a design system, an implementation plan, and mockups — all at once. |
@@ -63,7 +63,7 @@ Sections generate as a dependency graph — independent ones run concurrently, e
 <img width="100%" alt="PRD generation running concurrent sections with live per-section timing" src="public/screenshots/app-generation.png" />
 
 **3 · Refine any passage, surgically** ✍️
-Highlight a span → Clarify / Expand / Specify / Alternative / Replace → a threaded edit merges back into the spec.
+Highlight a span → Clarify / Expand / Specify / Alternative / Replace / Critique → a threaded edit merges back into the spec. Stage several edits and apply them together as one reviewed version, with an optional consistency check.
 
 <img width="100%" alt="Highlight-to-refine popover on a PRD passage" src="public/screenshots/app-refine.png" />
 

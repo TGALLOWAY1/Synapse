@@ -51,9 +51,17 @@ export type Branch = {
     projectId: string;
     spineVersionId: string;
     anchorText: string;
+    // 'active'   — open conversation, not yet resolved
+    // 'resolved' — staged: a concrete replacement is held, ready to batch-apply
+    // 'merged'   — consolidated into a new spine version
+    // 'rejected' — reserved
     status: 'active' | 'resolved' | 'rejected' | 'merged';
     createdAt: number;
     messages: BranchMessage[];
+    // Concrete replacement text held while the branch is staged ('resolved'),
+    // applied to the anchor on batch consolidation. Optional — legacy branches
+    // and never-staged branches omit it.
+    proposedReplacement?: string;
 };
 
 // Structured PRD types

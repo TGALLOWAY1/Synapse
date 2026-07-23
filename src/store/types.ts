@@ -159,6 +159,18 @@ export interface ProjectState {
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
     mergeBranch: (projectId: string, branchId: string, newSpineText: string, opts?: { structuredPRD?: StructuredPRD }) => { newSpineId: string };
+    // Staged-edits (batch consolidation) flow: hold a concrete replacement on a
+    // branch ('resolved'), then apply several at once as one spine version.
+    stageBranch: (projectId: string, branchId: string, proposedReplacement: string) => void;
+    unstageBranch: (projectId: string, branchId: string) => void;
+    applyStagedBranchesToSpine: (
+        projectId: string,
+        spineVersionId: string,
+        finalStructuredPRD: StructuredPRD,
+        finalResponseText: string,
+        appliedBranchIds: string[],
+        editSummary: string,
+    ) => { newSpineId: string };
     deleteProject: (projectId: string) => void;
     deleteBranch: (projectId: string, branchId: string) => void;
     getProject: (projectId: string) => Project | undefined;

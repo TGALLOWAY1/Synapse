@@ -749,7 +749,19 @@
     neither the legacy prompt_pack prompt nor the implementation_plan
     prompt-pack instructions (`coreArtifactService.ts`) may name or recommend a
     specific coding agent (Cursor, Claude Code, ChatGPT, Copilot).
-  - `branchService.ts` — branch consolidation back into the spine.
+  - `branchService.ts` — the highlight → refine branch conversation
+    (`replyInBranch`) and consolidation back into the spine
+    (`consolidateBranch`). `replyInBranch` selects a **specialized system
+    prompt per edit action** from the `src/lib/prdEditActions.ts` registry
+    (Clarify / Expand / Specify / Alternative / Replace / Critique), derived
+    from the intent's `"<Label>: "` prefix when not passed explicitly; a
+    free-text intent with no recognized action falls back to the generic
+    prompt. The per-action prompts are snapshot-locked in
+    `promptSurfaces.test.ts`.
+  - `prdEditReview.ts` — advisory, fail-open pre-commit critique for staged
+    edits (`reviewStagedEdits`): one fast-model pass checks the combined change
+    against the rest of the plan and returns findings; any failure yields an
+    empty (degraded) result and never blocks the commit.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
     `generatePreflightSummary()`; both inject transports for tests and degrade
