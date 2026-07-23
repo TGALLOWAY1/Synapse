@@ -25,7 +25,20 @@
   legacy markdown-only spines. Never append a markdown-only merge spine
   on top of a structured one — `canReview`/`canExploreOutputs` gate on
   the *latest* spine having a `structuredPRD`, so that silently disables
-  the Challenge and Explore/Build stages for the whole project. **Generation lifecycle:**
+  the Challenge and Explore/Build stages for the whole project.
+  **Staged edits (batch consolidation):** a branch can hold a concrete
+  replacement without committing — `stageBranch` sets its status to
+  `'resolved'` (the previously-dormant status) and stores
+  `Branch.proposedReplacement`; `unstageBranch` reverts it. Several staged
+  edits are then applied as **one** new spine version:
+  `applyStagedEditsToStructuredPRD` (pure, `src/lib/stagedBranchEdits.ts`)
+  applies each patch to the structured PRD in sequence — an edit whose
+  anchor a prior edit changed is *skipped and reported*, never dropped —
+  and `applyStagedBranchesToSpine` performs the atomic append, marks every
+  applied branch `'merged'`, and records one history event. An advisory,
+  fail-open pre-commit critique (`reviewStagedEdits`,
+  `src/lib/services/prdEditReview.ts`) can check the combined change against
+  the rest of the plan; it never blocks the commit. **Generation lifecycle:**
   `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
   legacy spines lack it) is stamped `'running'` by
   `markSpineGenerationStarted` when a PRD run actually begins (both

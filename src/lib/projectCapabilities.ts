@@ -109,7 +109,8 @@ export function canPerformProjectAction(projectId: string | undefined, action: P
  * adding a new write is a conscious policy decision, not a UI convention. */
 export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage',
-    'mergeBranch', 'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
+    'mergeBranch', 'stageBranch', 'unstageBranch', 'applyStagedBranchesToSpine',
+    'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
     'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
     'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
     'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
