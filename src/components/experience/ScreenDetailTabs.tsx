@@ -7,7 +7,9 @@
 // screen itself), Flow, and Mockups. The developer Handoff tab was moved out —
 // implementation planning lives in the Implementation Plan artifact.
 
-export type ScreenDetailTab = 'overview' | 'flow' | 'mockups';
+import type { PlanningScreenTab } from '../../lib/planning/planningNavigation';
+
+export type ScreenDetailTab = PlanningScreenTab;
 
 interface Props {
     active: ScreenDetailTab;

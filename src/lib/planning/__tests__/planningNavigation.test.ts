@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+    isPlanningScreenTab,
     parsePlanningNavigationIntent,
+    planningReturnTargetForSurface,
+    planningStageForDestination,
     serializePlanningNavigationIntent,
     validatePlanningDestination,
     withPlanningNavigationIntent,
     type PlanningNavigationIntent,
+    type PlanningScreenDestination,
 } from '../planningNavigation';
 
 describe('planning navigation presentation contract', () => {
@@ -47,6 +51,51 @@ describe('planning navigation presentation contract', () => {
         }))).toBeUndefined();
     });
 
+    it('round-trips an exact screen return target', () => {
+        const screen: PlanningScreenDestination = {
+            kind: 'screen',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            tab: 'flow',
+            label: 'Checkout · Flow',
+        };
+        const intent: PlanningNavigationIntent = {
+            destination: { kind: 'planning_record', recordId: 'decision-7' },
+            returnTo: {
+                destination: screen,
+                label: 'Back to Checkout · Flow',
+            },
+        };
+
+        expect(parsePlanningNavigationIntent(serializePlanningNavigationIntent(intent))).toEqual(intent);
+    });
+
+    it('recognizes only supported screen tabs', () => {
+        expect(['overview', 'flow', 'mockups'].every(isPlanningScreenTab)).toBe(true);
+        expect(isPlanningScreenTab('handoff')).toBe(false);
+    });
+
+    it('rejects unknown screen tabs and overlong screen labels', () => {
+        expect(parsePlanningNavigationIntent(JSON.stringify({
+            destination: {
+                kind: 'screen',
+                nodeId: 'screen_inventory',
+                screenId: 'scr-checkout',
+                tab: 'handoff',
+                label: 'Checkout · Handoff',
+            },
+        }))).toBeUndefined();
+        expect(parsePlanningNavigationIntent(JSON.stringify({
+            destination: {
+                kind: 'screen',
+                nodeId: 'screen_inventory',
+                screenId: 'scr-checkout',
+                label: 'x'.repeat(501),
+            },
+        }))).toBeUndefined();
+    });
+
     it('rejects malformed, overlong, and unknown targets', () => {
         expect(parsePlanningNavigationIntent('{not-json')).toBeUndefined();
         expect(parsePlanningNavigationIntent(JSON.stringify({ destination: { kind: 'authority_override' } }))).toBeUndefined();
@@ -75,5 +124,78 @@ describe('planning navigation presentation contract', () => {
             { kind: 'planning_record', recordId: 'deleted-record' },
             { planningRecordIds: new Set() },
         )).toEqual({ kind: 'prd' });
+    });
+
+    it('falls back from a missing screen to its artifact, Screens node, then workspace', () => {
+        const screen: PlanningScreenDestination = {
+            kind: 'screen',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            tab: 'flow',
+            label: 'Checkout · Flow',
+        };
+
+        expect(validatePlanningDestination(screen, {
+            artifactIds: new Set(['artifact-screens']),
+            screenIdsByArtifactId: new Map([['artifact-screens', new Set<string>()]]),
+        })).toEqual({
+            kind: 'artifact',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+        });
+        expect(validatePlanningDestination(screen, {
+            artifactIds: new Set(),
+        })).toEqual({
+            kind: 'artifact',
+            nodeId: 'screen_inventory',
+        });
+        expect(validatePlanningDestination(
+            { ...screen, nodeId: undefined },
+            { artifactIds: new Set() },
+        )).toEqual({ kind: 'workspace' });
+        expect(validatePlanningDestination(
+            { ...screen, artifactId: undefined, nodeId: undefined },
+            {},
+        )).toEqual({ kind: 'workspace' });
+    });
+
+    it('maps destinations to active planning stages', () => {
+        expect(planningStageForDestination({ kind: 'readiness', reviewId: 'review-1' })).toBe('prd');
+        expect(planningStageForDestination({ kind: 'planning_record', recordId: 'decision-1' })).toBe('review');
+        expect(planningStageForDestination({ kind: 'history' })).toBe('history');
+        expect(planningStageForDestination({ kind: 'artifact', nodeId: 'screen_inventory' })).toBe('workspace');
+    });
+
+    it('builds return targets for current presentation stages and exact workspace screens', () => {
+        const screen: PlanningScreenDestination = {
+            kind: 'screen',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            tab: 'flow',
+            label: 'Checkout · Flow',
+        };
+
+        expect(planningReturnTargetForSurface({ stage: 'prd' })).toEqual({
+            destination: { kind: 'prd' },
+            label: 'Back to Plan',
+        });
+        expect(planningReturnTargetForSurface({ stage: 'review' })).toEqual({
+            destination: { kind: 'challenge' },
+            label: 'Back to Challenge',
+        });
+        expect(planningReturnTargetForSurface({ stage: 'workspace' })).toEqual({
+            destination: { kind: 'workspace' },
+            label: 'Back to Build',
+        });
+        expect(planningReturnTargetForSurface({ stage: 'history' })).toEqual({
+            destination: { kind: 'history' },
+            label: 'Back to History',
+        });
+        expect(planningReturnTargetForSurface({ stage: 'workspace', screen })).toEqual({
+            destination: screen,
+            label: 'Back to Checkout · Flow',
+        });
     });
 });
