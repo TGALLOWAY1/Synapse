@@ -168,8 +168,7 @@ describe('planning navigation presentation contract', () => {
     });
 
     it('builds return targets for current presentation stages and exact workspace screens', () => {
-        const screen: PlanningScreenDestination = {
-            kind: 'screen',
+        const screen: Omit<PlanningScreenDestination, 'kind'> = {
             artifactId: 'artifact-screens',
             nodeId: 'screen_inventory',
             screenId: 'scr-checkout',
@@ -194,7 +193,7 @@ describe('planning navigation presentation contract', () => {
             label: 'Back to History',
         });
         expect(planningReturnTargetForSurface({ stage: 'workspace', screen })).toEqual({
-            destination: screen,
+            destination: { kind: 'screen', ...screen },
             label: 'Back to Checkout · Flow',
         });
     });

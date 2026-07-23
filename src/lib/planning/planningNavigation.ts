@@ -281,10 +281,10 @@ export function planningReturnTargetForSurface({
     screen,
 }: {
     stage: PipelineStage;
-    screen?: PlanningScreenDestination;
+    screen?: Omit<PlanningScreenDestination, 'kind'>;
 }): PlanningReturnTarget {
     if (stage === 'workspace' && screen) {
-        return { destination: screen, label: `Back to ${screen.label}` };
+        return { destination: { kind: 'screen', ...screen }, label: `Back to ${screen.label}` };
     }
     if (stage === 'review') {
         return { destination: { kind: 'challenge' }, label: 'Back to Challenge' };
