@@ -40,8 +40,14 @@ impact previews / the write-barrier apply path in
   with a percentage or artifact-count score. Missing outputs do not reduce
   planning readiness.
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
-  current readiness category, supporting criteria, and one highest-value next
-  action with direct entry to decisions or Challenge.
+  current readiness category, supporting criteria, and the three planning tools
+  as an always-visible, ordered set — Decision Center (settle open choices /
+  confirm scope) → Challenge this plan (stress-test once coherent) → Review
+  readiness (final check before build) — each carrying a plain-language
+  "when to use" cue so the order of operations is legible rather than three
+  equal buried links. The unconfirmed `scope` criterion links directly to the
+  Features view (`onOpenFeatures` → `?prdView=features`); the 7-criterion
+  breakdown stays behind a collapsed "Readiness checks" disclosure.
 - `GlobalNextActionStrip` is the one workspace-wide aggregate planning-attention
   surface below the stage rail. `derivePlanningAttention` ranks one primary and
   a small secondary set, and every action carries an exact destination plus
