@@ -32,7 +32,7 @@ it never reaches any Synapse server.
 Optional client-side settings, also `localStorage` keys (set via Settings or
 the browser console), let you tune model routing without code changes:
 
-- `GEMINI_MODEL` — default model (defaults to `gemini-3.5-flash`).
+- `GEMINI_MODEL` — default model (defaults to `gemini-3.6-flash`).
 - `GEMINI_FAST_MODEL` / `GEMINI_STRONG_MODEL` — per-tier overrides for the DAG
   pipeline (low-risk sections use fast, high-risk use strong).
 - `GEMINI_PROJECT_ID` — a GCP project id, forwarded as `x-goog-user-project`
