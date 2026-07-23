@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { ConfirmDialog } from './common/ConfirmDialog';
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
@@ -63,6 +63,7 @@ import {
     projectDecision,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
+import { GlobalNextActionStrip } from './planning/GlobalNextActionStrip';
 import { PreBuildCheckModal } from './planning/PreBuildCheckModal';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
 import { useDecisionImpactActions } from './review/useDecisionImpactActions';
@@ -72,7 +73,10 @@ import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
     PLANNING_NAVIGATION_QUERY_PARAM,
+    isPlanningScreenTab,
     parsePlanningNavigationIntent,
+    planningReturnTargetForSurface,
+    planningStageForDestination,
     validatePlanningDestination,
     withPlanningNavigationIntent,
     type PlanningArtifactRegionTarget,
@@ -80,6 +84,7 @@ import {
     type PlanningDestination,
     type PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
+import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 
 const EMPTY_PROJECT_LIST: never[] = [];
 
@@ -197,17 +202,55 @@ export function ProjectWorkspace() {
     // their existing persisted currentStage behavior.
     const [readOnlyStage, setReadOnlyStage] = useState<PipelineStage | null>(null);
 
+    const navigationScreens = useMemo(() => {
+        const idsByArtifactId = new Map<string, ReadonlySet<string>>();
+        const labels = new Map<string, string>();
+        if (!projectId) return { idsByArtifactId, labels };
+
+        for (const artifact of navigationArtifacts) {
+            if (artifact.subtype !== 'screen_inventory') continue;
+            const versions = getArtifactVersions(projectId, artifact.id);
+            const version = versions.find(item => item.id === artifact.currentVersionId)
+                ?? versions.find(item => item.isPreferred);
+            const inventory = version ? parseScreenInventory(version.content) : null;
+            if (!inventory) continue;
+
+            const screens = inventory.sections.flatMap(section => section.screens);
+            idsByArtifactId.set(
+                artifact.id,
+                new Set(screens.flatMap(screen => screen.id ? [screen.id] : [])),
+            );
+            screens.forEach(screen => {
+                if (screen.id) labels.set(`${artifact.id}:${screen.id}`, screen.name);
+            });
+        }
+
+        return { idsByArtifactId, labels };
+    }, [getArtifactVersions, navigationArtifacts, projectId]);
+
     const planningIntent = useMemo(
         () => parsePlanningNavigationIntent(searchParams.get(PLANNING_NAVIGATION_QUERY_PARAM)),
         [searchParams],
     );
 
+    const applyPresentationStage = useCallback((stage: PipelineStage) => {
+        if (!projectId) return;
+        if (capabilities.canPersistWorkflowState) setProjectStage(projectId, stage);
+        else setReadOnlyStage(stage);
+    }, [capabilities.canPersistWorkflowState, projectId, setProjectStage]);
+
     const writePlanningIntent = (intent?: PlanningNavigationIntent, replace = false) => {
         if (!intent) lastPlanningIntentRef.current = undefined;
         setSearchParams(current => {
             const next = withPlanningNavigationIntent(current, intent);
-            const screenId = intent?.destination.kind === 'artifact' ? intent.destination.region?.screenId : undefined;
-            if (!screenId) {
+            if (intent?.destination.kind === 'screen') {
+                next.set('screen', intent.destination.screenId);
+                if (intent.destination.tab && intent.destination.tab !== 'overview') {
+                    next.set('screenTab', intent.destination.tab);
+                } else {
+                    next.delete('screenTab');
+                }
+            } else {
                 next.delete('screen');
                 next.delete('screenTab');
             }
@@ -240,6 +283,7 @@ export function ProjectWorkspace() {
             readinessReviewIds: new Set(readinessReviews.map(review => review.id)),
             artifactIds: new Set(navigationArtifacts.map(artifact => artifact.id)),
             updatePlanIds: new Set(downstreamUpdatePlans.map(plan => plan.id)),
+            screenIdsByArtifactId: navigationScreens.idsByArtifactId,
         });
         // The applied key covers the intent AND its validated destination: a
         // deep link whose target had not loaded yet (falling back to the PRD)
@@ -250,7 +294,7 @@ export function ProjectWorkspace() {
         lastAppliedPlanningIntentRef.current = serializedIntent;
         if (destination.kind === 'prd') {
             setSelectedReadinessReviewId(null);
-            setProjectStage(projectId, 'prd');
+            applyPresentationStage('prd');
             if (destination.anchorId) window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
                 document.getElementById(destination.anchorId!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }));
@@ -262,7 +306,7 @@ export function ProjectWorkspace() {
             setReviewInitialRunId(undefined);
             setReviewInitialIssueId(undefined);
             setReviewInitialFindingId(undefined);
-            setProjectStage(projectId, 'review');
+            applyPresentationStage('review');
             return;
         }
         if (destination.kind === 'challenge') {
@@ -271,12 +315,37 @@ export function ProjectWorkspace() {
             setReviewInitialRunId(destination.reviewId);
             setReviewInitialIssueId(destination.issueId);
             setReviewInitialFindingId(destination.findingId);
-            setProjectStage(projectId, 'review');
+            applyPresentationStage('review');
             return;
         }
         if (destination.kind === 'readiness') {
             setReadinessInitialConcernId(destination.concernId);
             setSelectedReadinessReviewId(destination.reviewId);
+            return;
+        }
+        if (destination.kind === 'history') {
+            applyPresentationStage('history');
+            return;
+        }
+        if (destination.kind === 'workspace') {
+            applyPresentationStage('workspace');
+            return;
+        }
+        if (destination.kind === 'screen') {
+            setFinalizeAutoOpen(false);
+            setWorkspaceInitialNode(destination.nodeId ?? 'screen_inventory');
+            setWorkspaceInitialArtifactId(destination.artifactId);
+            setSearchParams(current => {
+                const next = new URLSearchParams(current);
+                next.set('screen', destination.screenId);
+                if (destination.tab && destination.tab !== 'overview') {
+                    next.set('screenTab', destination.tab);
+                } else {
+                    next.delete('screenTab');
+                }
+                return next;
+            }, { replace: true });
+            applyPresentationStage('workspace');
             return;
         }
         if (destination.kind === 'artifact') {
@@ -286,7 +355,7 @@ export function ProjectWorkspace() {
             setWorkspaceInitialRegion(destination.region);
             setWorkspaceInitialUpdatePlanId(undefined);
             setWorkspaceInitialUpdatePlanItemId(undefined);
-            setProjectStage(projectId, 'workspace');
+            applyPresentationStage('workspace');
             return;
         }
         const plan = downstreamUpdatePlans.find(candidate => candidate.id === destination.planId);
@@ -295,8 +364,8 @@ export function ProjectWorkspace() {
         setWorkspaceInitialArtifactId(destination.artifactId ?? plan?.artifact.artifactId);
         setWorkspaceInitialUpdatePlanId(destination.planId);
         setWorkspaceInitialUpdatePlanItemId(destination.itemId);
-        setProjectStage(projectId, 'workspace');
-    }, [downstreamUpdatePlans, navigationArtifacts, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setProjectStage]);
+        applyPresentationStage('workspace');
+    }, [applyPresentationStage, downstreamUpdatePlans, navigationArtifacts, navigationScreens.idsByArtifactId, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setSearchParams]);
 
     // Position the portaled overflow menu relative to its trigger button.
     useLayoutEffect(() => {
@@ -410,9 +479,7 @@ export function ProjectWorkspace() {
     const pipelineStage = capabilities.canPersistWorkflowState
         ? project?.currentStage || 'prd'
         : readOnlyStage ?? project?.currentStage ?? 'prd';
-    const setPipelineStage = (stage: PipelineStage) => {
-        if (projectId) setProjectStage(projectId, stage);
-    };
+    const setPipelineStage = applyPresentationStage;
     const handlePipelineStageChange = (stage: PipelineStage) => {
         // Land on the Decision Center first when decisions are still open — the
         // specialist critique (Findings) is gated until they are addressed.
@@ -591,6 +658,31 @@ export function ProjectWorkspace() {
         outputAlignments: outputAlignment.outputs,
     });
     const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
+    const activeScreenReturn = (() => {
+        if (pipelineStage !== 'workspace') return undefined;
+        const screenId = searchParams.get('screen');
+        if (!screenId) return undefined;
+
+        const artifactId = Array.from(navigationScreens.idsByArtifactId.entries())
+            .find(([, ids]) => ids.has(screenId))?.[0];
+        if (!artifactId) return undefined;
+
+        const label = navigationScreens.labels.get(`${artifactId}:${screenId}`);
+        if (!label) return undefined;
+
+        const rawTab = searchParams.get('screenTab');
+        return {
+            artifactId,
+            nodeId: 'screen_inventory' as const,
+            screenId,
+            tab: isPlanningScreenTab(rawTab) ? rawTab : 'overview' as const,
+            label,
+        };
+    })();
+    const activeSurfaceReturnTarget = planningReturnTargetForSurface({
+        stage: pipelineStage,
+        screen: activeScreenReturn,
+    });
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
         ? compareReadinessReviewCurrentness(selectedReadinessReview, readinessReviewInput)
@@ -1119,24 +1211,13 @@ export function ProjectWorkspace() {
     // so resolving a decision in Challenge never strands the user there.
     const planReturnTarget: PlanningReturnTarget = { destination: { kind: 'prd' }, label: 'Back to Plan' };
 
-    const handlePlanningNextAction = () => {
-        const kind = planningReadiness.nextAction.kind;
-        if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId, planReturnTarget);
-        if (kind === 'challenge_plan') return openChallenge(undefined, undefined, undefined, planReturnTarget);
-        if (kind === 'align_outputs') {
-            if (planningReadiness.nextAction.nodeId) setWorkspaceInitialNode(planningReadiness.nextAction.nodeId);
-            if (planningReadiness.nextAction.artifactId) setWorkspaceInitialArtifactId(planningReadiness.nextAction.artifactId);
-            return setPipelineStage('workspace');
-        }
-        if (kind === 'commit_plan') return handleToggleFinal();
-        const anchor = kind === 'confirm_scope' ? 'prd-features' : 'prd-coreProblem';
-        document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
-
     const openPlanningAttention = (destination: PlanningDestination) => {
-        writePlanningIntent(destination.kind === 'prd'
-            ? { destination }
-            : { destination, returnTo: planReturnTarget });
+        const leavesSurface = planningStageForDestination(destination)
+            !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+        writePlanningIntent({
+            destination,
+            ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
+        });
     };
 
     const handleExport = () => {
@@ -1436,6 +1517,11 @@ export function ProjectWorkspace() {
                 />
             </div>
 
+            <GlobalNextActionStrip
+                attention={planningAttention}
+                onOpen={openPlanningAttention}
+            />
+
             {/* One workspace-level explanation; individual artifacts stay free
                 of repetitive read-only warnings. */}
             {capabilities.isReadOnly && (
@@ -1717,12 +1803,9 @@ export function ProjectWorkspace() {
                                                         planSummary={activeSpine.structuredPRD.executiveSummary ? undefined : activeSpine.structuredPRD.vision}
                                                         committed={isCurrentPlanCommitted}
                                                         legacyCommitted={isLegacyPlanCommitted}
-                                                        onNextAction={handlePlanningNextAction}
                                                         onReviewReadiness={openCurrentReadinessCheckpoint}
                                                         onOpenDecisions={() => openDecisionCenter(undefined, planReturnTarget)}
                                                         onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
-                                                        attention={planningAttention}
-                                                        onOpenAttention={openPlanningAttention}
                                                         answerableCount={answerableAssumptions.length}
                                                         onStartSharpen={canEditPlan && answerableAssumptions.length > 0
                                                             ? () => setSharpenQueueIds(answerableAssumptions.map(record => record.id))
