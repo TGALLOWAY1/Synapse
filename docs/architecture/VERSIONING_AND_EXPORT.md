@@ -106,6 +106,18 @@ ref would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
 detail panel and the artifact-header strip when stale.
 
+**Re-finalize and the Update Assets plan — currently UNWIRED (doc drift,
+2026-07-23).** The flow described in this section no longer matches the code:
+`finalizeAndGenerate` was replaced by the readiness-commitment path
+(`commitReadinessReview` → `FinalizationSuccessModal` →
+`startAssetGeneration` → `artifactJobController.startAll`), which does NOT
+open `UpdateAssetsPlanModal` — the modal, `asOfSpineId`, and
+`expandSelectionWithTroubledUpstreams` are built and tested but have no live
+call sites, so every re-commit regenerates all assets. See
+`docs/VERSIONING_V3_RESTORE_PROPOSAL.md` §2.4/§4.7 for the audit and the
+proposal to re-wire this machinery. The paragraph below is retained as the
+intended design:
+
 **Re-finalize goes through the Update Assets plan.** When Mark-as-Final runs
 and downstream assets already exist (and no generation job is active),
 `ProjectWorkspace.finalizeAndGenerate` does NOT call `startAll` — it evaluates
