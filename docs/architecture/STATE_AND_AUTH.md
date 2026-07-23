@@ -132,6 +132,42 @@ It flushes pending writes on `beforeunload`, `pagehide`, **and**
 `visibilitychange → hidden` (the last two are the reliable mobile lifecycle
 events).
 
+**Cross-tab write safety (`registerCrossTabMerge` + `src/lib/crossTabMerge.ts`):**
+each tab persists the WHOLE store as one debounced localStorage value, so two
+open Synapse tabs used to race last-writer-wins on the entire namespace: a
+stale background tab flushing any write — including its unload/visibility
+flush — silently reverted everything a fresher tab had persisted since. In a
+freshly generated project the mockup spec version is the last thing written,
+so it was exactly what such a clobber deleted; on the next boot
+`artifactJobController.resumeIfNeeded` then saw "mockup missing for this
+spine" and silently regenerated it (plus its paid images) — the
+"mockups don't stay with the project" bug. The storage layer now tracks, per
+resolved key, the stored value as this tab last observed it (recorded on
+`getItem` and on every successful write). When a flush finds the stored value
+changed under us — another tab wrote in between, including the
+never-observed-but-present case — it does **not** overwrite: it calls the
+registered cross-tab merge (`registerCrossTabMerge`, wired in `projectStore`
+to the pure `mergePersistedProjectBlobs`) and writes the merged result. The
+merge is a **per-project newest-wins union**: for every project id on either
+side, the side with the newer `latestProjectActivity` (max `createdAt`/
+`updatedAt` across the project record and all its collection rows) wins
+**wholesale** — a project's slices always come from ONE side so they stay an
+internally-consistent snapshot (version arrays, preferred flags, and history
+agree); projects present on only one side are kept (union — losing brand-new
+work is strictly worse than the rare resurrection of a project deleted
+concurrently in another tab, which server sync re-deletes for signed-in
+users). Ties go to the in-memory tab. After a merged value lands (and no newer
+write is already pending), the storage fires the handler's `onApplied`, which
+rehydrates the store on the next microtask so the stale tab adopts the other
+tab's work into memory and its next write carries it natively. The merge is
+pure and never throws into persistence — an unparseable blob or a merge error
+falls back to the pre-guard overwrite. Concurrent edits to the *same project*
+in two tabs remain last-writer-wins **per project** — strictly narrower than
+the old whole-store clobber. Regression tests:
+`src/lib/__tests__/crossTabMerge.test.ts`, the cross-tab describe in
+`src/store/__tests__/storage.test.ts`, and the end-to-end mockup-survival
+scenario in `src/store/__tests__/crossTabPersistence.test.ts`.
+
 **`canonicalSpine` is never persisted (`partialize`):** the store's
 `partialize` strips the rebuildable `canonicalSpine` cache from every spine in
 `spineVersions` (`stripPersistedCanonicalSpines`) before serializing. It is a

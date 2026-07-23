@@ -34,6 +34,28 @@ export function registerQuotaRecovery(recovery: QuotaRecovery | null): void {
     quotaRecovery = recovery;
 }
 
+// Cross-tab write-safety hook. The persisted store is ONE whole-blob value per
+// namespace, so with two open tabs the LAST writer used to win outright: a
+// stale background tab flushing any write (including its unload flush)
+// silently reverted everything a fresher tab had persisted since — in a
+// freshly generated project that is the mockup spec version, the last thing
+// written (see src/lib/crossTabMerge.ts for the full failure story). Before
+// overwriting a value that changed under us (another tab wrote since this tab
+// last read or wrote the key), the storage now asks this handler to MERGE the
+// stored blob with ours and writes the merged result instead. `onApplied`
+// fires after a merged value lands so the registrant can adopt it into memory
+// (rehydrate); it is skipped when a newer write is already pending — that
+// write will simply re-merge on its own flush. Injected (not imported) for the
+// same storage → store cycle reason as the quota hook.
+export interface CrossTabMergeHandler {
+    merge: (storedRaw: string, oursRaw: string) => string;
+    onApplied?: () => void;
+}
+let crossTabMerge: CrossTabMergeHandler | null = null;
+export function registerCrossTabMerge(handler: CrossTabMergeHandler | null): void {
+    crossTabMerge = handler;
+}
+
 export function createDebouncedStorage<S>(
     delayMs: number = 500,
     // Optional override that decides the actual localStorage key, ignoring the
@@ -48,6 +70,10 @@ export function createDebouncedStorage<S>(
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let pendingValue: string | null = null;
     let pendingName: string | null = null;
+    // Per-key snapshot of the stored value as THIS TAB last saw it (read on
+    // hydration, updated on every successful write). A mismatch at write time
+    // means another tab wrote in between — the cross-tab merge guard's trigger.
+    const lastObserved = new Map<string, string | null>();
     // The id of the currently-shown sticky quota toast, so we can dismiss it the
     // moment a later write succeeds (space was freed by recovery or by the user
     // exporting/deleting). null = no quota toast is up.
@@ -86,9 +112,37 @@ export function createDebouncedStorage<S>(
     // the registered recovery (retention sweep) and only surface a single sticky
     // toast if that cannot rescue the write.
     function safeSetItem(name: string, value: string): void {
+        // Cross-tab guard: if the stored value changed since this tab last read
+        // or wrote it, another tab persisted work we do not have in memory —
+        // blindly overwriting would silently revert it (the "mockups vanish
+        // after reopening" data loss). Merge the two blobs and write the union
+        // instead. `lastObserved.has(name) === false` (a write with no prior
+        // read) is treated the same as a mismatch: we provably never saw what
+        // we are about to destroy.
+        let merged = false;
+        try {
+            const stored = localStorage.getItem(name);
+            if (
+                crossTabMerge
+                && stored !== null
+                && stored !== value
+                && stored !== lastObserved.get(name)
+            ) {
+                const resolved = crossTabMerge.merge(stored, value);
+                if (resolved !== value) {
+                    value = resolved;
+                    merged = true;
+                }
+            }
+        } catch (err) {
+            // Never let the guard itself break persistence — fall through and
+            // write ours, which is the pre-guard behavior.
+            console.error('[STORE] cross-tab merge failed:', err);
+        }
         try {
             const startTime = performance.now();
             localStorage.setItem(name, value);
+            lastObserved.set(name, value);
             if (persistDebugEnabled()) {
                 const durationMs = performance.now() - startTime;
                 console.log(`[STORE] persist: ${durationMs.toFixed(0)}ms (${(value.length / 1024).toFixed(1)}KB)`);
@@ -97,6 +151,16 @@ export function createDebouncedStorage<S>(
             // sticky warning and re-arm recovery for a future overflow.
             dismissQuotaToast();
             recoveryAttempted = false;
+            // Let the registrant adopt the merged value into memory — but only
+            // when no newer write is already queued (that write will re-merge on
+            // its own flush, and rehydrating now would race it).
+            if (merged && crossTabMerge?.onApplied && pendingValue === null) {
+                try {
+                    crossTabMerge.onApplied();
+                } catch (applyErr) {
+                    console.error('[STORE] cross-tab merge onApplied failed:', applyErr);
+                }
+            }
         } catch (err) {
             if (isQuotaError(err)) {
                 // First overflow of this episode: ask the store to prune. If it
@@ -157,7 +221,11 @@ export function createDebouncedStorage<S>(
 
     return {
         getItem: (name: string): StorageValue<S> | null => {
-            const raw = localStorage.getItem(target(name));
+            const key = target(name);
+            const raw = localStorage.getItem(key);
+            // Reading IS observing: a later write only merges when the stored
+            // value changed after this point (i.e. another tab wrote).
+            lastObserved.set(key, raw);
             if (raw === null) return null;
             try {
                 return JSON.parse(raw) as StorageValue<S>;
@@ -188,7 +256,9 @@ export function createDebouncedStorage<S>(
             if (timeoutId) clearTimeout(timeoutId);
             pendingValue = null;
             pendingName = null;
-            localStorage.removeItem(target(name));
+            const key = target(name);
+            localStorage.removeItem(key);
+            lastObserved.set(key, null);
         },
     };
 }

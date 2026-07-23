@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectState } from './types';
 import type { SpineVersion } from '../types';
-import { createDebouncedStorage, registerQuotaRecovery } from './storage';
+import { createDebouncedStorage, registerCrossTabMerge, registerQuotaRecovery } from './storage';
+import { mergePersistedProjectBlobs } from '../lib/crossTabMerge';
 import { resolveProjectStorageName } from './userScope';
 import { createProjectSlice } from './slices/projectSlice';
 import { createSpineSlice } from './slices/spineSlice';
@@ -167,6 +168,27 @@ export const useProjectStore = create<ProjectState>()(
         }
     )
 );
+
+// Cross-tab write safety. Each tab persists the WHOLE store as one debounced
+// localStorage value, so without this a stale background tab's flush (any
+// change, or its unload flush) last-writer-wins over the entire namespace and
+// silently reverts work a fresher tab persisted since — in a freshly generated
+// project that is the mockup spec version, the last thing written, which then
+// looks "gone" on the next boot and gets silently auto-regenerated
+// (artifactJobController.resumeIfNeeded). The storage layer detects the
+// under-us change and calls this merge (per-project newest-wins union, pure —
+// see src/lib/crossTabMerge.ts) instead of overwriting. After a merged value
+// lands, adopt it into memory so this tab's UI and NEXT write include the
+// other tab's work natively; deferred a tick because the flush can run inside
+// an unload handler or mid-setState, and rehydrate() re-enters the store.
+registerCrossTabMerge({
+    merge: mergePersistedProjectBlobs,
+    onApplied: () => {
+        queueMicrotask(() => {
+            void useProjectStore.persist.rehydrate();
+        });
+    },
+});
 
 // Mid-session quota recovery. The rehydrate sweep only runs at load; if a write
 // overflows the quota *during* a session (e.g. a burst of review runs) no sweep
