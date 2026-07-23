@@ -28,6 +28,7 @@
     "diff": "^9.0.0",
     "framer-motion": "^12.40.0",
     "lucide-react": "^0.575.0",
+    "lz-string": "^1.5.0",
     "mark.js": "^8.11.1",
     "mongodb": "^6.21.0",
     "react": "^19.2.0",

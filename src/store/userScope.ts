@@ -11,6 +11,7 @@
 // resets + rehydrates the store on a user switch lives in `projectUserSync.ts`.
 
 import { ALL_PROJECT_COLLECTIONS } from '../lib/projectBundle';
+import { decodePersistedBlob, encodePersistedBlob } from './persistCodec';
 
 const BASE_NAME = 'synapse-projects-storage';
 
@@ -83,11 +84,13 @@ function readDeclined(): string[] {
   }
 }
 
-/** Parse a persisted Zustand blob's project-id map for a given collection. */
+/** Parse a persisted Zustand blob's project-id map for a given collection.
+ *  Accepts both plain-JSON and compressed blobs (see persistCodec.ts). */
 function readProjectsMap(raw: string | null): Record<string, unknown> {
-  if (!raw) return {};
+  const json = decodePersistedBlob(raw);
+  if (!json) return {};
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(json);
     const projects = parsed?.state?.projects;
     return projects && typeof projects === 'object' ? (projects as Record<string, unknown>) : {};
   } catch {
@@ -184,7 +187,7 @@ export function importLegacyProjectsForUser(userId: string): boolean {
     return false;
   }
 
-  safeSet(nsKey, merged.json);
+  safeSet(nsKey, encodePersistedBlob(merged.json));
   safeSet(CLAIM_KEY, userId);
   return true;
 }
@@ -198,8 +201,11 @@ export function importLegacyProjectsForUser(userId: string): boolean {
  */
 function mergeStoredBlobs(targetRaw: string, sourceRaw: string): { json: string; addedProjects: number } | null {
   try {
-    const target = JSON.parse(targetRaw);
-    const source = JSON.parse(sourceRaw);
+    const targetJson = decodePersistedBlob(targetRaw);
+    const sourceJson = decodePersistedBlob(sourceRaw);
+    if (targetJson === null || sourceJson === null) return null;
+    const target = JSON.parse(targetJson);
+    const source = JSON.parse(sourceJson);
     const targetState = target?.state ?? {};
     const sourceState = source?.state ?? {};
     let added = 0;
@@ -244,7 +250,7 @@ export function mergeNamespaceInto(canonicalUserId: string | null, sourceUserId:
   }
   const merged = mergeStoredBlobs(targetRaw, sourceRaw);
   if (!merged || merged.addedProjects === 0) return false;
-  safeSet(targetKey, merged.json);
+  safeSet(targetKey, encodePersistedBlob(merged.json));
   return true;
 }
 

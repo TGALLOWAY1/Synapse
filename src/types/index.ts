@@ -8,6 +8,11 @@ export type Project = {
     id: string;
     name: string;
     createdAt: number;
+    // Stamped by in-place project-record mutations (stage changes, design
+    // preset, product metadata) so the cross-tab merge's per-project recency
+    // signal sees them (src/lib/crossTabMerge.ts). Optional — legacy data
+    // predates it.
+    updatedAt?: number;
     currentStage?: PipelineStage;
     platform?: ProjectPlatform;
     // Inferred by the PRD pipeline. Stored as metadata only — never replaces
@@ -663,6 +668,12 @@ export type SpineVersion = {
     promptText: string;
     responseText: string;
     createdAt: number;
+    // Stamped by every IN-PLACE mutation of this version (streaming PRD fill,
+    // decision-edit amend, preflight patches, flag/error/safety settles) so the
+    // cross-tab merge's per-project recency signal sees changes that don't
+    // append a new row (src/lib/crossTabMerge.ts). Optional — legacy data
+    // predates it.
+    updatedAt?: number;
     isLatest: boolean;
     isFinal: boolean;
     structuredPRD?: StructuredPRD;
