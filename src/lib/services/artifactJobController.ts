@@ -40,8 +40,6 @@ import { getStrongModel } from '../geminiClient';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
-import { useMockupImageStore } from '../../store/mockupImageStore';
-import { hasOpenAIKey } from '../openaiClient';
 import { selectPreferredDesignSystem } from '../designTokens';
 import { parseScreenInventory } from '../screenInventoryNormalize';
 import { parseComponentInventoryMarkdown } from '../componentInventoryParse';
@@ -572,28 +570,11 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         finishedAt: Date.now(),
     });
 
-    // Fire-and-forget: kick off low-quality AI image generation for each
-    // screen. The AI image is the sole visual deliverable, so kicking it
-    // off as soon as the spec lands matches the expectation that the
-    // mockup page lights up with images. Skipped when no OpenAI key is
-    // configured (the empty-state CTA is shown instead).
-    const versionId = newVersion?.versionId;
-    if (versionId && hasOpenAIKey() && !signal.aborted) {
-        const imageStore = useMockupImageStore.getState();
-        for (const screen of payload.screens) {
-            void imageStore.generate({
-                projectId,
-                artifactId,
-                versionId,
-                screen,
-                payload,
-                settings,
-                quality: 'low',
-            }).catch((err) => {
-                console.warn('[artifactJobController] auto image generation failed', err);
-            });
-        }
-    }
+    // Image generation is deliberately NOT fired here. The spec lands ready,
+    // but the costly visual step waits behind an explicit flow-approval gate
+    // (MockupApprovalGate) so the user reviews the user flows and approves
+    // which screens are worth rendering before any image is generated. On
+    // approval, the workspace fires generation for the selected screens.
 }
 
 async function executeJob(args: StartArgs, controller: AbortController, slotKeys: ArtifactSlotKey[]): Promise<void> {

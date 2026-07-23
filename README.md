@@ -37,7 +37,7 @@
 | ✍️ | **Refine by highlighting** | Select any passage and choose **Clarify · Expand · Specify · Alternative · Replace · Critique** — each a specialized action, not a generic prompt. A focused AI thread reworks just that span and merges it back — no regenerating the whole document. Stage several edits and apply them together as one reviewed version. |
 | ✅ | **Feature-by-feature approval** | Features are broken into systems and individual cards with success criteria, edge cases, and failure modes. Confirm the ones you agree with; the plan tracks what's settled and what still needs a look. |
 | ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and its recommended answer preselected — approve one explicitly or accept a guarded batch of recommendations. New assumptions arrive as one clear review card instead of silently filling a queue. Open decisions never block your design assets. |
-| 🎨 | **One plan → every asset** | When you're ready, generate the whole build foundation from the same source of truth: screen inventory, data model, user flows, a design system, an implementation plan, and mockups — all at once. |
+| 🎨 | **One plan → every asset** | When you're ready, generate the whole build foundation from the same source of truth: screen inventory, data model, user flows, a design system, and an implementation plan — all at once. Mockups add a review step: approve the flows and pick which screens to render before Synapse generates the images. |
 | 🖌️ | **Consistent visual direction** | Pick a design direction (Modern SaaS, Enterprise, Creative Studio…) recommended from your idea. It steers the design system, mockups, and image prompts so every asset looks like one product. |
 | 🕓 | **Nothing is ever lost** | Every regenerate, edit, decision, and merge appends a new version with a readable diff and one-click restore. History is append-only — you can always go back. |
 | 🔌 | **Everything stays connected** | Each artifact remembers the spec it came from. When the PRD moves, **Sync outputs** offers a quick dependency-safe refresh or a careful per-change review, while exact version guards prevent stale plans from applying. |
@@ -79,7 +79,7 @@ The Decision Center queues the assumptions and choices that actually move the pl
 <img width="100%" alt="Decision Center queue with a selected assumption and its impact" src="public/screenshots/app-decisions.png" />
 
 **6 · Fan out into every asset** 🎨
-Generate the design system, user flows, screens, data model, and implementation plan from the same source. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
+Generate the design system, user flows, screens, data model, and implementation plan from the same source. Mockups take one more deliberate step: review the flows and approve which screens are worth rendering, then Synapse generates images only for the screens you picked — so the visuals follow an approved flow instead of appearing unbidden. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
 
 <img width="100%" alt="Explore workspace showing generated artifacts and the design system" src="public/screenshots/app-artifacts.png" />
 

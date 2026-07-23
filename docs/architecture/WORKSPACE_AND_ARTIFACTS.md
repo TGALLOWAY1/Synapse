@@ -86,6 +86,41 @@ ready-output count plus current generation failures, validation dispositions
 alignment notes. It is keyed by the transient job's spine/`startedAt`, is
 dismissible, and does not reappear from stale persisted state after reload.
 
+### Mockup flow-approval gate (approve flows before images)
+
+Mockup generation is two-phase: a **spec phase** (`generateMockup`, no LLM —
+derives the per-screen list from `screen_inventory` + `component_inventory` +
+`design_system`) and a **visual phase** (OpenAI `gpt-image-2` per screen).
+`runMockupSlot` produces the spec as part of the normal asset run but **no
+longer fires image generation** — the costly visual step waits behind an
+explicit flow-approval gate so the user reviews the user flows and approves
+which screens are worth rendering before any image is generated.
+
+- **`src/lib/mockupApproval.ts`** (pure, unit-tested) is the read/derive layer:
+  `readMockupApproval` / `isMockupApproved` read the per-version overlay;
+  `buildMockupScreenRecommendations` / `recommendedScreenIds` seed the checklist
+  (P0/P1 and unlabelled screens pre-checked; P2/P3 offered unchecked — mirroring
+  the spec's existing priority-first selection so the user sees *why* each screen
+  is pre-checked).
+- **Approval is a per-version overlay**, stored under
+  `ArtifactVersion.metadata.mockupApproval`
+  (`{ approvedAt, approvedScreenIds, flowsReviewed }`) via
+  `updateArtifactVersionMetadata` — the same overlay pattern as `screenEdits` /
+  `extraScreens`, so it travels through sync + snapshots with **no new persisted
+  collection** (cross-cutting rules 6 & 12).
+- **`MockupApprovalGate`** (`src/components/mockups/MockupApprovalGate.tsx`) is the
+  UI: a compact flows review (parsed `user_flows` + an "Open Flows" jump + an
+  "I've reviewed the flows" acknowledgement) and the recommendation-seeded screen
+  checklist. On approve, `ArtifactWorkspace` writes the overlay (with a history
+  description) and fires `mockupImageStore.generate` for the selected screens.
+- **When the gate shows.** `ArtifactWorkspace`'s mockup branch renders the gate
+  instead of `MockupViewer` only when the version has **no approval overlay and
+  no images yet** *and* the project can generate. So demo/snapshot mockups (read
+  only, images already present) and pre-feature versions render straight through,
+  and a fresh regenerate re-gates the new version. Approval stays advisory in
+  spirit — nothing else is blocked, and users can still add/regenerate screens
+  from the mockup view afterwards.
+
 ### Consolidated Implementation Plan (Development section)
 
 The old **Developer Prompts** (`prompt_pack`) and **Build Plan**
