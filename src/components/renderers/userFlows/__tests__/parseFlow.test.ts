@@ -168,9 +168,14 @@ describe('classifyIssue / normalized issues', () => {
         expect(classifyIssue('Service returns 500 and cannot recover')).toBe('failure_mode');
     });
 
-    it('treats unresolved / TBD wording as unresolved_reference', () => {
-        expect(classifyIssue('TBD: hook this up to the canonical feature catalog')).toBe('unresolved_reference');
-        expect(classifyIssue('Reference to flow X is unresolved')).toBe('unresolved_reference');
+    // The `unresolved_reference` kind was removed: flagging open items inside
+    // an asset is not this surface's job, and the heuristic mostly fired on
+    // designed fallbacks ("… is missing from the index → return a hardcoded
+    // reply"). Such lines now classify as ordinary branches, so nothing
+    // disappears from the flow — it just isn't badged as unresolved.
+    it('classifies TBD wording as an ordinary branch rather than flagging it', () => {
+        expect(classifyIssue('TBD: hook this up to the canonical feature catalog')).toBe('edge_case');
+        expect(classifyIssue('Concepts missing from the index → return a canned reply')).toBe('edge_case');
     });
 
     it('treats edge case / first-time wording as edge_case', () => {
@@ -193,7 +198,6 @@ describe('classifyIssue / normalized issues', () => {
             'alternate_path',
             'validation_warning',
             'failure_mode',
-            'unresolved_reference',
         ]));
     });
 });

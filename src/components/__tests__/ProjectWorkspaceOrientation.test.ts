@@ -18,6 +18,16 @@ describe('ProjectWorkspace orientation', () => {
         expect(workspace.match(/<GlobalNextActionStrip/g)).toHaveLength(1);
     });
 
+    // `structuredPRD` is truthy after the first streamed section, so the
+    // outputs pill has to be gated on the run being settled — otherwise it
+    // invites the user to build outputs from a half-written plan.
+    it('hides the outputs pill while the PRD is still generating', () => {
+        const start = workspace.indexOf('const showAssetsPill =');
+        const decl = workspace.slice(start, workspace.indexOf(';', start));
+
+        expect(decl).toContain('!isPRDActivelyGenerating');
+    });
+
     it('does not pass global primary props into PlanningStateBar', () => {
         const start = workspace.indexOf('<PlanningStateBar');
         const props = workspace.slice(start, workspace.indexOf('/>', start));

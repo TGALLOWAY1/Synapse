@@ -21,6 +21,7 @@ import {
 import { PrdViewTabs } from './prd/PrdViewTabs';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
 import { isDisplayableFeatureId } from '../lib/derive/prdDecisions';
+import { groupConstraintItems } from '../lib/prdConstraintCategories';
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
 import type { ConsequentialPrdEditRecognition } from '../lib/planning';
@@ -55,6 +56,8 @@ import {
     RolesSection,
     ArchFlowsSection,
     MetricsSection,
+    DetailCard,
+    DetailField,
 } from './prd/PremiumSections';
 
 interface StructuredPRDViewProps {
@@ -891,28 +894,43 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         const constraints = structuredPRD.constraints ?? [];
         const nfrs = structuredPRD.nonFunctionalRequirements ?? [];
         if (constraints.length === 0 && nfrs.length === 0) return null;
+
+        // Same card + indented-subsection layout as JTBD and Core User Flows:
+        // the generator writes these lines with a leading category label
+        // ("Performance: …"), so that label becomes the subsection heading and
+        // the requirement text gets the full content width. Cards stack — a
+        // half-width column is what made long numeric requirements wrap after
+        // two or three words.
+        const renderGroup = (label: string, items: string[]) => {
+            const groups = groupConstraintItems(items);
+            if (groups.length === 0) return null;
+            return (
+                <DetailCard title={label}>
+                    {groups.map((group, i) => {
+                        const body = group.items.length === 1
+                            ? <p>{group.items[0]}</p>
+                            : (
+                                <ul className="list-disc pl-4 space-y-1">
+                                    {group.items.map((text, k) => <li key={k}>{text}</li>)}
+                                </ul>
+                            );
+                        return group.category
+                            ? <DetailField key={group.category} label={group.category}>{body}</DetailField>
+                            // Unlabelled lines get no invented heading.
+                            : <div key={`uncategorized-${i}`} className="text-sm text-neutral-700 leading-relaxed">{body}</div>;
+                    })}
+                </DetailCard>
+            );
+        };
+
         return (
             <div className="mb-8">
                 <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
                     <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Constraints</h3>
                 </div>
-                <div className="grid sm:grid-cols-2 gap-3">
-                    {constraints.length > 0 && (
-                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Boundaries</p>
-                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
-                                {constraints.map((c, i) => <li key={i}>{c}</li>)}
-                            </ul>
-                        </div>
-                    )}
-                    {nfrs.length > 0 && (
-                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Quality & Performance Requirements</p>
-                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
-                                {nfrs.map((c, i) => <li key={i}>{c}</li>)}
-                            </ul>
-                        </div>
-                    )}
+                <div className="space-y-3">
+                    {constraints.length > 0 && renderGroup('Boundaries', constraints)}
+                    {nfrs.length > 0 && renderGroup('Quality & Performance Requirements', nfrs)}
                 </div>
             </div>
         );

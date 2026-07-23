@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import { DecisionCenterContainer } from './DecisionCenterContainer';
+import type { PlanningDestination } from '../../lib/planning/planningNavigation';
 
 interface DecisionCenterSlideOverProps {
     open: boolean;
@@ -8,6 +9,9 @@ interface DecisionCenterSlideOverProps {
     initialRecordId?: string;
     onClose: () => void;
     onContinueToExplore?: () => void;
+    /** Closes the layer and navigates to the asset region behind an advisory
+     * open item. The workspace owns the navigation intent. */
+    onNavigateToAsset?: (destination: PlanningDestination) => void;
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -30,6 +34,7 @@ export function DecisionCenterSlideOver({
     initialRecordId,
     onClose,
     onContinueToExplore,
+    onNavigateToAsset,
 }: DecisionCenterSlideOverProps) {
     const titleId = useId();
     const panelRef = useRef<HTMLElement>(null);
@@ -115,6 +120,7 @@ export function DecisionCenterSlideOver({
                         projectId={projectId}
                         initialRecordId={initialRecordId}
                         onContinueToExplore={onContinueToExplore}
+                        onNavigateToAsset={onNavigateToAsset}
                     />
                 </div>
             </section>

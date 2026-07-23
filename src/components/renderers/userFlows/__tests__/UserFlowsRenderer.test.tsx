@@ -180,4 +180,28 @@ describe('UserFlowsRenderer', () => {
         expect(container.textContent).toMatch(/Flow 2/);
         expect(container.textContent).not.toMatch(/Flow 3\D/);
     });
+    // Flow risk and "unresolved" flagging were removed from this asset: the
+    // risk level was a heuristic over the issue mix, and open items belong to
+    // the Decision Center, not to a read surface for the flow itself.
+    it('never renders a risk indicator or an unresolved-item count', () => {
+        const content = `### Flow: Dangerous
+**Goal:** Do the hazardous thing.
+**Steps:**
+1. [Home] — User does X → System returns 500 and cannot recover
+**Error Paths:**
+- Service returns 500 and cannot recover, hard fail
+- TBD: confirm canonical id once the feature catalog ships
+
+### Flow: Safe
+**Goal:** Do something safe.
+**Steps:**
+1. [Home] — User opens app → System renders`;
+
+        const { container } = render(<UserFlowsRenderer content={content} />);
+
+        expect(container.textContent).not.toMatch(/risk/i);
+        expect(container.textContent).not.toMatch(/unresolved/i);
+        // The TBD line is not dropped — it is counted as an ordinary edge case.
+        expect(container.textContent).toMatch(/1 edge case/);
+    });
 });

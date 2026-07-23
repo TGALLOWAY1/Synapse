@@ -28,8 +28,11 @@ type PlanningSurfaceDestination = {
 };
 
 export type PlanningArtifactRegionTarget = {
-    planId: string;
-    itemId: string;
+    /** Present when the region came from a downstream update plan. Absent for
+     * plan-less locators — e.g. a derived asset open item pointing at the flow
+     * it was scanned out of. */
+    planId?: string;
+    itemId?: string;
     label: string;
     screenId?: string;
     flowId?: string;
@@ -193,8 +196,10 @@ function isImplementationTarget(value: unknown): value is ImplementationPlanNavi
 function isRegion(value: unknown): value is PlanningArtifactRegionTarget {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as Partial<PlanningArtifactRegionTarget>;
-    return nonEmpty(candidate.planId)
-        && nonEmpty(candidate.itemId)
+    return optionalString(candidate.planId)
+        && optionalString(candidate.itemId)
+        // planId and itemId travel together or not at all.
+        && ((candidate.planId === undefined) === (candidate.itemId === undefined))
         && nonEmpty(candidate.label)
         && optionalString(candidate.screenId)
         && optionalString(candidate.flowId)

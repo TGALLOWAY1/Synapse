@@ -19,7 +19,6 @@ const KIND_ORDER: FlowIssueKind[] = [
     'edge_case',
     'validation_warning',
     'failure_mode',
-    'unresolved_reference',
 ];
 
 function splitEdgeCases(block: string): string[] {
@@ -59,7 +58,6 @@ export function IssuesPanel({
         edge_case: [],
         validation_warning: [],
         failure_mode: [],
-        unresolved_reference: [],
     };
     for (const issue of all) {
         grouped[issue.kind].push(issue);

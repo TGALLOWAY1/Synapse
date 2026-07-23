@@ -48,6 +48,32 @@ function Section({ title, children, id }: { title: string; children: React.React
     );
 }
 
+// Card + indented-subsection layout used by the sections that used to be wide
+// tables (JTBD, user flows) and by Constraints. A 5–6 column table gives every
+// column ~1/6th of the width, so prose cells wrap after two or three words and
+// the row becomes unreadable. Keeping the entity (segment / flow / group) as
+// the card heading and turning the former columns into labelled subsections
+// lets each value use the full content width.
+export function DetailCard({ title, children }: { title: string; children: React.ReactNode }) {
+    return (
+        <div className="p-4 bg-white border border-neutral-200 rounded-lg">
+            <h4 className="text-base font-bold text-neutral-900">{title}</h4>
+            <div className="mt-3 space-y-3 border-l-2 border-neutral-200 pl-4">
+                {children}
+            </div>
+        </div>
+    );
+}
+
+export function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">{label}</p>
+            <div className="text-sm text-neutral-700 leading-relaxed">{children}</div>
+        </div>
+    );
+}
+
 const tierClasses: Record<string, string> = {
     mvp: 'bg-green-100 text-green-800 border-green-300',
     v1: 'bg-blue-100 text-blue-800 border-blue-300',
@@ -106,36 +132,22 @@ export function ProductThesisSection({ thesis }: { thesis: ProductThesis }) {
 export function JtbdSection({ jtbd }: { jtbd: Jtbd[] }) {
     return (
         <Section title="Target Users & Jobs-to-be-Done" id="prd-jtbd">
-            <TableScroll>
-                <table className="w-full min-w-[720px] text-sm">
-                    <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
-                        <tr>
-                            <th className="px-3 py-2 text-left">Segment</th>
-                            <th className="px-3 py-2 text-left">Motivation</th>
-                            <th className="px-3 py-2 text-left">Job-to-be-Done</th>
-                            <th className="px-3 py-2 text-left">Pain Points</th>
-                            <th className="px-3 py-2 text-left">Success Moment</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-100">
-                        {jtbd.map((j, i) => (
-                            <tr key={i}>
-                                <td className="px-3 py-2 font-semibold text-neutral-800 align-top">{j.segment}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{j.motivation}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{j.job}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">
-                                    {j.painPoints?.length ? (
-                                        <ul className="list-disc pl-4 space-y-0.5">
-                                            {j.painPoints.map((p, k) => <li key={k}>{p}</li>)}
-                                        </ul>
-                                    ) : '—'}
-                                </td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{j.successMoment}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </TableScroll>
+            <div className="space-y-3">
+                {jtbd.map((j, i) => (
+                    <DetailCard key={i} title={j.segment}>
+                        {j.motivation && <DetailField label="Motivation">{j.motivation}</DetailField>}
+                        {j.job && <DetailField label="Job-to-be-Done">{j.job}</DetailField>}
+                        {j.painPoints?.length ? (
+                            <DetailField label="Pain Points">
+                                <ul className="list-disc pl-4 space-y-1">
+                                    {j.painPoints.map((p, k) => <li key={k}>{p}</li>)}
+                                </ul>
+                            </DetailField>
+                        ) : null}
+                        {j.successMoment && <DetailField label="Success Moment">{j.successMoment}</DetailField>}
+                    </DetailCard>
+                ))}
+            </div>
         </Section>
     );
 }
@@ -157,33 +169,18 @@ export function PrinciplesSection({ principles }: { principles: Principle[] }) {
 
 export function UserLoopsSection({ loops }: { loops: UserLoop[] }) {
     return (
-        <Section title="Core User Loops" id="prd-user-loops">
-            <TableScroll>
-                <table className="w-full min-w-[840px] text-sm">
-                    <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
-                        <tr>
-                            <th className="px-3 py-2 text-left">Loop</th>
-                            <th className="px-3 py-2 text-left">Trigger</th>
-                            <th className="px-3 py-2 text-left">Action</th>
-                            <th className="px-3 py-2 text-left">System Response</th>
-                            <th className="px-3 py-2 text-left">Reward</th>
-                            <th className="px-3 py-2 text-left">Retention</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-100">
-                        {loops.map((l, i) => (
-                            <tr key={i}>
-                                <td className="px-3 py-2 font-semibold text-neutral-800 align-top">{l.name}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{l.trigger}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{l.action}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{l.systemResponse}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{l.reward}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{l.retentionMechanic}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </TableScroll>
+        <Section title="Core User Flows" id="prd-user-loops">
+            <div className="space-y-3">
+                {loops.map((l, i) => (
+                    <DetailCard key={i} title={l.name}>
+                        {l.trigger && <DetailField label="Trigger">{l.trigger}</DetailField>}
+                        {l.action && <DetailField label="Action">{l.action}</DetailField>}
+                        {l.systemResponse && <DetailField label="System Response">{l.systemResponse}</DetailField>}
+                        {l.reward && <DetailField label="Reward">{l.reward}</DetailField>}
+                        {l.retentionMechanic && <DetailField label="Retention">{l.retentionMechanic}</DetailField>}
+                    </DetailCard>
+                ))}
+            </div>
         </Section>
     );
 }

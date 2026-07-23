@@ -55,7 +55,7 @@ describe('parseFlows — entry points vs preconditions', () => {
     });
 });
 
-describe('parseFlows — assumptions / open questions / risk', () => {
+describe('parseFlows — assumptions / open questions', () => {
     it('parses `**Assumptions:**` and `**Open Questions:**` sections', () => {
         const md = `### Flow: Recovery
 **Steps:**
@@ -68,34 +68,5 @@ describe('parseFlows — assumptions / open questions / risk', () => {
         const flow = parseFlows(md)[0];
         expect(flow.assumptions).toMatch(/Service Worker/);
         expect(flow.openQuestions).toMatch(/changes devices/);
-    });
-
-    it('assigns a high-risk label when failure modes or unresolved refs exist', () => {
-        const md = `### Flow: Dangerous
-**Steps:**
-1. [Home] — User does X → System returns 500 and cannot recover
-**Error Paths:**
-- Service returns 500 and cannot recover, hard fail
-- TBD: confirm canonical id once feature catalog ships`;
-        const flow = parseFlows(md)[0];
-        expect(flow.risk).toBe('high');
-    });
-
-    it('assigns a medium-risk label when only alternate paths or edge cases exist', () => {
-        const md = `### Flow: Reasonable
-**Steps:**
-1. [Home] — User opens app → System loads
-**Error Paths:**
-- Network timeout → retry with backoff`;
-        const flow = parseFlows(md)[0];
-        expect(flow.risk).toBe('medium');
-    });
-
-    it('assigns a low-risk label when no issues are present', () => {
-        const md = `### Flow: Safe
-**Steps:**
-1. [Home] — User opens app → System renders`;
-        const flow = parseFlows(md)[0];
-        expect(flow.risk).toBe('low');
     });
 });
