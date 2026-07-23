@@ -2489,6 +2489,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                                                 onReviewReadiness={openCurrentReadinessCheckpoint}
                                                                 onOpenDecisions={() => openDecisionCenter(undefined, planReturnTarget)}
                                                                 onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
+                                                                onOpenFeatures={() => setPrdView('features')}
                                                                 answerableCount={answerableAssumptions.length}
                                                                 onStartSharpen={canEditPlan && answerableAssumptions.length > 0
                                                                     ? () => setSharpenQueueIds(answerableAssumptions.map(record => record.id))
