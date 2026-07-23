@@ -20,7 +20,7 @@ export manifest. **Nothing in the system deletes history**, and that invariant
 is worth protecting in everything below.
 
 But measured against the question "can a user *reliably* get back to a
-previous good state?", the audit found five load-bearing defects:
+previous good state?", the audit found six load-bearing defects:
 
 1. **Overlay edits are destructive and invisible to versioning.** Screen
    edits/deletions, extra screens, prompt edits, and plan progress mutate the
@@ -47,6 +47,12 @@ previous good state?", the audit found five load-bearing defects:
    (content-aware) says `aligned`. The revert confirmation warns that a
    content-identical restore "may invalidate" every artifact. Users cannot
    trust warnings that are sometimes false.
+6. **Restoring a mockup loses its images.** Rendered images are keyed by
+   artifact version id in IndexedDB with no fallback chain, and every
+   restore/mark-current appends a clone under a fresh id — so the restored
+   version's screens come up image-less. Any new clone-appending mechanism
+   (including overlay versioning) inherits this unless image continuity is
+   solved first (§4.8).
 
 The proposal keeps the shipped model — append-only snapshots, opaque ids,
 positional labels, `sourceRefs` lineage — and adds four capabilities on top:
@@ -146,6 +152,22 @@ conflict or, if it wins, replaces the other device's bundle; "Use cloud"
 resolution discards the local device's entire version history. No per-version
 merge exists (and building one is out of scope) — but conflict resolution
 currently offers no restore point to fall back on.
+
+**D9 (P1) — Append-clones orphan per-version images today.** Mockup,
+screen-inventory, and mockup-variant images live in IndexedDB keyed
+`versionId:screenId:quality` (mockupImageStore.ts:31-39), and viewers resolve
+strictly by the displayed version's id with no fallback chain
+(`MockupScreenImage.tsx:56`). `revertArtifactToVersion` and
+`markArtifactCurrentForSpine` mint new version ids without copying or
+aliasing image records — so restoring (or confirming-current) a mockup
+version yields a preferred version whose screens render **image-less**,
+degrading to the per-screen generate/upload state. The Screens architecture
+already works around exactly this for coverage: `extraScreens` was made an
+overlay *because* "appending a version would orphan every existing render"
+(SCREENS_EXPERIENCE.md, mockup-coverage rule). Any mechanism in this
+proposal that appends clones of image-bearing versions — overlay versioning,
+artifact restore, mark-current, checkpoint restore — must solve image
+continuity first (§4.8), and the fix also repairs today's restore behavior.
 
 ### 2.3 Usability gaps
 
@@ -294,7 +316,12 @@ branch:
 
 Storage cost is modest: overlay-bearing artifacts are text; amend-coalescing
 bounds version count; quota behavior is unchanged (and §9 R5 addresses the
-growth curve).
+growth curve). **Prerequisite:** for image-bearing artifacts (mockups —
+including `extraScreens` — screen inventory, variants), overlay appends
+depend on the image-continuity indirection in §4.8; without it, every
+appended version would orphan its renders (the exact reason
+SCREENS_EXPERIENCE.md currently forbids appending a version for mockup
+coverage).
 
 ### 4.2 Naming and labels
 
@@ -475,6 +502,40 @@ there's a restore point and the existing recovery download), and include
 checkpoints in `ALL_PROJECT_COLLECTIONS` so they travel. Per-version merge of
 diverged bundles stays out of scope.
 
+### 4.8 Image continuity across append-clones (fixes D9)
+
+Every mechanism above that appends a clone of an image-bearing version
+(mockup, screen inventory, mockup variants) must keep that version's rendered
+images reachable. Copying 1–3 MB IndexedDB records per clone would multiply
+storage; instead, add **read-time indirection**:
+
+- New optional `metadata.imageSourceVersionId` on `ArtifactVersion`, stamped
+  by every clone-appending action (`revertArtifactToVersion`,
+  `markArtifactCurrentForSpine`, overlay appends, checkpoint restores) with
+  the id whose images the clone inherits — the source version's own
+  `imageSourceVersionId` if set (chains collapse to the origin at write time,
+  so lookup is always one hop), else the source version's id.
+- Image consumers (`MockupScreenImage`, screen-inventory and variant
+  viewers) resolve the **effective image version id**
+  (`metadata.imageSourceVersionId ?? version.id`) before building keys. New
+  generations on a clone write under the clone's own id and shadow inherited
+  records per screen/quality (read own-id first, then inherited).
+- The image **sync collector** (`projectImageSync.ts`) and **snapshot
+  collectors** (`snapshotClient.ts`) already iterate all versions, and
+  records live once under the origin id, so captured sets stay complete
+  without duplication; the demo restore id-remap must rewrite
+  `imageSourceVersionId` alongside version ids (same remap pass).
+- `extraScreens` keeps its documented rationale satisfied: with indirection,
+  the overlay-append path no longer orphans renders, so it can join overlay
+  versioning (§4.1) instead of being excluded from it. The SCREENS_EXPERIENCE
+  "never a new ArtifactVersion" rule for mockup coverage is superseded by
+  this mechanism and must be updated in the same change that lands it.
+- Future image GC (the existing TODO) must treat a version's images as live
+  while any version's `imageSourceVersionId` points at it.
+
+This is a prerequisite inside R1 (overlay versioning would otherwise regress
+mockups) and independently fixes today's image-less mockup restores (D9).
+
 ---
 
 ## 5. Critical user flows (target behavior)
@@ -555,6 +616,7 @@ All additive and optional; zero migrations; legacy projects load unchanged.
 | `updateArtifactOverlay` store action | `artifactSlice` | Append-or-amend per §4.1; all reads inside `set()` (rule 1); existing `updateArtifactVersionMetadata` becomes internal. |
 | `restoreProjectCheckpoint` store action | new slice / `projectSlice` | One transaction per §4.5; stamps `changeSource: 'revert'` on every appended version (rule 11). |
 | Overlay policy param on `revertArtifactToVersion` | `artifactSlice` | Default keep-current-overlays (merge). |
+| `metadata.imageSourceVersionId?: string` + effective-image-id resolution | types; clone-appending actions in `artifactSlice`; `MockupScreenImage` / screen-inventory / variant viewers; demo-restore id remap in `snapshotClient` | §4.8. One-hop chain (collapsed at write time); image stores and sync/snapshot collectors unchanged; SCREENS_EXPERIENCE.md coverage rule updated in the same change. |
 | `HistoryEventType` += `ProjectRestored`, `CheckpointCreated` | types + emitters + `HistoryView`/timeline config maps | |
 | Alignment-driven presentation for badges/warnings | `FreshnessBadge`, `ProjectWorkspace.getStaleArtifactTitles`, `ExportModal` | Consumes existing `getProjectOutputAlignment`; engine untouched. |
 | Planner wiring | `ProjectWorkspace` (restore + re-commit edges), `UpdateAssetsPlanModal` (already built) | Plus `asOfSpineId` goes live; docs drift in `VERSIONING_AND_EXPORT.md` / `VERSIONING_V2_PLAN.md` corrected in the same change. |
@@ -574,6 +636,7 @@ a second freshness engine, server-side per-version storage.
 | **The re-commit edge is load-bearing** (safety gate, incomplete-PRD gate, design-preset gate ordering) | Planner slots in *after* existing gates, exactly where `startAll` fires; regression tests on gate ordering; fallback flag to plain `startAll`. |
 | **Overlay amend-coalescing loses intermediate states** | Destructive ops always append; amend only on unreferenced overlay-edit versions (precedented guard); session-bounded. |
 | **Checkpoint restore mid-generation** | Disable restore while a generation job is active (same guard other structural actions use). |
+| **Image indirection misses a consumer** — a viewer, exporter, or sync path that builds `versionId:` keys directly would still see clones as image-less | Single shared resolver (`effectiveImageVersionId(version)`) used by all key builders; unit test that every clone-appending store action stamps `imageSourceVersionId`; the demo-restore remap round-trip test covers the rewritten field. |
 | **Vocabulary unification regressing the "advisory never suppresses hard states" rule** | Presentation layer only; engine statuses unchanged; the existing tests for that rule stay green and gain the new badge-consumer cases. |
 | **Demo/snapshot id remapping for checkpoints** (id-maps reference version ids that get remapped on demo restore) | Reuse the existing `rewriteIds`/version-remap machinery in `snapshotClient`; test the remap round trip. |
 | **User confusion: "restore created Version 9"** | Consistent copy + provenance badges + grouped `ProjectRestored` event; undo toast makes the model safe to explore. |
@@ -587,12 +650,14 @@ Each phase is independently shippable, `npm run build`/`lint`/`test` gated,
 and updates the affected `docs/architecture/*` topic docs + README (rule:
 restore points and the planner are README-worthy) in the same change.
 
-### R1 — Stop the silent data loss (P0, small)
-Overlay versioning (`updateArtifactOverlay`, append-or-amend, destructive ops
+### R1 — Stop the silent data loss (P0, small–medium)
+**Image continuity first** (`imageSourceVersionId` + shared effective-id
+resolver, §4.8 — also fixes today's image-less mockup restores, D9); then
+overlay versioning (`updateArtifactOverlay`, append-or-amend, destructive ops
 always append), history events for all overlay writes, overlay-preserving
 artifact restore (default "Keep my edits" + opt-in old-overlays), artifact
 restore confirm gains the overlay choice. Store + types + focused tests; no
-new collections. *This alone fixes S1 (screens) and S5.*
+new collections. *This alone fixes S1 (screens), S5, and D9.*
 
 ### R2 — Truthful restore + the planner (P1, medium)
 Wire the dormant planner at the PRD-restore and plan-re-commit edges
@@ -656,3 +721,7 @@ needed, defer R4's structured diffs before anything in R1–R3.
 - Sync LWW/conflict: `api/projects.js:242-259`,
   `src/store/projectServerSync.ts:186-207,611-645`,
   `projectBundle.ts:174-202`.
+- Image keying/orphaning (D9): `src/lib/mockupImageStore.ts:31-39`,
+  `src/components/mockups/MockupScreenImage.tsx:56` (no fallback chain),
+  `docs/architecture/SCREENS_EXPERIENCE.md` mockup-coverage rule
+  ("appending a version would orphan every existing render").
