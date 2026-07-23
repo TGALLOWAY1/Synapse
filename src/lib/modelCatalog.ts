@@ -18,8 +18,8 @@ export interface ModelOption {
 
 export const MODEL_CATALOG: ModelOption[] = [
     {
-        id: 'gemini-3.5-flash',
-        name: 'Gemini 3.5 Flash',
+        id: 'gemini-3.6-flash',
+        name: 'Gemini 3.6 Flash',
         description: 'Recommended default. Latest GA Flash — frontier-class quality with full quotas.',
         tier: 'current',
     },
@@ -36,9 +36,15 @@ export const MODEL_CATALOG: ModelOption[] = [
         tier: 'current',
     },
     {
+        id: 'gemini-3.5-flash',
+        name: 'Gemini 3.5 Flash',
+        description: 'Previous-generation GA Flash — superseded by 3.6 Flash.',
+        tier: 'legacy',
+    },
+    {
         id: 'gemini-3-flash-preview',
         name: 'Gemini 3 Flash',
-        description: 'Previous-generation Flash preview — prefer 3.5 Flash, which is GA.',
+        description: 'Previous-generation Flash preview — prefer 3.6 Flash, which is GA.',
         tier: 'legacy',
     },
     {
@@ -50,7 +56,7 @@ export const MODEL_CATALOG: ModelOption[] = [
     {
         id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
-        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3.5 Flash.',
+        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3.6 Flash.',
         tier: 'legacy',
     },
 ];

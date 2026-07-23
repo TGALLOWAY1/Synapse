@@ -5,12 +5,24 @@
 ### PRD highlight → branch selection pipeline
 
 The core PRD-refinement gesture — highlight PRD text, get a contextual
-action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
-a history-tracked branch — is detection-source-agnostic and works on
+action dialog (Clarify / Expand / Specify / Alternative / Replace / Critique),
+spawn a history-tracked branch — is detection-source-agnostic and works on
 both desktop and touch. The selection pipeline now has a single consumer,
 `StructuredPRDView.tsx` (the structured PRD renderer); legacy spines with no
 `structuredPRD` render as read-only markdown with no selection/branch UI. Do
 not reintroduce per-component `onMouseUp` selection logic.
+
+- **`src/lib/prdEditActions.ts`** — the edit-action **registry**, the single
+  source of truth for the actions. Each `PrdEditAction` carries an `id`,
+  `label`, `icon`, inline `helper`, a **specialized `systemPrompt`**, and a
+  `mode` (`'chat' | 'draft'`). The actions are no longer cosmetic prefixes:
+  `branchService.replyInBranch` selects the system prompt by action id (derived
+  from the intent's `"<Label>: "` prefix when not passed explicitly), so
+  Specify returns acceptance criteria, Alternative returns tradeoff-structured
+  options, Critique stress-tests the passage, etc. `SelectionActionDialog.tsx`
+  and `intentHelper.tsx` derive their chips/hints from this registry; the tour
+  (`src/components/tour/`) keeps its own demo scripts and demos a subset. The
+  per-action prompts are snapshot-locked in `promptSurfaces.test.ts`.
 
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
@@ -54,9 +66,10 @@ not reintroduce per-component `onMouseUp` selection logic.
   - **Desktop popover sizing/layout.** The popover is `480×280`
     (`POPOVER_SIZE` + the `w-[480px]` class; `computePopoverPosition` is
     unchanged — same above-preferred / viewport-clamp math, just fed the
-    larger size). The five action chips (`SELECTION_ACTIONS` —
-    Clarify / Expand / Specify / Alternative / Replace) render in a single
-    `flex flex-nowrap` row (each `flex-1`), still prefilling the intent as
+    larger size). The action chips (derived from `PRD_EDIT_ACTIONS` —
+    Clarify / Expand / Specify / Alternative / Replace / Critique, each with an
+    icon) render in a `flex flex-wrap` row (each `flex-1 basis-[30%]`, so six
+    chips wrap to two rows), still prefilling the intent as
     `"<tag>: "` and reflecting the active tag via `aria-pressed`. The intent
     field is a `rows={3}` **`<textarea autoFocus>`** inside a `flex flex-col`
     form with a footer row (keyboard hint left, Branch button right):

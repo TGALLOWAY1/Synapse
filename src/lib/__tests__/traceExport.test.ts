@@ -6,7 +6,7 @@ const call: LlmTraceCall = {
     id: 'a',
     createdAt: 1000,
     provider: 'gemini',
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.6-flash',
     mode: 'json',
     status: 'success',
     startedAt: 1000,
@@ -15,7 +15,7 @@ const call: LlmTraceCall = {
     systemInstruction: 'You are a PRD writer.',
     promptText: 'Generate the Features section.',
     messages: [],
-    requestBody: '{"model":"gemini-3.5-flash"}',
+    requestBody: '{"model":"gemini-3.6-flash"}',
     requestUrl: 'https://generativelanguage.googleapis.com',
     rawResponse: '{"features":[]}',
     parsedJson: { features: [] },
@@ -30,7 +30,7 @@ describe('buildTraceHtmlReport', () => {
         const html = buildTraceHtmlReport([call]);
         expect(html.startsWith('<!doctype html>')).toBe(true);
         expect(html).toContain('Generate Features');
-        expect(html).toContain('gemini-3.5-flash');
+        expect(html).toContain('gemini-3.6-flash');
         expect(html).toContain('You are a PRD writer.');
         expect(html).toContain('Generate the Features section.');
         // No external resource references (works offline).

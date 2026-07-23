@@ -9,7 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { toPreflightContext } from '../lib/llmProvider';
+import { toPreflightContext, consolidateBranch } from '../lib/llmProvider';
 import { runPrdGeneration } from '../lib/runPrdGeneration';
 import { normalizeError } from '../lib/errors';
 import { ProgressTimeline } from './progress/ProgressTimeline';
@@ -18,6 +18,7 @@ import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
 import { summarizeConsistencyReview } from '../lib/services/prdConsistencyReview';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
+import { StagedEditsReviewModal } from './StagedEditsReviewModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
@@ -298,6 +299,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
+    // Staged-edits (batch consolidation) review overlay.
+    const [showStagedReview, setShowStagedReview] = useState(false);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
     // PRD version-history UI: the full panel, plus the banner's standalone
     // compare/restore against the latest version.
@@ -1426,6 +1429,18 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         openCurrentReadinessCheckpoint();
     };
 
+    // Stage a branch for batch consolidation: generate its local patch now and
+    // hold it on the branch ('resolved') so several edits can be reviewed and
+    // applied together as one spine version. Throws on failure — the caller
+    // (BranchList) surfaces a toast.
+    const handleStageBranch = async (branch: Branch) => {
+        if (!projectId || !latestSpine || !canPerformProjectAction(projectId, 'persist')) return;
+        const res = await consolidateBranch(latestSpine.responseText, branch, 'local');
+        const patch = res.localPatch?.trim();
+        if (!patch) throw new Error('The model did not return a concrete replacement to stage. Continue the conversation and try again.');
+        useProjectStore.getState().stageBranch(projectId, branch.id, patch);
+    };
+
     const startAssetGeneration = () => {
         if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return;
         artifactJobController.startAll({
@@ -2331,6 +2346,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                         spineVersionId={latestSpine.id}
                                         onConsolidate={(branch) => setConsolidatingBranch(branch)}
                                         onCanvasOpen={(branchId) => setActiveCanvasBranchId(branchId)}
+                                        onStage={handleStageBranch}
+                                        onReviewStaged={() => setShowStagedReview(true)}
                                     />
                                 ) : (
                                     <div className="text-sm text-neutral-500 p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4 flex items-center justify-center gap-2">
@@ -2393,6 +2410,14 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     spineText={latestSpine.responseText}
                     structuredPRD={latestSpine.structuredPRD}
                     onClose={() => setConsolidatingBranch(null)}
+                />
+            )}
+
+            {showStagedReview && latestSpine && (
+                <StagedEditsReviewModal
+                    projectId={projectId}
+                    spineVersionId={latestSpine.id}
+                    onClose={() => setShowStagedReview(false)}
                 />
             )}
 

@@ -1,4 +1,5 @@
 import { callGemini } from '../geminiClient';
+import { getActionFromIntent, getPrdEditAction, type PrdEditActionId } from '../prdEditActions';
 
 export interface ConsolidationResult {
     localPatch?: string;
@@ -47,10 +48,28 @@ export const consolidateBranch = async (
     }
 };
 
+/** Generic fallback prompt for free-text intents with no recognized action. */
+const GENERIC_BRANCH_SYSTEM = (anchorText: string) =>
+    `You are a senior product manager helping a user refine a PRD. The user has selected the text: "${anchorText}". Respond to their intent concisely and precisely, using formal, professional language and avoiding hedging. If they request a change, provide a "Suggested replacement for selected text:" block.`;
+
 export const replyInBranch = async (
-    context: { anchorText: string, intent: string, threadHistory: { role: string; content: string }[] }
+    context: {
+        anchorText: string,
+        intent: string,
+        threadHistory: { role: string; content: string }[],
+        /** Explicit action; when omitted it is derived from the intent prefix. */
+        actionId?: PrdEditActionId,
+    }
 ): Promise<string> => {
-    const system = `You are a senior product manager helping a user refine a PRD. The user has selected the text: "${context.anchorText}". Respond to their intent concisely and precisely, using formal, professional language and avoiding hedging. If they request a change, provide a "Suggested replacement for selected text:" block.`;
+    // Prefer an explicit action id; otherwise recover it from the intent's
+    // `"<Label>: "` prefix (the initial branch message carries it). A follow-up
+    // reply with no prefix and no id falls back to the generic prompt.
+    const action = context.actionId
+        ? getPrdEditAction(context.actionId)
+        : getActionFromIntent(context.intent);
+    const system = action
+        ? `${action.systemPrompt}\n\nThe user has selected the text: "${context.anchorText}".`
+        : GENERIC_BRANCH_SYSTEM(context.anchorText);
 
     let promptText = `Thread History:\n`;
     if (context.threadHistory && context.threadHistory.length > 0) {

@@ -201,11 +201,15 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               ↓
   PRD stage:       StructuredPRDView (the only interactive view; legacy spines
                    with no structuredPRD render as read-only ReactMarkdown with
-                   no selection/branch UI) — text selection →
-                   branch creation → AI conversation → consolidateBranch()
-                   merges into spine (local or doc-wide scope, see
-                   ConsolidationModal). Selection → action dialog runs
-                   through the shared touch-aware pipeline (see
+                   no selection/branch UI) — text selection → action dialog
+                   (specialized actions from the src/lib/prdEditActions.ts
+                   registry) → branch creation → AI conversation →
+                   consolidateBranch() merges into spine (local patch; doc-wide
+                   only for legacy markdown spines, see ConsolidationModal).
+                   Edits can also be *staged* and applied together as one
+                   version via StagedEditsReviewModal (with an advisory
+                   pre-commit critique). Selection → action dialog runs through
+                   the shared touch-aware pipeline (see
                    docs/architecture/UI_PATTERNS.md).
   Build stage:     ArtifactWorkspace (exploratory or committed outputs; bundle/
                    individual gen, refine, validate)
