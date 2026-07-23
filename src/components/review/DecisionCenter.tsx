@@ -315,6 +315,27 @@ export function DecisionCenter({
             setAnswerChoice(undefined);
         }
     }
+    // The center can mount before its store-backed planning records hydrate, so
+    // `records` is briefly empty and the initializer above picks the true-empty
+    // default ('needs_review' = "all caught up"). The `useState` initializer
+    // never re-runs and the initialSelectedId sync only fires on an id *change*,
+    // so once real records arrive we re-derive the default ONCE here — otherwise
+    // an all-resolved history (or a resolved `initialSelectedId`) would be
+    // stranded behind the log tab. Guarded by `awaitingFirstRecords` so a user's
+    // own later tab choice is never overridden, and so a genuinely empty center
+    // keeps the true-empty default.
+    const [awaitingFirstRecords, setAwaitingFirstRecords] = useState(records.length === 0);
+    if (awaitingFirstRecords && records.length > 0) {
+        setAwaitingFirstRecords(false);
+        const hydratedInitial = initialSelectedId ? records.find(record => record.id === initialSelectedId) : undefined;
+        if (hydratedInitial) {
+            setView(needsVerdict(hydratedInitial) ? 'needs_review' : 'log');
+            setSelectedId(hydratedInitial.id);
+            setMobileDetailOpen(true);
+        } else if (!records.some(needsVerdict)) {
+            setView('log');
+        }
+    }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const correctionTextareaRef = useRef<HTMLTextAreaElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
