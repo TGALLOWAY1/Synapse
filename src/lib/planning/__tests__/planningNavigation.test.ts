@@ -96,6 +96,38 @@ describe('planning navigation presentation contract', () => {
         }))).toBeUndefined();
     });
 
+    it('rejects update-plan identity fields on screen destinations', () => {
+        for (const forbidden of [
+            { planId: 'plan-1' },
+            { itemId: 'item-1' },
+        ]) {
+            expect(parsePlanningNavigationIntent(JSON.stringify({
+                destination: {
+                    kind: 'screen',
+                    nodeId: 'screen_inventory',
+                    screenId: 'scr-checkout',
+                    label: 'Checkout',
+                    ...forbidden,
+                },
+            }))).toBeUndefined();
+        }
+    });
+
+    it('rejects artifact and update-plan identity fields on workspace and history destinations', () => {
+        for (const kind of ['workspace', 'history']) {
+            for (const forbidden of [
+                { artifactId: 'artifact-screens' },
+                { nodeId: 'screen_inventory' },
+                { planId: 'plan-1' },
+                { itemId: 'item-1' },
+            ]) {
+                expect(parsePlanningNavigationIntent(JSON.stringify({
+                    destination: { kind, ...forbidden },
+                }))).toBeUndefined();
+            }
+        }
+    });
+
     it('rejects malformed, overlong, and unknown targets', () => {
         expect(parsePlanningNavigationIntent('{not-json')).toBeUndefined();
         expect(parsePlanningNavigationIntent(JSON.stringify({ destination: { kind: 'authority_override' } }))).toBeUndefined();
@@ -161,13 +193,40 @@ describe('planning navigation presentation contract', () => {
     });
 
     it('maps destinations to active planning stages', () => {
-        expect(planningStageForDestination({ kind: 'readiness', reviewId: 'review-1' })).toBe('prd');
-        expect(planningStageForDestination({ kind: 'planning_record', recordId: 'decision-1' })).toBe('review');
-        expect(planningStageForDestination({ kind: 'history' })).toBe('history');
-        expect(planningStageForDestination({ kind: 'artifact', nodeId: 'screen_inventory' })).toBe('workspace');
+        const cases = [
+            [{ kind: 'prd' }, 'prd'],
+            [{ kind: 'readiness', reviewId: 'review-1' }, 'prd'],
+            [{ kind: 'decision_center' }, 'review'],
+            [{ kind: 'planning_record', recordId: 'decision-1' }, 'review'],
+            [{ kind: 'challenge' }, 'review'],
+            [{ kind: 'screen', nodeId: 'screen_inventory', screenId: 'scr-checkout', label: 'Checkout' }, 'workspace'],
+            [{ kind: 'workspace' }, 'workspace'],
+            [{ kind: 'artifact', nodeId: 'screen_inventory' }, 'workspace'],
+            [{ kind: 'update_plan', planId: 'plan-1' }, 'workspace'],
+            [{ kind: 'history' }, 'history'],
+        ] as const;
+
+        for (const [destination, expected] of cases) {
+            expect(planningStageForDestination(destination)).toBe(expected);
+        }
     });
 
-    it('builds return targets for current presentation stages and exact workspace screens', () => {
+    it('builds return targets for every pipeline stage', () => {
+        const cases = [
+            ['prd', { destination: { kind: 'prd' }, label: 'Back to Plan' }],
+            ['review', { destination: { kind: 'challenge' }, label: 'Back to Challenge' }],
+            ['workspace', { destination: { kind: 'workspace' }, label: 'Back to Build' }],
+            ['mockups', { destination: { kind: 'workspace' }, label: 'Back to Build' }],
+            ['artifacts', { destination: { kind: 'workspace' }, label: 'Back to Build' }],
+            ['history', { destination: { kind: 'history' }, label: 'Back to History' }],
+        ] as const;
+
+        for (const [stage, expected] of cases) {
+            expect(planningReturnTargetForSurface({ stage })).toEqual(expected);
+        }
+    });
+
+    it('builds exact workspace screen return targets', () => {
         const screen: Omit<PlanningScreenDestination, 'kind'> = {
             artifactId: 'artifact-screens',
             nodeId: 'screen_inventory',
@@ -176,25 +235,23 @@ describe('planning navigation presentation contract', () => {
             label: 'Checkout · Flow',
         };
 
-        expect(planningReturnTargetForSurface({ stage: 'prd' })).toEqual({
-            destination: { kind: 'prd' },
-            label: 'Back to Plan',
-        });
-        expect(planningReturnTargetForSurface({ stage: 'review' })).toEqual({
-            destination: { kind: 'challenge' },
-            label: 'Back to Challenge',
-        });
-        expect(planningReturnTargetForSurface({ stage: 'workspace' })).toEqual({
-            destination: { kind: 'workspace' },
-            label: 'Back to Build',
-        });
-        expect(planningReturnTargetForSurface({ stage: 'history' })).toEqual({
-            destination: { kind: 'history' },
-            label: 'Back to History',
-        });
         expect(planningReturnTargetForSurface({ stage: 'workspace', screen })).toEqual({
             destination: { kind: 'screen', ...screen },
             label: 'Back to Checkout · Flow',
+        });
+    });
+
+    it('owns the screen discriminator when runtime input carries a conflicting kind', () => {
+        const screen = {
+            kind: 'history',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            label: 'Checkout',
+        } as unknown as Omit<PlanningScreenDestination, 'kind'>;
+
+        expect(planningReturnTargetForSurface({ stage: 'workspace', screen })).toEqual({
+            destination: { ...screen, kind: 'screen' },
+            label: 'Back to Checkout',
         });
     });
 });

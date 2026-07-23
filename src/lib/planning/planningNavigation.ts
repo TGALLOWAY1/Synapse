@@ -106,6 +106,8 @@ function isPlanningScreenDestination(value: unknown): value is PlanningScreenDes
         && nonEmpty(candidate.screenId)
         && (candidate.tab === undefined || isPlanningScreenTab(candidate.tab))
         && nonEmpty(candidate.label)
+        && candidate.planId === undefined
+        && candidate.itemId === undefined
         && Boolean(candidate.artifactId || candidate.nodeId);
 }
 
@@ -153,7 +155,12 @@ export function isPlanningDestination(value: unknown): value is PlanningDestinat
         return nonEmpty(candidate.reviewId) && optionalString(candidate.concernId);
     }
     if (candidate.kind === 'screen') return isPlanningScreenDestination(candidate);
-    if (candidate.kind === 'workspace' || candidate.kind === 'history') return true;
+    if (candidate.kind === 'workspace' || candidate.kind === 'history') {
+        return candidate.artifactId === undefined
+            && candidate.nodeId === undefined
+            && candidate.planId === undefined
+            && candidate.itemId === undefined;
+    }
     if (candidate.kind === 'artifact') {
         return optionalString(candidate.artifactId)
             && (candidate.nodeId === undefined || isArtifactSlotKey(candidate.nodeId))
@@ -284,7 +291,7 @@ export function planningReturnTargetForSurface({
     screen?: Omit<PlanningScreenDestination, 'kind'>;
 }): PlanningReturnTarget {
     if (stage === 'workspace' && screen) {
-        return { destination: { kind: 'screen', ...screen }, label: `Back to ${screen.label}` };
+        return { destination: { ...screen, kind: 'screen' }, label: `Back to ${screen.label}` };
     }
     if (stage === 'review') {
         return { destination: { kind: 'challenge' }, label: 'Back to Challenge' };
