@@ -233,7 +233,10 @@ update the script in the same change (treat drift here like docs drift):
   Define + the PlanningStateBar's `Challenge this plan` button; the
   Decision Center and Project history are slide-overs behind the top-bar
   `More actions` overflow menu (`Decision Center` / `Project History`
-  entries, `Close Decision Center` / `Close project history` buttons).
+  entries, `Close Decision Center` / `Close project history` buttons). The
+  `More actions` lookup is scoped to the top-bar `<header>` banner landmark —
+  `FlowSummaryCard` renders its own `More actions` button, so an unscoped
+  match is a strict-mode violation whenever User Flows is on screen.
 - PRD tabs: `#prd-tab-overview|features` ids in
   `src/components/prd/PrdViewTabs.tsx`; the PRD content panel id prefix
   `prd-panel-` (used for programmatic selection in `--interactions`).

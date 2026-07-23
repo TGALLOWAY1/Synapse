@@ -1811,8 +1811,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     return (
         <div className="flex h-screen flex-col overflow-x-hidden bg-neutral-900 text-neutral-100">
 
-            {/* Top Navigation Bar — shrink-0, no absolute */}
-            <div className="shrink-0 h-14 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-10">
+            {/* Top Navigation Bar — shrink-0, no absolute. A <header> (banner
+                landmark) so assistive tech and the e2e driver can target its
+                controls unambiguously. */}
+            <header className="shrink-0 h-14 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-10">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                     <button
                         onClick={() => navigate('/')}
@@ -1983,7 +1985,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         )}
                     </div>
                 </div>
-            </div>
+            </header>
 
             {selectedReadinessView && (
                 <ReadinessCheckpoint

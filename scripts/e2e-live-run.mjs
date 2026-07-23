@@ -449,8 +449,11 @@ async function gotoStage(page, stage) {
 }
 
 // Open an entry of the top-bar "More actions" overflow menu (portaled).
+// Scoped to the top-bar banner landmark: FlowSummaryCard renders its own
+// "More actions" button, so an unscoped lookup is a strict-mode violation
+// whenever the User Flows view is on screen.
 async function openOverflowMenuItem(page, label) {
-    await page.getByRole('button', { name: 'More actions' }).click({ timeout: 6000 });
+    await page.getByRole('banner').getByRole('button', { name: 'More actions' }).click({ timeout: 6000 });
     await settle(300);
     await page.getByRole('menu').getByRole('button', { name: label }).click({ timeout: 6000 });
     await settle(800);
@@ -874,7 +877,7 @@ try {
         await step('open replayed project from state dump', async () => {
             await page.goto(`${BASE_URL}/p/${stateBundle.projectId}`, { waitUntil: 'domcontentloaded' });
             try {
-                await page.getByRole('navigation', { name: 'Planning progression' })
+                await page.getByRole('navigation', { name: 'Product journey' })
                     .waitFor({ timeout: 30_000 });
             } catch {
                 // The both-keys seeding contract is supposed to make the first
