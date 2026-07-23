@@ -4,7 +4,17 @@
 > staleness (`spineChangeAnalysis.ts`), the Update Assets plan dialog at
 > re-finalize, `markArtifactCurrentForSpine`, provenance completion,
 > overlay-edit history events, and the export version manifest. Phases B/C and
-> the deferred list remain unbuilt. Implementation notes deviating from this
+> the deferred list remain unbuilt.
+> **Status correction (2026-07-23):** the Update Assets plan dialog is no
+> longer wired — the finalize path became the readiness-commitment flow
+> (`commitReadinessReview` → `startAssetGeneration` → `startAll`), and
+> `UpdateAssetsPlanModal` / `asOfSpineId` /
+> `expandSelectionWithTroubledUpstreams` now have test-only call sites. See
+> `docs/VERSIONING_V3_RESTORE_PROPOSAL.md` §2.4, which proposes re-wiring
+> them at the restore and re-commit edges.
+> **Superseded for the next increment by
+> `docs/VERSIONING_V3_RESTORE_PROPOSAL.md`** (restore/rollback audit +
+> proposal; not yet implemented). Implementation notes deviating from this
 > plan: the `consistency_review` changeSource is deliberately NOT stamped as a
 > version change source (the review happens inside a single generation before
 > settle and is already recorded in `generationMeta.consistencyReview`); the
