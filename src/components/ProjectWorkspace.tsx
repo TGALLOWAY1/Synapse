@@ -73,7 +73,6 @@ import {
     type PlanningAttentionItem,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
-import { GlobalNextActionStrip } from './planning/GlobalNextActionStrip';
 import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
 import { AssumptionArrivalCard } from './planning/AssumptionArrivalCard';
@@ -2159,11 +2158,6 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     onCancel={() => setShowPreBuildCheck(false)}
                 />
             )}
-
-            <GlobalNextActionStrip
-                attention={planningAttention}
-                onOpen={openPlanningAttention}
-            />
 
             {/* One workspace-level explanation; individual artifacts stay free
                 of repetitive read-only warnings. */}
