@@ -2090,15 +2090,20 @@ export function ArtifactWorkspace({
                     {updatePlanRegionTarget && (
                         <div className="sticky top-14 z-[9] mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950 shadow-sm md:top-3">
                             <span className="min-w-0 break-words">
-                                Viewing update-plan region: <strong>{updatePlanRegionTarget.label}</strong>
+                                {updatePlanRegionTarget.planId ? 'Viewing update-plan region: ' : 'Viewing: '}
+                                <strong>{updatePlanRegionTarget.label}</strong>
                             </span>
-                            <button
-                                type="button"
-                                onClick={() => setUpdatePlanId(updatePlanRegionTarget.planId)}
-                                className="min-h-11 shrink-0 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
-                            >
-                                Return to update plan
-                            </button>
+                            {/* Plan-less locators (a derived asset open item) point at a
+                                region without an update plan to return to. */}
+                            {updatePlanRegionTarget.planId && (
+                                <button
+                                    type="button"
+                                    onClick={() => setUpdatePlanId(updatePlanRegionTarget.planId ?? null)}
+                                    className="min-h-11 shrink-0 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
+                                >
+                                    Return to update plan
+                                </button>
+                            )}
                         </div>
                     )}
                     {renderMain()}

@@ -12,6 +12,8 @@ import { UnderlineTabs, type UnderlineTab } from '../ui/UnderlineTabs';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 import type { BatchVerdictCandidate, BatchVerdictResult } from '../../lib/planning';
 import { assumptionWorkflowCopy, planningRecordCopy, planningRecordDominantCondition, type PlanningRecordDominantCondition } from '../../lib/planning/planningLanguage';
+import { AssetOpenItemsPanel } from './AssetOpenItemsPanel';
+import type { AssetOpenItem } from '../../lib/planning/assetOpenItems';
 
 export type DecisionCenterOptionView = {
     id: string;
@@ -140,6 +142,13 @@ interface Props {
     recommendationBatchBusy?: boolean;
     recommendationBatchResult?: BatchVerdictResult;
     onAcceptRecommendations?: (candidates: BatchVerdictCandidate[]) => void;
+    /** Derived, advisory open items scanned out of the generated outputs. They
+     * are never persisted and never counted toward the unresolved total —
+     * acting on one promotes it into a real record. */
+    assetOpenItems?: AssetOpenItem[];
+    assetOpenItemsPromotedIds?: ReadonlySet<string>;
+    onOpenAssetItem?: (item: AssetOpenItem) => void;
+    onAddAssetItemToPlan?: (item: AssetOpenItem) => void;
 }
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
@@ -242,6 +251,10 @@ export function DecisionCenter({
     recommendationBatchBusy,
     recommendationBatchResult,
     onAcceptRecommendations,
+    assetOpenItems,
+    assetOpenItemsPromotedIds,
+    onOpenAssetItem,
+    onAddAssetItemToPlan,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsVerdict(initialRecord) ? 'needs_review' : 'log') : records.some(needsVerdict) ? 'needs_review' : 'log');
@@ -539,6 +552,15 @@ export function DecisionCenter({
                                     ))}
                             </div>
                         ))}
+                        {view === 'needs_review' && (
+                            <AssetOpenItemsPanel
+                                items={assetOpenItems ?? []}
+                                promotedIds={assetOpenItemsPromotedIds}
+                                readOnly={readOnly}
+                                onOpen={onOpenAssetItem}
+                                onAddToPlan={onAddAssetItemToPlan}
+                            />
+                        )}
                     </div>
                 </aside>
 

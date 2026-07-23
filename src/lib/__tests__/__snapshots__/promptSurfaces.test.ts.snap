@@ -2472,7 +2472,7 @@ Features: {"features":[{"id":"f1","name":"Route Builder","description":"Generate
 
 
 Return JSON with:
-- userLoops: array of 2–4 retention loops, each: { name, trigger, action, systemResponse, reward, retentionMechanic }
+- userLoops: array of 2–4 core user flows — the recurring journeys that bring users back — each: { name, trigger, action, systemResponse, reward, retentionMechanic }. Name each flow for what the user is doing ("Capture and verify", "Daily review"); never append "Loop" to the name.
 - uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (3–6 short items — the key content and primary actions the user sees on this screen) }. Stay at the decision level: do NOT write component-by-component UI specs, interaction lists, or empty/loading/error state definitions — the dedicated Screen Inventory artifact owns that detail.
 - roles: array of 3–6 user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }.
   Permissions & Roles describe **business capabilities a user has inside the product** — the things they can do — NOT how the software is built or secured. Write them the way a product manager would.

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BatchVerdictCandidate } from '../../lib/planning';
 import { DecisionCenter, type DecisionCenterRecordView } from '../review/DecisionCenter';
+import type { AssetOpenItem } from '../../lib/planning/assetOpenItems';
 
 const openRecord: DecisionCenterRecordView = {
     id: 'd1', type: 'assumption', title: 'Should guests start without an account?',
@@ -816,5 +817,69 @@ describe('DecisionCenter', () => {
         fireEvent.change(revision, { target: { value: 'The onboarding flow was removed' } });
         fireEvent.click(screen.getByRole('button', { name: 'Mark no longer valid' }));
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'invalidate', 'The onboarding flow was removed', undefined);
+    });
+});
+
+describe('DecisionCenter — advisory open items from outputs', () => {
+    const assetItem: AssetOpenItem = {
+        id: 'asset-open-abc',
+        artifactId: 'artifact-flows',
+        artifactVersionId: 'v3',
+        slot: 'user_flows',
+        artifactTitle: 'User Flows',
+        kind: 'open_question',
+        text: 'Should partial-coverage answers show a confidence score?',
+        locationLabel: 'Grounded Knowledge Retrieval',
+        flowId: 'grounded-knowledge-retrieval',
+        flowStepIndex: 1,
+    };
+
+    it('lists the item with a link back to its flow and step', () => {
+        const onOpenAssetItem = vi.fn();
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem]}
+                onOpenAssetItem={onOpenAssetItem}
+                onAddAssetItemToPlan={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByText(/partial-coverage answers/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {
+            name: /Open Grounded Knowledge Retrieval in User Flows/i,
+        }));
+        expect(onOpenAssetItem).toHaveBeenCalledWith(assetItem);
+        expect(screen.getByText(/Grounded Knowledge Retrieval · Step 2/)).toBeInTheDocument();
+    });
+
+    it('never counts an advisory item toward the items needing an answer', () => {
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem, { ...assetItem, id: 'asset-open-def' }]}
+            />,
+        );
+
+        // One real record needs an answer; the two advisory items must not
+        // inflate the header count.
+        expect(screen.getByLabelText('1 planning item needs an answer')).toBeInTheDocument();
+    });
+
+    it('shows a promoted item as added instead of offering to add it again', () => {
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem]}
+                assetOpenItemsPromotedIds={new Set([assetItem.id])}
+                onAddAssetItemToPlan={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByText('Added to plan')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Add ".*" to the plan/ })).toBeNull();
     });
 });

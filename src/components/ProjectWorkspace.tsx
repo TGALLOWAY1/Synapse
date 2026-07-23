@@ -1415,7 +1415,11 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
+    // `structuredPRD` turns truthy after the FIRST section streams in, so this
+    // pill used to appear mid-generation and invite the user to build outputs
+    // from a half-written plan. Gate it on the run being settled.
     const showAssetsPill = !!activeSpine?.structuredPRD
+        && !isPRDActivelyGenerating
         && activeSpine?.safetyReview?.status !== 'blocked'
         && !isOldVersion
         && pipelineStage !== 'workspace';
@@ -2013,6 +2017,13 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 onContinueToExplore={() => {
                     closeDecisionCenter();
                     setPipelineStage('workspace');
+                }}
+                onNavigateToAsset={destination => {
+                    closeDecisionCenter();
+                    writePlanningIntent({
+                        destination,
+                        returnTo: { destination: { kind: 'decision_center' }, label: 'Back to Decision Center' },
+                    });
                 }}
             />
             <HistoryPanel

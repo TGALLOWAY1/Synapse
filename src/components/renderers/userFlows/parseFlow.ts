@@ -1,5 +1,5 @@
 import type {
-    FeatureRef, FlowIssue, FlowIssueKind, FlowRiskLevel, ParsedErrorPath, ParsedFlow, ParsedStep,
+    FeatureRef, FlowIssue, FlowIssueKind, ParsedErrorPath, ParsedFlow, ParsedStep,
 } from './types';
 import { categorize } from './categorize';
 
@@ -397,9 +397,6 @@ function linkErrorToStep(text: string, steps: ParsedStep[]): number | undefined 
  */
 export function classifyIssue(text: string): FlowIssueKind {
     const t = text.toLowerCase();
-    if (/\b(unresolved|missing|undefined|not\s+found|dangling|tbd|todo)\b/.test(t)) {
-        return 'unresolved_reference';
-    }
     if (/\b(invalid|validation|must\s+be|required|min|max|out[-\s]?of[-\s]?range|format)\b/.test(t)) {
         return 'validation_warning';
     }
@@ -555,35 +552,6 @@ function buildIssues(
     return out;
 }
 
-/**
- * Compute a coarse risk score for the flow from its issue mix and
- * step density. Used to give product/eng a "where to look first"
- * indicator in the sidebar.
- *
- *   - high   : any failure_mode, or >=3 alt paths/edge cases combined, or >=1 unresolved ref
- *   - medium : any alternate_path / edge_case / validation_warning
- *   - low    : otherwise (including a flow with no recognized issues)
- */
-function inferRisk(issues: FlowIssue[]): FlowRiskLevel {
-    if (issues.length === 0) return 'low';
-    let alt = 0;
-    let edge = 0;
-    let failure = 0;
-    let unresolved = 0;
-    let validation = 0;
-    for (const i of issues) {
-        if (i.kind === 'failure_mode') failure++;
-        else if (i.kind === 'alternate_path') alt++;
-        else if (i.kind === 'edge_case') edge++;
-        else if (i.kind === 'unresolved_reference') unresolved++;
-        else if (i.kind === 'validation_warning') validation++;
-    }
-    if (failure > 0 || unresolved > 0) return 'high';
-    if (alt + edge >= 3) return 'high';
-    if (alt + edge + validation > 0) return 'medium';
-    return 'low';
-}
-
 export function parseFlows(markdown: string): ParsedFlow[] {
     const raw = splitFlows(markdown);
     return raw.map(r => {
@@ -601,7 +569,6 @@ export function parseFlows(markdown: string): ParsedFlow[] {
             [r.goal, r.relatedFeatures, r.preconditions, r.entryPoints, r.successOutcome, r.edgeCases, r.assumptions, r.openQuestions],
             titleExtractedRefs,
         );
-        const risk = inferRisk(issues);
         // The related-features line used to live inside the goal; keep it in the
         // categorization haystack so a split doesn't silently reclassify a flow.
         const categoryText = [r.goal, r.relatedFeatures].filter(Boolean).join(' ');
@@ -624,7 +591,6 @@ export function parseFlows(markdown: string): ParsedFlow[] {
             inferredEntryPoints: entryPoints,
             inferredSystems,
             featureRefs,
-            risk,
         };
     });
 }

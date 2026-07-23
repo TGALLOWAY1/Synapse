@@ -166,6 +166,33 @@ impact previews / the write-barrier apply path in
   count — recording a verdict must never unload proposal cards onto the
   user. Do not re-add `requiresValidation` to the queue's attention
   predicate or re-expand these sections by default.
+- **Open items live in the Decision Center, not inside the assets.** Generated
+  outputs are read surfaces: they render their content plainly and must not
+  flag their own unresolved items. (The User Flows asset previously derived a
+  per-flow risk level and an "N unresolved" count from an issue-wording
+  heuristic; both were removed — the heuristic mostly fired on designed
+  fallbacks such as "… is missing from the index → return a canned reply".)
+  `assetOpenItems.ts` is the derived, advisory replacement: it scans each
+  artifact's current version for explicitly labelled `**Open Questions:**` /
+  `**Assumptions:**` blocks and for unambiguous markers (TBD/TODO/"to be
+  determined"/"needs a decision" — deliberately NOT "missing"/"unresolved",
+  which are ordinary words in designed behavior). Every item carries a locator
+  back to its source region, and for user-flow assets that means a `flowId`
+  (slugged identically to `UserFlowsRenderer`'s `flowId()`) plus an optional
+  `flowStepIndex`. `AssetOpenItemsPanel` renders the list at the foot of the
+  Decision Center queue. These items are **recomputed on every read, never
+  persisted, and never counted toward the unresolved total**; the only durable
+  effect is the user promoting one into a real `PlanningRecord` through the
+  existing `flagPlanningConcern` path (`assetOpenItemPlanningSourceKey`, which
+  omits the version so a promoted item stays marked after a regeneration). Do
+  not re-add an in-asset open-item indicator, and do not auto-create planning
+  records from this projection.
+- **`PlanningArtifactRegionTarget.planId`/`itemId` are optional.** They are
+  present only when a region came from a downstream update plan; a plan-less
+  locator (an asset open item pointing at a flow) supplies just the label and
+  the region keys. They travel together or not at all, and
+  `ArtifactWorkspace`'s region banner hides its "Return to update plan" action
+  when there is no plan.
 - **Ordinary open decisions never block Refine, Generate, or Review.** The Decision
   Center keeps its "Continue to Explore" action (`onContinueToExplore`, threaded
   from `ProjectWorkspace`). At output generation, one inline

@@ -12,9 +12,6 @@ export type FeatureRef = {
     raw: string;
 };
 
-/** Heuristic risk level inferred from the issue mix on a flow. */
-export type FlowRiskLevel = 'low' | 'medium' | 'high';
-
 export type ParsedStep = {
     index: number;
     rawText: string;
@@ -44,8 +41,7 @@ export type FlowIssueKind =
     | 'alternate_path'
     | 'edge_case'
     | 'validation_warning'
-    | 'failure_mode'
-    | 'unresolved_reference';
+    | 'failure_mode';
 
 export type FlowIssue = {
     text: string;
@@ -114,6 +110,4 @@ export type ParsedFlow = {
     inferredSystems: string[];
     /** Aggregated feature references across the whole flow. */
     featureRefs: FeatureRef[];
-    /** Heuristic risk level derived from the issue mix. */
-    risk: FlowRiskLevel;
 };
