@@ -68,7 +68,9 @@ describe('ScreenReviewNotes Flag to plan', () => {
         expect(within(note).getByRole('button', { name: 'Flag to plan' })).toBeDisabled();
         expect(within(otherNote).queryByRole('status')).toBeNull();
 
-        fireEvent.click(within(note).getByRole('button', { name: 'Keep reviewing' }));
+        fireEvent.click(within(note).getByRole('button', {
+            name: 'Keep reviewing — Recovery path is missing',
+        }));
         await waitFor(() => expect(trigger).toHaveFocus());
         expect(within(note).queryByRole('status')).toBeNull();
     });
@@ -92,7 +94,9 @@ describe('ScreenReviewNotes Flag to plan', () => {
         fireEvent.click(within(note).getByRole('button', { name: 'Flag to plan' }));
 
         expect(within(note).getByRole('status')).toHaveTextContent('Already in the plan');
-        fireEvent.click(within(note).getByRole('button', { name: 'Review now' }));
+        fireEvent.click(within(note).getByRole('button', {
+            name: 'Review now — Recovery path is missing',
+        }));
         expect(onReviewPlanningRecord).toHaveBeenCalledWith('planning-existing');
     });
 
@@ -122,25 +126,20 @@ describe('ScreenReviewNotes Flag to plan', () => {
         expect(within(createdNote).getByRole('status')).toHaveTextContent('Added to the plan');
         expect(within(existingNote).getByRole('status')).toHaveTextContent('Already in the plan');
         expect(screen.getByRole('button', {
-            name: 'Keep reviewing',
-            description: 'Recovery path is missing',
+            name: 'Keep reviewing — Recovery path is missing',
         })).toBeTruthy();
         expect(screen.getByRole('button', {
-            name: 'Keep reviewing',
-            description: 'Loading behavior needs detail',
+            name: 'Keep reviewing — Loading behavior needs detail',
         })).toBeTruthy();
         expect(screen.getByRole('button', {
-            name: 'Review now',
-            description: 'Recovery path is missing',
+            name: 'Review now — Recovery path is missing',
         })).toBeTruthy();
         expect(screen.getByRole('button', {
-            name: 'Review now',
-            description: 'Loading behavior needs detail',
+            name: 'Review now — Loading behavior needs detail',
         })).toBeTruthy();
 
         fireEvent.click(screen.getByRole('button', {
-            name: 'Keep reviewing',
-            description: 'Recovery path is missing',
+            name: 'Keep reviewing — Recovery path is missing',
         }));
         await waitFor(() => expect(createdTrigger).toHaveFocus());
         expect(within(createdNote).queryByRole('status')).toBeNull();
@@ -165,7 +164,10 @@ describe('ScreenReviewNotes Flag to plan', () => {
         fireEvent.click(within(note).getByRole('button', { name: 'Flag to plan' }));
 
         expect(within(note).getByRole('alert')).toHaveTextContent(/screen source changed/i);
-        expect(within(note).queryByRole('button', { name: 'Review now' })).toBeNull();
+        expect(within(note).getByRole('button', {
+            name: 'Keep reviewing — Recovery path is missing',
+        })).toBeTruthy();
+        expect(within(note).queryByRole('button', { name: /^Review now/ })).toBeNull();
     });
 
     it.each(['source_not_found', 'spine_not_found'] as const)(
@@ -184,7 +186,10 @@ describe('ScreenReviewNotes Flag to plan', () => {
             expect(within(note).getByRole('alert')).toHaveTextContent(
                 'This screen source is no longer available.',
             );
-            expect(within(note).queryByRole('button', { name: 'Review now' })).toBeNull();
+            expect(within(note).getByRole('button', {
+                name: 'Keep reviewing — Recovery path is missing',
+            })).toBeTruthy();
+            expect(within(note).queryByRole('button', { name: /^Review now/ })).toBeNull();
         },
     );
 

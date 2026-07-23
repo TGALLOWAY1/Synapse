@@ -658,7 +658,7 @@ describe('review notes', () => {
             statement: expect.any(String),
             materiality: expect.stringMatching(/^(blocking|high|normal|low)$/),
         }));
-        fireEvent.click(getByRole('button', { name: 'Review now' }));
+        fireEvent.click(getByRole('button', { name: /^Review now — / }));
         expect(onReviewPlanningRecord).toHaveBeenCalledWith('planning-screen-note');
     });
 
@@ -678,7 +678,7 @@ describe('review notes', () => {
         fireEvent.click(view.getByText('Review notes'));
         fireEvent.click(view.getAllByRole('button', { name: 'Flag to plan' })[0]);
         expect(view.getByText('Added to the plan')).toBeTruthy();
-        expect(view.getByRole('button', { name: 'Review now' })).toBeTruthy();
+        expect(view.getByRole('button', { name: /^Review now — / })).toBeTruthy();
 
         view.rerender(contractDetailView('overview', {
             ...options,
@@ -686,10 +686,10 @@ describe('review notes', () => {
         }));
 
         expect(view.queryByText('Added to the plan')).toBeNull();
-        expect(view.queryByRole('button', { name: 'Review now' })).toBeNull();
+        expect(view.queryByRole('button', { name: /^Review now/ })).toBeNull();
         fireEvent.click(view.getByText('Review notes'));
         expect(view.getAllByRole('button', { name: 'Flag to plan' })[0]).toBeEnabled();
-        expect(view.queryByRole('button', { name: 'Review now' })).toBeNull();
+        expect(view.queryByRole('button', { name: /^Review now/ })).toBeNull();
     });
 });
 

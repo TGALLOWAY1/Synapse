@@ -259,6 +259,7 @@ export function ScreenReviewNotes({
                                                         <div className="mt-1 flex flex-wrap gap-2">
                                                             <button
                                                                 type="button"
+                                                                aria-label={`Keep reviewing — ${issue.title}`}
                                                                 aria-describedby={`screen-review-note-${issue.id}`}
                                                                 onClick={() => keepReviewing(issue.id)}
                                                                 className="min-h-11 px-2 text-[11px] font-medium text-neutral-600 hover:text-neutral-800"
@@ -268,6 +269,7 @@ export function ScreenReviewNotes({
                                                             {onReviewPlanningRecord && (
                                                                 <button
                                                                     type="button"
+                                                                    aria-label={`Review now — ${issue.title}`}
                                                                     aria-describedby={`screen-review-note-${issue.id}`}
                                                                     onClick={() => onReviewPlanningRecord(issueFlagResult.planningRecordId)}
                                                                     className="min-h-11 px-2 text-[11px] font-medium text-indigo-700 hover:text-indigo-900"
@@ -289,6 +291,7 @@ export function ScreenReviewNotes({
                                                         </p>
                                                         <button
                                                             type="button"
+                                                            aria-label={`Keep reviewing — ${issue.title}`}
                                                             aria-describedby={`screen-review-note-${issue.id}`}
                                                             onClick={() => keepReviewing(issue.id)}
                                                             className="mt-1 min-h-11 px-2 text-[11px] font-medium text-neutral-600 hover:text-neutral-800"
