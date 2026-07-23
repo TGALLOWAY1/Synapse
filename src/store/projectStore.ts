@@ -2,7 +2,10 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectState } from './types';
 import type { SpineVersion } from '../types';
-import { createDebouncedStorage, registerQuotaRecovery } from './storage';
+import { createDebouncedStorage, registerCrossTabMerge, registerQuotaRecovery } from './storage';
+import { compactPersistedNamespaces, decodePersistedBlob } from './persistCodec';
+import { mergePersistedProjectBlobs } from '../lib/crossTabMerge';
+import { ALL_PROJECT_COLLECTIONS } from '../lib/projectBundle';
 import { resolveProjectStorageName } from './userScope';
 import { createProjectSlice } from './slices/projectSlice';
 import { createSpineSlice } from './slices/spineSlice';
@@ -47,6 +50,14 @@ export function stripPersistedCanonicalSpines(
     }
     return changed ? next : spineVersions;
 }
+
+// Re-encode any oversized PLAIN persisted namespace (active, other users',
+// and the legacy anonymous blob) into the compressed format BEFORE the store
+// hydrates. A device already at the "Storage full" toast only recovers if
+// space frees up, and the inactive namespaces are never rewritten by normal
+// writes — this sweep is what actually releases their quota. Pure re-encoding
+// of identical bytes; see persistCodec.ts.
+compactPersistedNamespaces('synapse-projects-storage');
 
 export const useProjectStore = create<ProjectState>()(
     persist(
@@ -167,6 +178,54 @@ export const useProjectStore = create<ProjectState>()(
         }
     )
 );
+
+// Cross-tab write safety. Each tab persists the WHOLE store as one debounced
+// localStorage value, so without this a stale background tab's flush (any
+// change, or its unload flush) last-writer-wins over the entire namespace and
+// silently reverts work a fresher tab persisted since — in a freshly generated
+// project that is the mockup spec version, the last thing written, which then
+// looks "gone" on the next boot and gets silently auto-regenerated
+// (artifactJobController.resumeIfNeeded). The storage layer detects the
+// under-us change and calls this merge (per-project newest-wins union, pure —
+// see src/lib/crossTabMerge.ts) instead of overwriting. After a merged value
+// lands, adopt it into memory so this tab's UI and NEXT write include the
+// other tab's work natively; deferred a tick because the flush can run inside
+// an unload handler or mid-setState.
+//
+// Adoption deliberately does NOT go through `persist.rehydrate()`: that would
+// re-run `onRehydrateStorage`, whose interruption fixups assume a page load
+// killed all in-flight work — a project mid-generation in the OTHER tab
+// (`generationPhase: 'running'`) would be adopted as a settled "interrupted"
+// error here and could then be persisted back over the live run. Instead we
+// read the merged blob and setState only the persisted project-keyed
+// collections; transient slices (jobs, prdProgress) and boot fixups are
+// untouched.
+registerCrossTabMerge({
+    merge: mergePersistedProjectBlobs,
+    onApplied: () => {
+        queueMicrotask(() => {
+            try {
+                const raw = localStorage.getItem(resolveProjectStorageName());
+                const json = decodePersistedBlob(raw);
+                if (!json) return;
+                const parsed = JSON.parse(json) as { state?: Record<string, unknown> };
+                const persistedState = parsed?.state;
+                if (!persistedState || typeof persistedState !== 'object') return;
+                const adopted: Record<string, unknown> = {};
+                for (const key of ALL_PROJECT_COLLECTIONS) {
+                    const value = persistedState[key];
+                    if (value && typeof value === 'object') adopted[key] = value;
+                }
+                if (Object.keys(adopted).length > 0) {
+                    useProjectStore.setState(adopted as Partial<ProjectState>);
+                }
+            } catch {
+                // Adoption is best-effort — this tab just stays on its own view
+                // and the next flush re-merges against the stored value again.
+            }
+        });
+    },
+});
 
 // Mid-session quota recovery. The rehydrate sweep only runs at load; if a write
 // overflows the quota *during* a session (e.g. a burst of review runs) no sweep

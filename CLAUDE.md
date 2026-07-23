@@ -252,7 +252,8 @@ Standalone design docs (referenced from the topic docs):
 `docs/ADVERSARIAL_PLANNING_REVIEW.md`, `docs/UNCERTAINTY_FIRST_PLANNING.md`,
 `docs/DECISION_CENTER_SIMPLIFICATION_PLAN.md`, `docs/VERSIONING_AUDIT.md`,
 `docs/VERSIONING_V3_RESTORE_PROPOSAL.md`,
-`docs/ORCHESTRATION_AND_METRICS.md`, `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`.
+`docs/ORCHESTRATION_AND_METRICS.md`, `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`,
+`docs/audits/WORKFLOW_AUDIT.md`.
 
 ## Cross-cutting rules (always apply)
 

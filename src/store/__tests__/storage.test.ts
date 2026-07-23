@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDebouncedStorage, registerQuotaRecovery } from '../storage';
+import { createDebouncedStorage, registerCrossTabMerge, registerQuotaRecovery } from '../storage';
 import { useToastStore } from '../toastStore';
 
 const KEY = 'synapse-projects-storage';
@@ -119,5 +119,104 @@ describe('debounced storage — quota handling', () => {
 
         expect(setItem).toHaveBeenCalled();
         expect(useToastStore.getState().toasts).toHaveLength(0); // stale warning cleared
+    });
+});
+
+describe('debounced storage — cross-tab write guard', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        registerQuotaRecovery(null);
+        registerCrossTabMerge(null);
+        localStorage.clear();
+        useToastStore.setState({ toasts: [] });
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        registerQuotaRecovery(null);
+        registerCrossTabMerge(null);
+        localStorage.clear();
+    });
+
+    it('merges instead of overwriting when another tab wrote since our last read', () => {
+        const merge = vi.fn(() => JSON.stringify({ state: { merged: true }, version: 0 }));
+        const onApplied = vi.fn();
+        registerCrossTabMerge({ merge, onApplied });
+
+        const storage = createDebouncedStorage(500);
+        // This tab hydrates (observes) the current value…
+        localStorage.setItem(KEY, 'observed-value');
+        storage.getItem(KEY);
+        // …then ANOTHER tab persists newer work…
+        localStorage.setItem(KEY, 'other-tab-value');
+        // …and this tab flushes its own (stale) write.
+        storage.setItem(KEY, VALUE);
+        flushDebounce();
+
+        expect(merge).toHaveBeenCalledWith('other-tab-value', JSON.stringify(VALUE));
+        expect(localStorage.getItem(KEY)).toContain('"merged":true');
+        expect(onApplied).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes normally when the stored value is unchanged since our last observation', () => {
+        const merge = vi.fn((_stored: string, ours: string) => ours);
+        registerCrossTabMerge({ merge });
+
+        const storage = createDebouncedStorage(500);
+        storage.setItem(KEY, VALUE);
+        flushDebounce();
+        // Second write: stored === what we last wrote → no conflict.
+        storage.setItem(KEY, VALUE);
+        flushDebounce();
+
+        expect(merge).not.toHaveBeenCalled();
+        expect(localStorage.getItem(KEY)).toBe(JSON.stringify(VALUE));
+    });
+
+    it('treats a first write over never-observed existing data as a conflict', () => {
+        const merge = vi.fn(() => 'merged-blob');
+        registerCrossTabMerge({ merge });
+
+        localStorage.setItem(KEY, 'pre-existing');
+        const storage = createDebouncedStorage(500);
+        // No getItem first — this tab provably never saw 'pre-existing'.
+        storage.setItem(KEY, VALUE);
+        flushDebounce();
+
+        expect(merge).toHaveBeenCalledWith('pre-existing', JSON.stringify(VALUE));
+        expect(localStorage.getItem(KEY)).toBe('merged-blob');
+    });
+
+    it('applies the guard on the unload flush too', () => {
+        const merge = vi.fn(() => 'merged-on-unload');
+        registerCrossTabMerge({ merge });
+
+        const storage = createDebouncedStorage(500);
+        localStorage.setItem(KEY, 'observed');
+        storage.getItem(KEY);
+        localStorage.setItem(KEY, 'other-tab');
+        storage.setItem(KEY, VALUE);
+        // Tab closes before the debounce fires.
+        window.dispatchEvent(new Event('pagehide'));
+
+        expect(merge).toHaveBeenCalledTimes(1);
+        expect(localStorage.getItem(KEY)).toBe('merged-on-unload');
+    });
+
+    it('falls back to writing our value when the merge handler throws', () => {
+        registerCrossTabMerge({
+            merge: () => {
+                throw new Error('merge exploded');
+            },
+        });
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const storage = createDebouncedStorage(500);
+        localStorage.setItem(KEY, 'other-tab');
+        storage.setItem(KEY, VALUE);
+        flushDebounce();
+
+        expect(localStorage.getItem(KEY)).toBe(JSON.stringify(VALUE));
     });
 });

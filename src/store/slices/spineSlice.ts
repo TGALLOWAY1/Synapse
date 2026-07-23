@@ -55,7 +55,7 @@ const patchPreflight = (
 ): SpineVersion[] =>
     spines.map((s) => {
         if (s.id !== spineId || !s.preflightSession) return s;
-        return { ...s, preflightSession: patch(s.preflightSession) };
+        return { ...s, preflightSession: patch(s.preflightSession), updatedAt: Date.now() };
     });
 
 export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = (set, get) => ({
@@ -66,7 +66,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, responseText: text } : s
+                s.id === spineId ? { ...s, responseText: text, updatedAt: Date.now() } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });
@@ -153,7 +153,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             if (hasDurableCommitment) return state;
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, isFinal } : s
+                s.id === spineId ? { ...s, isFinal, updatedAt: Date.now() } : s
             );
             return {
                 spineVersions: {
@@ -290,7 +290,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, structuredPRD } : s
+                s.id === spineId ? { ...s, structuredPRD, updatedAt: Date.now() } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });
@@ -308,7 +308,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s => {
                 if (s.id !== spineId) return s;
-                const next: SpineVersion = { ...s, structuredPRD, responseText };
+                const next: SpineVersion = { ...s, structuredPRD, responseText, updatedAt: Date.now() };
                 if (meta?.sourcePrompt !== undefined) next.sourcePrompt = meta.sourcePrompt;
                 if (meta?.generationMeta !== undefined) next.generationMeta = meta.generationMeta;
                 if (meta?.model !== undefined) next.model = meta.model;
@@ -427,6 +427,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     // Same id + createdAt — this is an in-place amend, not a new version.
                     structuredPRD: nextStructuredPRD,
                     responseText: opts?.responseText ?? latest.responseText,
+                    updatedAt: now,
                     isLatest: true,
                     provenance: {
                         changeSource: 'decision_edit',
@@ -776,7 +777,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         set((state) => {
             const project = state.projects[projectId];
             if (!project) return state;
-            const next = { ...project };
+            const next = { ...project, updatedAt: Date.now() };
             if (meta.productName !== undefined) next.productName = meta.productName;
             if (meta.productCategory !== undefined) next.productCategory = meta.productCategory;
             return { projects: { ...state.projects, [projectId]: next } };
@@ -788,7 +789,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, generationPhase: 'running' as const } : s
+                s.id === spineId ? { ...s, generationPhase: 'running' as const, updatedAt: Date.now() } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });
@@ -812,6 +813,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     ? {
                         ...s,
                         safetyReview: review,
+                        updatedAt: Date.now(),
                         // A blocked spine can never be final and must not retain
                         // a half-built PRD or the "Generating…" placeholder. The
                         // run has settled, so it also stops counting as running.
@@ -856,6 +858,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     ? {
                         ...s,
                         generationError: error ?? undefined,
+                        updatedAt: Date.now(),
                         // Clear placeholder so isPRDGenerating stops being true
                         responseText: error && s.responseText === 'Generating PRD...' ? '' : s.responseText,
                         // An error settles the run; clearing an error re-arms nothing.

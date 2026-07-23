@@ -179,7 +179,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         set((state) => ({
             projects: {
                 ...state.projects,
-                [projectId]: { ...state.projects[projectId], currentStage: stage }
+                [projectId]: { ...state.projects[projectId], currentStage: stage, updatedAt: Date.now() }
             }
         }));
         void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
@@ -195,7 +195,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                     ...state.projects,
                     // A chosen preset settles the setup step no matter which UI
                     // it came from (setup step, finalize gate, design artifact).
-                    [projectId]: { ...project, designSystemPreset: presetId, needsDesignSetup: false },
+                    [projectId]: { ...project, designSystemPreset: presetId, needsDesignSetup: false, updatedAt: Date.now() },
                 },
             };
         });
@@ -209,7 +209,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             return {
                 projects: {
                     ...state.projects,
-                    [projectId]: { ...project, needsDesignSetup: false },
+                    [projectId]: { ...project, needsDesignSetup: false, updatedAt: Date.now() },
                 },
             };
         });
