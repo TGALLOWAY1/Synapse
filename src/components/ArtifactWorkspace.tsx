@@ -1713,7 +1713,13 @@ export function ArtifactWorkspace({
             // yet — so demo/snapshot mockups (read-only, images already present)
             // and pre-feature versions render straight through.
             const mockupApproved = isMockupApproved(preferred.metadata);
-            const mockupHasImages = Object.keys(mockupImagesMap).some(k => k.startsWith(`${preferred.id}:`));
+            // "Has images" spans both delivery paths: AI-generated (mockupImagesMap,
+            // keyed `${versionId}:…`) and user-uploaded (screenUploadImagesMap, keyed
+            // by the mockup version id). A version with either already-present set
+            // renders straight through instead of re-gating on flow approval.
+            const mockupHasImages =
+                Object.keys(mockupImagesMap).some(k => k.startsWith(`${preferred.id}:`)) ||
+                Object.values(screenUploadImagesMap).some(r => r.artifactVersionId === preferred.id);
             const showApprovalGate = capabilities.canGenerateArtifacts && !mockupApproved && !mockupHasImages;
             const handleApproveMockupFlows = (selectedScreenIds: string[]) => {
                 updateArtifactVersionMetadata(
@@ -1790,7 +1796,11 @@ export function ArtifactWorkspace({
                     )}
                     {showApprovalGate ? (
                         <MockupErrorBoundary resetKey={preferred.id}>
+                            {/* key by version: a version switch remounts the gate so
+                                its selected-screen state can't carry stale ids from a
+                                previous payload into approval. */}
                             <MockupApprovalGate
+                                key={preferred.id}
                                 payload={payload}
                                 flows={parsedFlows}
                                 hasImageKey={hasOpenAIKey()}
