@@ -38,6 +38,7 @@ export function ArtifactFlagToPlanControl({
     const triggerRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLDivElement>(null);
     const titleRef = useRef<HTMLInputElement>(null);
+    const resultActionRef = useRef<HTMLButtonElement>(null);
     const headingId = useId();
     const titleId = useId();
     const statementId = useId();
@@ -52,7 +53,12 @@ export function ArtifactFlagToPlanControl({
     };
 
     useEffect(() => {
-        if (open && result === null) titleRef.current?.focus();
+        if (!open) return;
+        if (result === null) {
+            titleRef.current?.focus();
+        } else if (result.status === 'created' || result.status === 'existing') {
+            resultActionRef.current?.focus();
+        }
     }, [open, result]);
 
     useEffect(() => {
@@ -95,10 +101,15 @@ export function ArtifactFlagToPlanControl({
         if (!trimmedTitle || !trimmedStatement || (result && result.status !== 'rejected')) {
             return;
         }
-        setResult(onCreate({
+        const nextResult = onCreate({
             title: trimmedTitle,
             statement: trimmedStatement,
-        }));
+        });
+        setResult(nextResult);
+        if (nextResult.status === 'created' || nextResult.status === 'existing') {
+            setTitle('');
+            setStatement('');
+        }
     };
 
     const acceptedResult = result?.status === 'created' || result?.status === 'existing'
@@ -163,13 +174,16 @@ export function ArtifactFlagToPlanControl({
                                             : 'Already in plan.'}
                                     </p>
                                     <p className="mt-1 text-emerald-800">
-                                        You can keep reviewing here or open the planning record now.
+                                        {onReviewNow
+                                            ? 'You can keep reviewing here or open the planning record now.'
+                                            : 'You can keep reviewing this artifact.'}
                                     </p>
                                 </div>
                                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
                                     <button
+                                        ref={resultActionRef}
                                         type="button"
-                                        onClick={() => setResult(null)}
+                                        onClick={closeDialog}
                                         className="min-h-11 w-full rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 sm:w-auto"
                                     >
                                         Keep reviewing

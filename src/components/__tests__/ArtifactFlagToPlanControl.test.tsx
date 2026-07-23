@@ -26,7 +26,7 @@ function expectMinimumTouchTargets(container: ParentNode) {
 }
 
 describe('ArtifactFlagToPlanControl', () => {
-    it('opens a labeled modal, focuses the title, validates whitespace, and submits trimmed values', () => {
+    it('opens a labeled modal, focuses the title, validates whitespace, and focuses created actions', async () => {
         const onCreate = vi.fn((): FlagPlanningConcernResult => createdResult);
         render(
             <ArtifactFlagToPlanControl
@@ -72,10 +72,11 @@ describe('ArtifactFlagToPlanControl', () => {
         expect(status).toHaveAttribute('aria-live', 'polite');
         expect(status).toHaveTextContent('Added to plan');
         expect(screen.queryByRole('button', { name: 'Add to plan' })).toBeNull();
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Keep reviewing' })).toHaveFocus());
         expectMinimumTouchTargets(dialog);
     });
 
-    it('reports an existing record, reviews its exact id, and returns to the preserved form', async () => {
+    it('reports an existing record, reviews its exact id, and closes back to the trigger', async () => {
         const onCreate = vi.fn((): FlagPlanningConcernResult => ({
             status: 'existing',
             planningRecordId: 'planning-existing',
@@ -100,16 +101,19 @@ describe('ArtifactFlagToPlanControl', () => {
             .toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
         expect(screen.getByRole('button', { name: 'Review now' }))
             .toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Keep reviewing' })).toHaveFocus());
 
         fireEvent.click(screen.getByRole('button', { name: 'Review now' }));
         expect(onReviewNow).toHaveBeenCalledWith('planning-existing');
 
+        const trigger = screen.getByRole('button', { name: 'Flag Data Model to plan' });
         fireEvent.click(screen.getByRole('button', { name: 'Keep reviewing' }));
-        await waitFor(() => expect(screen.getByLabelText('Concern title')).toHaveFocus());
-        expect(screen.getByLabelText('Concern title')).toHaveValue('  Ownership is unclear  ');
-        expect(screen.getByLabelText('What should the plan address?')).toHaveValue(
-            '  The owner relationship has no deletion rule.  ',
-        );
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        expect(trigger).toHaveFocus();
+
+        fireEvent.click(trigger);
+        expect(screen.getByLabelText('Concern title')).toHaveValue('');
+        expect(screen.getByLabelText('What should the plan address?')).toHaveValue('');
     });
 
     it('keeps a changed-source rejection editable and allows a retry without Review now', () => {
@@ -166,7 +170,7 @@ describe('ArtifactFlagToPlanControl', () => {
         },
     );
 
-    it('omits Review now when no planning navigation callback exists', () => {
+    it('omits Review now and describes only available actions without planning navigation', async () => {
         render(
             <ArtifactFlagToPlanControl
                 artifactTitle="Data Model"
@@ -178,7 +182,10 @@ describe('ArtifactFlagToPlanControl', () => {
         fillConcern();
         fireEvent.click(screen.getByRole('button', { name: 'Add to plan' }));
 
+        expect(screen.getByRole('status')).toHaveTextContent('You can keep reviewing this artifact.');
+        expect(screen.getByRole('status')).not.toHaveTextContent(/open the planning record now/i);
         expect(screen.getByRole('button', { name: 'Keep reviewing' })).toBeEnabled();
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Keep reviewing' })).toHaveFocus());
         expect(screen.queryByRole('button', { name: 'Review now' })).toBeNull();
     });
 
