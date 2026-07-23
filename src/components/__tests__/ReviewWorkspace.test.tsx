@@ -82,18 +82,18 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
 });
 
 describe('ReviewWorkspace', () => {
-    it('keeps legacy Decision Center targets on the critique surface during integration', () => {
+    it('keeps legacy Decision Center targets on the tab-free critique setup during integration', () => {
         const props = baseProps({ initialTab: 'review' });
         const { rerender } = render(<ReviewWorkspace {...props} />);
-        expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
+        expect(screen.getByRole('heading', { name: 'Run an optional specialist critique' })).toBeInTheDocument();
 
         rerender(<ReviewWorkspace {...props} initialTab="decisions" />);
-        expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
+        expect(screen.getByRole('heading', { name: 'Run an optional specialist critique' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: 'Decision Center' })).toBeNull();
     });
 
-    it('keeps both critique navigation targets reachable at mobile width', () => {
-        render(<ReviewWorkspace {...baseProps()} />);
+    it('keeps both critique navigation targets reachable at mobile width on a run surface', () => {
+        render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], activeRunId: 'review-1' })} />);
 
         const findings = screen.getByRole('button', { name: 'Review findings' });
         const history = screen.getByRole('button', { name: 'Review history' });
@@ -105,17 +105,36 @@ describe('ReviewWorkspace', () => {
         expect(screen.queryByRole('button', { name: 'Decision Center' })).toBeNull();
     });
 
-    it('starts a recommended review with the selected panel and optional focus', () => {
+    it('drops the Findings and History tabs from the challenge setup page', () => {
+        render(<ReviewWorkspace {...baseProps()} />);
+        expect(screen.queryByRole('button', { name: 'Review findings' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Review history' })).toBeNull();
+        expect(screen.getByRole('heading', { name: 'What happens next' })).toBeInTheDocument();
+    });
+
+    it('starts a recommended review with the full recommended panel and no scoped focus', () => {
         const onStartReview = vi.fn();
         render(<ReviewWorkspace {...baseProps({ onStartReview })} />);
 
-        fireEvent.change(screen.getByLabelText('Optional focus'), { target: { value: 'Focus on mobile recovery' } });
+        expect(screen.queryByLabelText('Optional focus')).toBeNull();
         fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
 
         expect(onStartReview).toHaveBeenCalledWith({
             specialistIds: ['product', 'security'],
-            focus: 'Focus on mobile recovery',
+            focus: undefined,
         });
+    });
+
+    it('selects and clears the whole panel with one control', () => {
+        const onStartReview = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ onStartReview })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+        expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeDisabled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
+        expect(onStartReview).toHaveBeenCalledWith({ specialistIds: ['product', 'security'], focus: undefined });
     });
 
     it('labels an intentionally narrowed specialist review as exploratory rather than readiness-complete', () => {
@@ -358,8 +377,8 @@ describe('ReviewWorkspace', () => {
     });
 
     describe('non-blocking critique suggestion', () => {
-        it('keeps Findings and critique History together in the Refine surface', () => {
-            render(<ReviewWorkspace {...baseProps()} />);
+        it('keeps Findings and critique History together on a completed-run surface', () => {
+            render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], activeRunId: 'review-1' })} />);
             const tabs = screen.getAllByRole('button', { name: /Review findings|Review history/ });
             expect(tabs.map(tab => tab.getAttribute('aria-label'))).toEqual([
                 'Review findings', 'Review history',
@@ -374,7 +393,6 @@ describe('ReviewWorkspace', () => {
 
         it('keeps critique enabled and shows advisory open-item context', () => {
             render(<ReviewWorkspace {...baseProps({ openDecisionCount: 3 })} />);
-            expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
             expect(screen.getByText('3 open items — critiquing now may re-raise them.')).toBeInTheDocument();
             expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeEnabled();
         });
