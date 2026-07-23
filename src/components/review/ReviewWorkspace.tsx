@@ -963,18 +963,21 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     const chronologicalRuns = useMemo(() => [...props.runs].sort((a, b) => b.capturedAt - a.capturedAt), [props.runs]);
     const isInProgress = activeRun && ['running', 'synthesizing', 'validating', 'interrupted', 'failed'].includes(activeRun.status);
     // The redesigned challenge/setup page is a single, tab-free two-column
-    // layout. Findings/History navigation stays available on the run surfaces
-    // (progress, results) and the history list itself, so a completed run is
-    // always reachable — it is only the fresh setup page that drops the tabs.
-    const showTabs = tab === 'history' || !!activeRun;
+    // layout — but only the *fresh* first-run setup (no runs yet) drops the
+    // tabs. Once any run exists, Findings/History stay available so the run
+    // surfaces, the history list, AND the "review current plan" setup remain a
+    // click away from the prior completed run. Clicking a tab clears the
+    // start-new-review intent so it navigates back rather than staying on setup.
+    const showTabs = tab === 'history' || !!activeRun || props.runs.length > 0;
+    const openTab = (next: 'review' | 'history') => { setStartingNewReview(false); setTab(next); };
 
     return (
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
             {showTabs && (
                 <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
                     <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
-                        <button type="button" aria-label="Review findings" onClick={() => setTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">Findings</span></button>
-                        <button type="button" aria-label="Review history" onClick={() => setTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">History</span></button>
+                        <button type="button" aria-label="Review findings" onClick={() => openTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">Findings</span></button>
+                        <button type="button" aria-label="Review history" onClick={() => openTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">History</span></button>
                     </div>
                 </div>
             )}
@@ -985,7 +988,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         <p className="mt-1 text-sm text-neutral-500">Each review remains attached to the exact project versions it inspected.</p>
                         <div className="mt-6 space-y-3">
                             {chronologicalRuns.map(run => (
-                                <button key={run.id} type="button" onClick={() => { props.onSelectRun(run.id); setTab('review'); }} className="flex w-full items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm hover:border-neutral-300">
+                                <button key={run.id} type="button" onClick={() => { setStartingNewReview(false); props.onSelectRun(run.id); setTab('review'); }} className="flex w-full items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm hover:border-neutral-300">
                                     <History size={16} className="mt-0.5 shrink-0 text-neutral-400" />
                                     <span className="min-w-0 flex-1">
                                         <span className="block text-sm font-semibold text-neutral-900">{run.label}</span>

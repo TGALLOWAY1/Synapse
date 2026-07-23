@@ -284,6 +284,21 @@ describe('ReviewWorkspace', () => {
         expect(onStartReview).toHaveBeenCalled();
     });
 
+    it('keeps the prior run and history reachable while starting another review', () => {
+        render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], activeRunId: 'review-1' })} />);
+
+        // Begin another review from the completed run: setup is shown, but
+        // because a prior run exists the tabs stay available (no orphaned run).
+        fireEvent.click(screen.getByRole('button', { name: 'Review current plan' }));
+        expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review history' })).toBeInTheDocument();
+
+        // Returning via Findings restores the completed run rather than pinning
+        // the user on the setup page.
+        fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
+        expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
+    });
+
     it('retries and resynthesizes incomplete coverage from partial results', () => {
         const onRetrySynthesis = vi.fn();
         const run = completeRun({
