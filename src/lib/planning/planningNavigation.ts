@@ -1,5 +1,6 @@
 import type { ArtifactSlotKey, PipelineStage } from '../../types';
 import type { ImplementationPlanNavigationTarget } from './implementationPlanNavigation';
+import type { PlanningAttentionItem } from './planningAttention';
 
 /** Presentation-only navigation. These values must never participate in
  * planning authority, provenance, readiness hashes, or persisted project data. */
@@ -82,6 +83,60 @@ const optionalString = (value: unknown): value is string | undefined =>
 
 export function isPlanningScreenTab(value: unknown): value is PlanningScreenTab {
     return typeof value === 'string' && ['overview', 'flow', 'mockups'].includes(value);
+}
+
+export function dispatchPlanningAttentionItem(
+    item: PlanningAttentionItem,
+    {
+        onCommit,
+        onNavigate,
+    }: {
+        onCommit: () => void;
+        onNavigate: (destination: PlanningDestination) => void;
+    },
+): void {
+    if (item.condition === 'ready_to_commit') {
+        onCommit();
+        return;
+    }
+    onNavigate(item.destination);
+}
+
+export function resolveActivePlanningScreen({
+    screenId,
+    rawTab,
+    idsByArtifactId,
+    labels,
+    preferredArtifactId,
+}: {
+    screenId: string | null | undefined;
+    rawTab: string | null | undefined;
+    idsByArtifactId: ReadonlyMap<string, ReadonlySet<string>>;
+    labels: ReadonlyMap<string, string>;
+    preferredArtifactId?: string;
+}): Omit<PlanningScreenDestination, 'kind'> | undefined {
+    if (!nonEmpty(screenId)) return undefined;
+
+    const preferredMatches = nonEmpty(preferredArtifactId)
+        && idsByArtifactId.get(preferredArtifactId)?.has(screenId);
+    const matchingArtifactIds = preferredMatches
+        ? [preferredArtifactId]
+        : Array.from(idsByArtifactId.entries())
+            .filter(([artifactId, ids]) => nonEmpty(artifactId) && ids.has(screenId))
+            .map(([artifactId]) => artifactId);
+    if (matchingArtifactIds.length !== 1) return undefined;
+
+    const artifactId = matchingArtifactIds[0];
+    const label = labels.get(`${artifactId}:${screenId}`);
+    if (!nonEmpty(label)) return undefined;
+
+    return {
+        artifactId,
+        nodeId: 'screen_inventory',
+        screenId,
+        tab: isPlanningScreenTab(rawTab) ? rawTab : 'overview',
+        label,
+    };
 }
 
 function isArtifactSlotKey(value: unknown): value is ArtifactSlotKey {

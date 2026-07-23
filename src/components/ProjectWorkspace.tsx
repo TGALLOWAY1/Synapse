@@ -61,6 +61,7 @@ import {
     hasReadinessProvenanceForSpine,
     planningContentHash,
     projectDecision,
+    type PlanningAttentionItem,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { GlobalNextActionStrip } from './planning/GlobalNextActionStrip';
@@ -73,15 +74,15 @@ import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
     PLANNING_NAVIGATION_QUERY_PARAM,
-    isPlanningScreenTab,
+    dispatchPlanningAttentionItem,
     parsePlanningNavigationIntent,
     planningReturnTargetForSurface,
     planningStageForDestination,
+    resolveActivePlanningScreen,
     validatePlanningDestination,
     withPlanningNavigationIntent,
     type PlanningArtifactRegionTarget,
     type PlanningNavigationIntent,
-    type PlanningDestination,
     type PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
@@ -209,6 +210,7 @@ export function ProjectWorkspace() {
 
         for (const artifact of navigationArtifacts) {
             if (artifact.subtype !== 'screen_inventory') continue;
+            idsByArtifactId.set(artifact.id, new Set());
             const versions = getArtifactVersions(projectId, artifact.id);
             const version = versions.find(item => item.id === artifact.currentVersionId)
                 ?? versions.find(item => item.isPreferred);
@@ -658,27 +660,17 @@ export function ProjectWorkspace() {
         outputAlignments: outputAlignment.outputs,
     });
     const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
-    const activeScreenReturn = (() => {
-        if (pipelineStage !== 'workspace') return undefined;
-        const screenId = searchParams.get('screen');
-        if (!screenId) return undefined;
-
-        const artifactId = Array.from(navigationScreens.idsByArtifactId.entries())
-            .find(([, ids]) => ids.has(screenId))?.[0];
-        if (!artifactId) return undefined;
-
-        const label = navigationScreens.labels.get(`${artifactId}:${screenId}`);
-        if (!label) return undefined;
-
-        const rawTab = searchParams.get('screenTab');
-        return {
-            artifactId,
-            nodeId: 'screen_inventory' as const,
-            screenId,
-            tab: isPlanningScreenTab(rawTab) ? rawTab : 'overview' as const,
-            label,
-        };
-    })();
+    const activeScreenId = pipelineStage === 'workspace' ? searchParams.get('screen') : undefined;
+    const activeScreenReturn = resolveActivePlanningScreen({
+        screenId: activeScreenId,
+        rawTab: searchParams.get('screenTab'),
+        idsByArtifactId: navigationScreens.idsByArtifactId,
+        labels: navigationScreens.labels,
+        preferredArtifactId: planningIntent?.destination.kind === 'screen'
+            && planningIntent.destination.screenId === activeScreenId
+            ? planningIntent.destination.artifactId
+            : undefined,
+    });
     const activeSurfaceReturnTarget = planningReturnTargetForSurface({
         stage: pipelineStage,
         screen: activeScreenReturn,
@@ -1211,12 +1203,17 @@ export function ProjectWorkspace() {
     // so resolving a decision in Challenge never strands the user there.
     const planReturnTarget: PlanningReturnTarget = { destination: { kind: 'prd' }, label: 'Back to Plan' };
 
-    const openPlanningAttention = (destination: PlanningDestination) => {
-        const leavesSurface = planningStageForDestination(destination)
-            !== planningStageForDestination(activeSurfaceReturnTarget.destination);
-        writePlanningIntent({
-            destination,
-            ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
+    const openPlanningAttention = (item: PlanningAttentionItem) => {
+        dispatchPlanningAttentionItem(item, {
+            onCommit: handleToggleFinal,
+            onNavigate: destination => {
+                const leavesSurface = planningStageForDestination(destination)
+                    !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+                writePlanningIntent({
+                    destination,
+                    ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
+                });
+            },
         });
     };
 

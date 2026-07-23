@@ -1,15 +1,34 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+    dispatchPlanningAttentionItem,
     isPlanningScreenTab,
     parsePlanningNavigationIntent,
     planningReturnTargetForSurface,
     planningStageForDestination,
+    resolveActivePlanningScreen,
     serializePlanningNavigationIntent,
     validatePlanningDestination,
     withPlanningNavigationIntent,
     type PlanningNavigationIntent,
     type PlanningScreenDestination,
 } from '../planningNavigation';
+import type { PlanningAttentionItem } from '../planningAttention';
+
+const attentionItem = (
+    condition: PlanningAttentionItem['condition'],
+    destination: PlanningAttentionItem['destination'],
+): PlanningAttentionItem => ({
+    key: `test:${condition}`,
+    condition,
+    title: 'Test next action',
+    why: 'This action exercises the presentation dispatcher.',
+    actionLabel: 'Continue',
+    destination,
+    materiality: 'normal',
+    dependencyCount: 0,
+    actionableNow: true,
+    sourceRefs: [],
+});
 
 describe('planning navigation presentation contract', () => {
     it('round-trips an exact cross-stage target and explicit return without entering project state', () => {
@@ -74,6 +93,105 @@ describe('planning navigation presentation contract', () => {
     it('recognizes only supported screen tabs', () => {
         expect(['overview', 'flow', 'mockups'].every(isPlanningScreenTab)).toBe(true);
         expect(isPlanningScreenTab('handoff')).toBe(false);
+    });
+
+    it('dispatches ready-to-commit attention directly without writing navigation', () => {
+        const onCommit = vi.fn();
+        const onNavigate = vi.fn();
+
+        dispatchPlanningAttentionItem(
+            attentionItem('ready_to_commit', { kind: 'prd' }),
+            { onCommit, onNavigate },
+        );
+
+        expect(onCommit).toHaveBeenCalledOnce();
+        expect(onNavigate).not.toHaveBeenCalled();
+    });
+
+    it('dispatches non-commit attention to its exact destination', () => {
+        const onCommit = vi.fn();
+        const onNavigate = vi.fn();
+        const destination = { kind: 'planning_record', recordId: 'decision-7' } as const;
+
+        dispatchPlanningAttentionItem(
+            attentionItem('needs_decision', destination),
+            { onCommit, onNavigate },
+        );
+
+        expect(onCommit).not.toHaveBeenCalled();
+        expect(onNavigate).toHaveBeenCalledWith(destination);
+    });
+
+    it('resolves a unique active screen with its canonical tab', () => {
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'flow',
+            idsByArtifactId: new Map([
+                ['artifact-screens', new Set(['scr-checkout'])],
+                ['artifact-other', new Set(['scr-home'])],
+            ]),
+            labels: new Map([['artifact-screens:scr-checkout', 'Checkout']]),
+        })).toEqual({
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            tab: 'flow',
+            label: 'Checkout',
+        });
+    });
+
+    it('does not guess when duplicate screen ids have no preferred artifact', () => {
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'mockups',
+            idsByArtifactId: new Map([
+                ['artifact-a', new Set(['scr-checkout'])],
+                ['artifact-b', new Set(['scr-checkout'])],
+            ]),
+            labels: new Map([
+                ['artifact-a:scr-checkout', 'Checkout A'],
+                ['artifact-b:scr-checkout', 'Checkout B'],
+            ]),
+        })).toBeUndefined();
+    });
+
+    it('uses a matching preferred artifact to resolve duplicate screen ids', () => {
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'mockups',
+            preferredArtifactId: 'artifact-b',
+            idsByArtifactId: new Map([
+                ['artifact-a', new Set(['scr-checkout'])],
+                ['artifact-b', new Set(['scr-checkout'])],
+            ]),
+            labels: new Map([
+                ['artifact-a:scr-checkout', 'Checkout A'],
+                ['artifact-b:scr-checkout', 'Checkout B'],
+            ]),
+        })).toEqual({
+            artifactId: 'artifact-b',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-checkout',
+            tab: 'mockups',
+            label: 'Checkout B',
+        });
+    });
+
+    it('returns no exact screen for absent or unparseable inventory maps', () => {
+        const labels = new Map([['artifact-screens:scr-checkout', 'Checkout']]);
+
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'flow',
+            idsByArtifactId: new Map(),
+            labels,
+        })).toBeUndefined();
+        expect(resolveActivePlanningScreen({
+            screenId: 'scr-checkout',
+            rawTab: 'handoff',
+            idsByArtifactId: new Map([['artifact-screens', new Set()]]),
+            labels,
+        })).toBeUndefined();
     });
 
     it('rejects unknown screen tabs and overlong screen labels', () => {
@@ -190,6 +308,24 @@ describe('planning navigation presentation contract', () => {
             { ...screen, artifactId: undefined, nodeId: undefined },
             {},
         )).toEqual({ kind: 'workspace' });
+    });
+
+    it('falls back from an exact screen when its known inventory artifact has no parsed ids', () => {
+        expect(validatePlanningDestination({
+            kind: 'screen',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+            screenId: 'scr-stale',
+            tab: 'flow',
+            label: 'Stale screen',
+        }, {
+            artifactIds: new Set(['artifact-screens']),
+            screenIdsByArtifactId: new Map([['artifact-screens', new Set()]]),
+        })).toEqual({
+            kind: 'artifact',
+            artifactId: 'artifact-screens',
+            nodeId: 'screen_inventory',
+        });
     });
 
     it('maps destinations to active planning stages', () => {

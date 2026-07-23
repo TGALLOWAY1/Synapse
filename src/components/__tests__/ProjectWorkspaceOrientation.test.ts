@@ -26,4 +26,13 @@ describe('ProjectWorkspace orientation', () => {
         expect(props).not.toContain('onOpenAttention=');
         expect(props).not.toContain('onNextAction=');
     });
+
+    it('routes global items through the direct commit-aware dispatcher', () => {
+        const start = workspace.indexOf('const openPlanningAttention');
+        const handler = workspace.slice(start, workspace.indexOf('const handleExport', start));
+
+        expect(handler).toContain('dispatchPlanningAttentionItem');
+        expect(handler).toContain('onCommit: handleToggleFinal');
+        expect(handler).toContain('onNavigate:');
+    });
 });

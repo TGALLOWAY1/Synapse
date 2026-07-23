@@ -1,7 +1,7 @@
 import { ArrowRight, Compass } from 'lucide-react';
 import type {
+    PlanningAttentionItem,
     PlanningAttentionSummary,
-    PlanningDestination,
 } from '../../lib/planning';
 
 export function GlobalNextActionStrip({
@@ -9,7 +9,7 @@ export function GlobalNextActionStrip({
     onOpen,
 }: {
     attention: PlanningAttentionSummary;
-    onOpen: (destination: PlanningDestination) => void;
+    onOpen: (item: PlanningAttentionItem) => void;
 }) {
     const primary = attention.primary;
     if (!primary) return null;
@@ -47,7 +47,7 @@ export function GlobalNextActionStrip({
                 </div>
                 <button
                     type="button"
-                    onClick={() => onOpen(primary.destination)}
+                    onClick={() => onOpen(primary)}
                     className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white sm:w-auto"
                 >
                     {primary.actionLabel}

@@ -56,10 +56,7 @@ describe('GlobalNextActionStrip', () => {
         const action = screen.getByRole('button', { name: 'Make this decision' });
         expect(action).toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
         fireEvent.click(action);
-        expect(onOpen).toHaveBeenCalledWith({
-            kind: 'planning_record',
-            recordId: 'record-1',
-        });
+        expect(onOpen).toHaveBeenCalledWith(attention.primary);
     });
 
     it('uses a singular accessible count label', () => {
