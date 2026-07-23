@@ -41,17 +41,29 @@ export const screenNotePlanningSourceKey = (input: {
     input.noteId,
 ].join(':');
 
+const canonicalizeArtifactConcernContent = (input: {
+    title: string;
+    statement: string;
+}): { title: string; statement: string } => ({
+    title: input.title.trim().toLowerCase(),
+    statement: input.statement.trim().toLowerCase(),
+});
+
 export const artifactConcernPlanningSourceKey = (input: {
     artifactId: string;
     artifactVersionId: string;
     title: string;
     statement: string;
-}): string => `artifact-concern:${input.artifactId}:${
-    input.artifactVersionId
-}:${planningContentHash({
-    title: input.title.trim().toLowerCase(),
-    statement: input.statement.trim().toLowerCase(),
-})}`;
+}): string => {
+    const canonicalContent = canonicalizeArtifactConcernContent(input);
+    const losslessContentIdentity = encodeURIComponent(JSON.stringify([
+        canonicalContent.title,
+        canonicalContent.statement,
+    ]));
+    return `artifact-concern:${input.artifactId}:${input.artifactVersionId}:${
+        planningContentHash(canonicalContent)
+    }:${losslessContentIdentity}`;
+};
 
 export const screenIssueMateriality = (
     severity: 'blocking' | 'review' | 'info',

@@ -9,6 +9,7 @@ import {
 } from '../../lib/planning/flagToPlan';
 import { planningContentHash } from '../../lib/planning/planningHash';
 import { ProjectCapabilityError } from '../../lib/projectCapabilities';
+import type { PlanningRecord } from '../../types';
 import { useProjectStore } from '../projectStore';
 
 const projectId = 'project-1';
@@ -28,6 +29,30 @@ const input: FlagPlanningConcernInput = {
         entityId: 'scr-home:note-1',
     },
 };
+
+const existingRecord = (
+    id: string,
+    overrides: Partial<PlanningRecord> = {},
+): PlanningRecord => ({
+    id,
+    projectId,
+    type: 'open_question',
+    status: 'open',
+    title: 'Existing concern',
+    statement: 'Existing concern statement.',
+    evidence: [],
+    sourceFindingIds: [],
+    createdBy: 'user',
+    createdAt: 1,
+    updatedAt: 1,
+    sources: [{
+        key: input.sourceKey,
+        sourceType: 'artifact',
+        sourceId: input.artifactId,
+        sourceVersionId: input.artifactVersionId,
+    }],
+    ...overrides,
+});
 
 beforeEach(() => {
     vi.spyOn(Date, 'now').mockReturnValue(1_000);
@@ -113,15 +138,53 @@ describe('flag-to-plan projections', () => {
             noteId: 'note-1',
         })).toBe(input.sourceKey);
 
-        expect(artifactConcernPlanningSourceKey({
+        const normalizedConcernKey = artifactConcernPlanningSourceKey({
             artifactId: 'artifact-screens',
             artifactVersionId: 'artifact-version-2',
             title: '  RECOVERY path is missing ',
             statement: ' The ERROR state cannot return to checkout. ',
-        })).toBe(`artifact-concern:artifact-screens:artifact-version-2:${planningContentHash({
+        });
+        expect(normalizedConcernKey).toContain(`artifact-concern:artifact-screens:artifact-version-2:${planningContentHash({
             title: 'recovery path is missing',
             statement: 'the error state cannot return to checkout.',
         })}`);
+        expect(normalizedConcernKey).toBe(artifactConcernPlanningSourceKey({
+            artifactId: 'artifact-screens',
+            artifactVersionId: 'artifact-version-2',
+            title: 'recovery path is missing',
+            statement: 'the error state cannot return to checkout.',
+        }));
+    });
+
+    it('keeps colliding planning hashes distinct without changing normalization semantics', () => {
+        const first = artifactConcernPlanningSourceKey({
+            artifactId: 'artifact-screens',
+            artifactVersionId: 'artifact-version-2',
+            title: 'flag',
+            statement: 'concern knf9ma qll',
+        });
+        const second = artifactConcernPlanningSourceKey({
+            artifactId: 'artifact-screens',
+            artifactVersionId: 'artifact-version-2',
+            title: 'flag',
+            statement: 'concern 1h6xn1y 2kyl',
+        });
+
+        expect(planningContentHash({
+            title: 'flag',
+            statement: 'concern knf9ma qll',
+        })).toBe('am3g5z');
+        expect(planningContentHash({
+            title: 'flag',
+            statement: 'concern 1h6xn1y 2kyl',
+        })).toBe('am3g5z');
+        expect(first).not.toBe(second);
+        expect(first).toBe(artifactConcernPlanningSourceKey({
+            artifactId: 'artifact-screens',
+            artifactVersionId: 'artifact-version-2',
+            title: '  FLAG  ',
+            statement: '  CONCERN KNF9MA QLL  ',
+        }));
     });
 
     it('maps screen issue severity conservatively', () => {
@@ -219,6 +282,82 @@ describe('flagPlanningConcern', () => {
                 at: 1_000,
             }],
         });
+    });
+
+    it.each([
+        ['open after a user-authored reopen', existingRecord('existing-open', {
+            status: 'confirmed',
+            events: [{
+                id: 'created-open',
+                planningRecordId: 'existing-open',
+                type: 'created',
+                actor: 'user',
+                at: 1,
+            }, {
+                id: 'reopened-open',
+                planningRecordId: 'existing-open',
+                type: 'reopened',
+                actor: 'user',
+                at: 2,
+            }],
+        })],
+        ['proposed from specialist authority', existingRecord('existing-proposed', {
+            status: 'confirmed',
+            createdBy: 'specialist_review',
+            events: [{
+                id: 'created-proposed',
+                planningRecordId: 'existing-proposed',
+                type: 'created',
+                actor: 'synapse',
+                at: 1,
+            }],
+        })],
+    ])('reuses a record projected %s despite its stale top-level status', (_label, record) => {
+        useProjectStore.setState({
+            planningRecords: {
+                [projectId]: [record],
+            },
+        });
+
+        expect(useProjectStore.getState().flagPlanningConcern(projectId, input)).toEqual({
+            status: 'existing',
+            planningRecordId: record.id,
+        });
+        expect(useProjectStore.getState().planningRecords[projectId]).toEqual([record]);
+    });
+
+    it('does not reuse a top-level open record whose verdict events project it closed', () => {
+        const answered = existingRecord('answered-record', {
+            status: 'open',
+            events: [{
+                id: 'created-answered',
+                planningRecordId: 'answered-record',
+                type: 'created',
+                actor: 'user',
+                at: 1,
+            }, {
+                id: 'verdict-answered',
+                planningRecordId: 'answered-record',
+                type: 'custom_answered',
+                actor: 'user',
+                answer: 'The concern has been resolved.',
+                at: 2,
+            }],
+        });
+        useProjectStore.setState({
+            planningRecords: {
+                [projectId]: [answered],
+            },
+        });
+
+        const result = useProjectStore.getState().flagPlanningConcern(projectId, input);
+
+        expect(result).toMatchObject({
+            status: 'created',
+            planningRecordId: expect.not.stringMatching(/^answered-record$/),
+        });
+        expect(useProjectStore.getState().planningRecords[projectId]).toHaveLength(2);
+        expect(useProjectStore.getState().planningRecords[projectId][0]).toBe(answered);
     });
 
     it.each([
