@@ -170,6 +170,47 @@ describe('ArtifactFlagToPlanControl', () => {
         },
     );
 
+    it('preserves the form and allows retry when the create callback throws', () => {
+        const onCreate = vi.fn()
+            .mockImplementationOnce(() => {
+                throw new Error('Sensitive capability details must not escape.');
+            })
+            .mockReturnValueOnce(createdResult);
+        render(
+            <ArtifactFlagToPlanControl
+                artifactTitle="Data Model"
+                onCreate={onCreate}
+                onReviewNow={vi.fn()}
+            />,
+        );
+
+        const trigger = screen.getByRole('button', { name: 'Flag Data Model to plan' });
+        fireEvent.click(trigger);
+        fillConcern();
+        fireEvent.click(screen.getByRole('button', { name: 'Add to plan' }));
+
+        const alert = screen.getByRole('alert');
+        expect(alert).toHaveTextContent(/couldn't add this concern to the plan/i);
+        expect(alert).toHaveTextContent(/try again/i);
+        expect(alert).not.toHaveTextContent(/sensitive capability details/i);
+        expect(screen.getByLabelText('Concern title')).toHaveValue('  Ownership is unclear  ');
+        expect(screen.getByLabelText('What should the plan address?')).toHaveValue(
+            '  The owner relationship has no deletion rule.  ',
+        );
+        expect(screen.getByRole('button', { name: 'Add to plan' })).toBeEnabled();
+        expect(screen.queryByRole('status')).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Review now' })).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        fireEvent.click(trigger);
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.getByLabelText('Concern title')).toHaveValue('  Ownership is unclear  ');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add to plan' }));
+        expect(onCreate).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('status')).toHaveTextContent('Added to plan');
+    });
+
     it('omits Review now and describes only available actions without planning navigation', async () => {
         render(
             <ArtifactFlagToPlanControl

@@ -19,6 +19,9 @@ const FOCUSABLE_SELECTOR = [
     '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+const SUBMISSION_ERROR_COPY =
+    "We couldn't add this concern to the plan. Try again, or close this dialog and reopen the current artifact.";
+
 function rejectionCopy(result: Extract<FlagPlanningConcernResult, { status: 'rejected' }>): string {
     if (result.reason === 'source_changed') {
         return 'This artifact changed since you opened it. Review the latest version, then try again.';
@@ -35,6 +38,7 @@ export function ArtifactFlagToPlanControl({
     const [title, setTitle] = useState('');
     const [statement, setStatement] = useState('');
     const [result, setResult] = useState<FlagPlanningConcernResult | null>(null);
+    const [submissionError, setSubmissionError] = useState<string | null>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLDivElement>(null);
     const titleRef = useRef<HTMLInputElement>(null);
@@ -49,6 +53,7 @@ export function ArtifactFlagToPlanControl({
 
     const openDialog = () => {
         setResult(null);
+        setSubmissionError(null);
         setOpen(true);
     };
 
@@ -101,10 +106,18 @@ export function ArtifactFlagToPlanControl({
         if (!trimmedTitle || !trimmedStatement || (result && result.status !== 'rejected')) {
             return;
         }
-        const nextResult = onCreate({
-            title: trimmedTitle,
-            statement: trimmedStatement,
-        });
+        setResult(null);
+        setSubmissionError(null);
+        let nextResult: FlagPlanningConcernResult;
+        try {
+            nextResult = onCreate({
+                title: trimmedTitle,
+                statement: trimmedStatement,
+            });
+        } catch {
+            setSubmissionError(SUBMISSION_ERROR_COPY);
+            return;
+        }
         setResult(nextResult);
         if (nextResult.status === 'created' || nextResult.status === 'existing') {
             setTitle('');
@@ -141,7 +154,7 @@ export function ArtifactFlagToPlanControl({
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby={headingId}
-                        className="w-full max-w-md rounded-t-2xl bg-white p-5 text-neutral-900 shadow-2xl sm:rounded-2xl"
+                        className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-5 text-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl"
                     >
                         <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0">
@@ -232,12 +245,16 @@ export function ArtifactFlagToPlanControl({
                                     />
                                 </div>
 
-                                {result?.status === 'rejected' && (
+                                {(submissionError || result?.status === 'rejected') && (
                                     <div
                                         role="alert"
                                         className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
                                     >
-                                        {rejectionCopy(result)}
+                                        {submissionError ?? (
+                                            result?.status === 'rejected'
+                                                ? rejectionCopy(result)
+                                                : null
+                                        )}
                                     </div>
                                 )}
 

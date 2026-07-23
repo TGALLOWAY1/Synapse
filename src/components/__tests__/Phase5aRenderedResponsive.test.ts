@@ -39,14 +39,17 @@ describe('Phase 5A rendered mobile release regressions', () => {
         expect(control).toContain('flex-col');
         expect(control).toContain('sm:flex-row');
         expect(control).toMatch(/className="[^"]*w-full[^"]*sm:w-auto"/);
+        expect(control).toContain('max-h-[calc(100dvh-1rem)]');
+        expect(control).toContain('sm:max-h-[calc(100dvh-2rem)]');
+        expect(control).toContain('overflow-y-auto');
 
         expect(artifacts).toContain('preferred: ArtifactVersion');
-        expect(artifacts).toContain("artifact?.type === 'mockup'");
-        expect(artifacts).toContain("artifact?.type === 'core_artifact'");
-        expect(artifacts).toContain('artifactSlot && capabilities.canPersistWorkflowState');
-        expect(artifacts).toContain('artifactVersionId: preferred.id');
-        expect(artifacts).toContain('artifactConcernPlanningSourceKey({');
-        expect(artifacts).toContain('artifactId: artifact.id,');
-        expect(artifacts).toContain('nodeId: artifactSlot,');
+        expect(artifacts).toContain('<ArtifactVersionFlagToPlanControl');
+        expect(artifacts).toContain('artifact={artifact}');
+        expect(artifacts).toContain('preferred={preferred}');
+        expect(artifacts).toContain(
+            'canPersistWorkflowState={capabilities.canPersistWorkflowState}',
+        );
+        expect(artifacts).not.toContain('artifactConcernPlanningSourceKey({');
     });
 });
