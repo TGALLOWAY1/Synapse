@@ -9,7 +9,7 @@ const workspace = readFileSync(
 
 describe('ProjectWorkspace orientation', () => {
     it('places one global strip after the rail and before stage content', () => {
-        const rail = workspace.indexOf('<PipelineStageBar');
+        const rail = workspace.indexOf('<JourneyRail');
         const strip = workspace.indexOf('<GlobalNextActionStrip');
         const main = workspace.indexOf('{/* Main Workspace Area');
 
@@ -36,37 +36,41 @@ describe('ProjectWorkspace orientation', () => {
         expect(handler).toContain('onNavigate:');
     });
 
-    it('keeps decisions-first Challenge orientation without gating critique', () => {
-        const handlerStart = workspace.indexOf('const handlePipelineStageChange');
-        const handler = workspace.slice(handlerStart, workspace.indexOf('const activeSpine', handlerStart));
+    it('keeps critique in Refine while decisions open in the universal slide-over', () => {
         const reviewContainerStart = workspace.indexOf('<ReviewWorkspaceContainer');
         const reviewContainer = workspace.slice(
             reviewContainerStart,
             workspace.indexOf('/>', reviewContainerStart),
         );
+        const decisionCenterStart = workspace.indexOf('<DecisionCenterSlideOver');
+        const decisionCenter = workspace.slice(
+            decisionCenterStart,
+            workspace.indexOf('/>', decisionCenterStart),
+        );
 
-        expect(handler).toContain("planningReadiness.openDecisionCount > 0 ? 'decisions' : 'review'");
         expect(workspace).not.toContain('CritiqueGate');
         expect(reviewContainer).not.toContain('critiqueUnlocked');
+        expect(reviewContainer).not.toContain('initialRecordId');
+        expect(decisionCenter).toContain('initialRecordId={reviewInitialRecordId}');
+        expect(decisionCenter).toContain('open={decisionCenterOpen}');
     });
 
-    it('prepares deterministic Careful-sync snapshots after importing assumptions', () => {
+    it('prepares deterministic Careful-sync proposals after importing assumptions', () => {
         const importCall = workspace.indexOf('.importPlanningAssumptions');
-        const generateCall = workspace.indexOf('.generateDownstreamUpdatePlans');
-        const effectStart = workspace.lastIndexOf('useEffect(() =>', generateCall);
-        const effect = workspace.slice(effectStart, workspace.indexOf(']);', generateCall) + 3);
+        const prepareCall = workspace.indexOf('.prepareCurrentDownstreamArtifactUpdateProposals');
+        const effectStart = workspace.lastIndexOf('useEffect(() =>', prepareCall);
+        const effect = workspace.slice(effectStart, workspace.indexOf(']);', prepareCall) + 3);
 
-        expect(generateCall).toBeGreaterThan(importCall);
+        expect(prepareCall).toBeGreaterThan(importCall);
         expect(effect).toContain('capabilities.canPersistWorkflowState');
         expect(effect).toContain('planningArtifactVersions');
         expect(effect).toContain('planningRecords');
-        expect(effect).not.toContain('Proposal');
         expect(effect).not.toContain('Application');
         expect(effect).not.toContain('Verification');
     });
 
     it('shows the advisory pre-build checkpoint inline below the stage rail', () => {
-        const rail = workspace.indexOf('<PipelineStageBar');
+        const rail = workspace.indexOf('<JourneyRail');
         const checkpoint = workspace.indexOf('<PreBuildCheckpointCard');
         const strip = workspace.indexOf('<GlobalNextActionStrip');
         const rankingStart = workspace.indexOf('const preBuildAttentionItem');
@@ -104,6 +108,7 @@ describe('ProjectWorkspace orientation', () => {
 
         expect(modal).toContain('checkpointSummary={exportCheckpointSummary}');
         expect(modal).toContain('onNavigateCheckpoint={openCheckpointDestination}');
+        expect(modal).toContain('buildBlocked={!buildMaterialityGate.canProceed}');
         expect(modal).not.toContain('planningReady');
     });
 

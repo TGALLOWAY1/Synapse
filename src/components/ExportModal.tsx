@@ -43,6 +43,9 @@ function exportContentFor(artifact: Artifact, raw: string): string {
 interface ExportModalProps {
     projectId: string;
     checkpointSummary: WorkflowCheckpointSummary;
+    buildBlocked?: boolean;
+    blockingPlanningItems?: Array<{ recordId: string; title: string }>;
+    onResolveBuildBlockers?: () => void;
     onNavigateCheckpoint?: (destination: PlanningDestination) => void;
     onClose: () => void;
 }
@@ -50,6 +53,9 @@ interface ExportModalProps {
 export function ExportModal({
     projectId,
     checkpointSummary,
+    buildBlocked = false,
+    blockingPlanningItems = [],
+    onResolveBuildBlockers,
     onNavigateCheckpoint,
     onClose,
 }: ExportModalProps) {
@@ -349,6 +355,40 @@ export function ExportModal({
                         </div>
                     )}
 
+                    {buildBlocked && (
+                        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-950">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-600" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold">Finalize blocking decisions before export</p>
+                                    <p className="mt-1 text-xs leading-5 text-red-800">
+                                        {blockingPlanningItems.length} planning item{blockingPlanningItems.length === 1 ? '' : 's'} explicitly marked
+                                        as blocking must be resolved or accepted at the Finalize checkpoint.
+                                    </p>
+                                    {blockingPlanningItems.length > 0 && (
+                                        <ul className="mt-2 space-y-1 text-xs text-red-800">
+                                            {blockingPlanningItems.slice(0, 3).map(item => (
+                                                <li key={item.recordId}>• {item.title}</li>
+                                            ))}
+                                            {blockingPlanningItems.length > 3 && (
+                                                <li>• {blockingPlanningItems.length - 3} more</li>
+                                            )}
+                                        </ul>
+                                    )}
+                                    {onResolveBuildBlockers && (
+                                        <button
+                                            type="button"
+                                            onClick={onResolveBuildBlockers}
+                                            className="mt-3 inline-flex min-h-10 items-center rounded-md bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-800"
+                                        >
+                                            Open Finalize checkpoint
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <WorkflowCheckpointSummaryCard
                         summary={checkpointSummary}
                         onOpen={onNavigateCheckpoint ? row => {
@@ -356,6 +396,17 @@ export function ExportModal({
                             onNavigateCheckpoint(row.destination);
                         } : undefined}
                     />
+
+                    <fieldset
+                        disabled={buildBlocked}
+                        aria-describedby={buildBlocked ? 'export-materiality-blocked' : undefined}
+                        className="m-0 space-y-3 border-0 p-0 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        {buildBlocked && (
+                            <span id="export-materiality-blocked" className="sr-only">
+                                Export actions are unavailable until blocking planning decisions are finalized.
+                            </span>
+                        )}
 
                     {/* --- EXPORT: whole-project bundles --- */}
                     <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
@@ -495,6 +546,7 @@ export function ExportModal({
                             ))}
                         </div>
                     )}
+                    </fieldset>
                 </div>
             </div>
         </div>

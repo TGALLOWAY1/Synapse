@@ -74,6 +74,17 @@ export type PlanningNavigationIntent = {
 
 export const PLANNING_NAVIGATION_QUERY_PARAM = 'planning';
 
+/** Decision destinations are presentation layers over the current workspace
+ * surface. They must not force a persisted pipeline-stage change or destroy
+ * the exact screen/artifact context underneath the layer. */
+export function isDecisionOverlayDestination(
+    destination: PlanningDestination | undefined,
+): destination is Extract<PlanningDestination,
+    { kind: 'decision_center' } | { kind: 'planning_record' }> {
+    return destination?.kind === 'decision_center'
+        || destination?.kind === 'planning_record';
+}
+
 const MAX_SERIALIZED_LENGTH = 8_000;
 const MAX_VALUE_LENGTH = 500;
 const nonEmpty = (value: unknown): value is string =>

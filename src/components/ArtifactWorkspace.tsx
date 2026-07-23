@@ -136,6 +136,9 @@ interface ArtifactWorkspaceProps {
     onInitialSelectionConsumed?: () => void;
     onOpenPlanningRecord?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
     onNavigatePlanning?: (intent: PlanningNavigationIntent) => void;
+    buildBlocked?: boolean;
+    blockingPlanningItems?: Array<{ recordId: string; title: string }>;
+    onResolveBuildBlockers?: () => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -308,7 +311,8 @@ export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
     initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
-    onOpenPlanningRecord, onNavigatePlanning,
+    onOpenPlanningRecord, onNavigatePlanning, buildBlocked, blockingPlanningItems,
+    onResolveBuildBlockers,
 }: ArtifactWorkspaceProps) {
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
@@ -2145,6 +2149,12 @@ export function ArtifactWorkspace({
                     sourceSpineVersionId={spineVersionId}
                     artifactContent={tasksModalSource.content}
                     projectName={getProject(projectId)?.name}
+                    buildBlocked={buildBlocked}
+                    blockingPlanningItems={blockingPlanningItems}
+                    onResolveBuildBlockers={() => {
+                        setTasksModalSource(null);
+                        onResolveBuildBlockers?.();
+                    }}
                     onClose={() => setTasksModalSource(null)}
                 />
             )}

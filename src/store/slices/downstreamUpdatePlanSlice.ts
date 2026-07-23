@@ -76,6 +76,7 @@ export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamArtifactUpdateVerificationEvents'
     | 'recordDownstreamArtifactUpdateProposal'
     | 'generateDownstreamArtifactUpdateProposal'
+    | 'prepareCurrentDownstreamArtifactUpdateProposals'
     | 'appendDownstreamArtifactUpdateReviewEvent'
     | 'recordDownstreamArtifactUpdateApplication'
     | 'applyDownstreamArtifactUpdateProposal'
@@ -361,6 +362,73 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             },
         }));
         return { status: 'generated', proposalId: result.proposal.id, operation: result.proposal.operation };
+    },
+
+    prepareCurrentDownstreamArtifactUpdateProposals: (projectId) => {
+        // Reuse the exact same deterministic plan/proposal generators as the
+        // user-started Careful flow. This action only prepares Synapse-authored
+        // advisory records: it never appends review authority, applies a
+        // proposal, creates an artifact version, or changes a preferred output.
+        const planResult = get().generateDownstreamUpdatePlans(projectId);
+        if (planResult.status === 'rejected') return planResult;
+
+        const state = get();
+        const context = currentContext(state, projectId);
+        if (!context) return { status: 'rejected', reason: 'binding_not_found' };
+
+        const currentPlans = (state.downstreamUpdatePlans[projectId] ?? [])
+            .filter(validateDownstreamUpdatePlanIntegrity)
+            .filter(plan => compareDownstreamUpdatePlanCurrentness(plan, context).current)
+            .sort((left, right) => (
+                left.artifact.slot.localeCompare(right.artifact.slot)
+                || left.artifact.artifactId.localeCompare(right.artifact.artifactId)
+                || left.id.localeCompare(right.id)
+            ));
+        const existingProposalIds = new Set(
+            (state.downstreamArtifactUpdateProposals[projectId] ?? []).map(proposal => proposal.id),
+        );
+        const prepared: Extract<
+            ReturnType<ProjectState['prepareCurrentDownstreamArtifactUpdateProposals']>,
+            { status: 'prepared' }
+        >['prepared'] = [];
+        const rejected: Extract<
+            ReturnType<ProjectState['prepareCurrentDownstreamArtifactUpdateProposals']>,
+            { status: 'prepared' }
+        >['rejected'] = [];
+
+        for (const plan of currentPlans) {
+            for (const item of plan.items) {
+                // generateDownstreamArtifactUpdateProposal repeats all
+                // currentness/integrity checks immediately before its write.
+                // A source change between planning and this loop therefore
+                // becomes one partial rejection rather than stale queue work.
+                const result = get().generateDownstreamArtifactUpdateProposal(
+                    projectId,
+                    plan.id,
+                    item.id,
+                );
+                if (result.status === 'rejected') {
+                    rejected.push({ planId: plan.id, itemId: item.id, reason: result.reason });
+                    continue;
+                }
+                prepared.push({
+                    planId: plan.id,
+                    itemId: item.id,
+                    proposalId: result.proposalId,
+                    operation: result.operation,
+                    reused: existingProposalIds.has(result.proposalId),
+                });
+            }
+        }
+
+        return {
+            status: 'prepared',
+            planIds: currentPlans.map(plan => plan.id),
+            attempted: prepared.length + rejected.length,
+            created: prepared.filter(item => !item.reused).length,
+            prepared,
+            rejected,
+        };
     },
 
     appendDownstreamArtifactUpdateReviewEvent: (projectId, proposalId, input) => {

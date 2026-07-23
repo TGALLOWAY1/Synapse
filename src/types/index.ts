@@ -2214,7 +2214,9 @@ export type ReadinessReview = {
 };
 
 type ReadinessCommitmentEventBase = {
-    eventSchemaVersion: 1;
+    /** v2 adds an exact, spine-bound materiality blocker snapshot to new
+     * authorization events. v1 remains readable historical authority. */
+    eventSchemaVersion: 1 | 2;
     /** Local append-only payload integrity. Legacy events without this value
      * remain historical provenance but cannot confer current authority. */
     eventIntegrityHash: string;
@@ -2236,6 +2238,10 @@ export type ReadinessCommitmentEvent =
         acceptedConcernIds: string[];
         rationale: string;
         containmentPlan?: string;
+        /** Narrow Tier 3 checkpoint authority. Present on v2 authorization
+         * events; optional here so persisted v1 events remain readable. */
+        acceptedBlockingRecordIds?: string[];
+        blockingSnapshotHash?: string;
     })
     | (ReadinessCommitmentEventBase & {
         type: 'plan_committed';

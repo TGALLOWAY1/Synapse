@@ -2,7 +2,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle, ListChecks } from 'lucide-react';
 import { ConfirmDialog } from './common/ConfirmDialog';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -20,7 +20,7 @@ import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
 import { StagedEditsReviewModal } from './StagedEditsReviewModal';
 import { SettingsModal } from './SettingsModal';
-import { PipelineStageBar } from './PipelineStageBar';
+import { JourneyRail } from './JourneyRail';
 import { StructuredPRDView } from './StructuredPRDView';
 import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { SafetyReviewView } from './SafetyReviewView';
@@ -32,7 +32,7 @@ import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
 import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
-import { HistoryView } from './HistoryView';
+import { HistoryPanel } from './HistoryPanel';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
@@ -44,6 +44,7 @@ import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem, ReadinessActionTarget } from '../types';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
+import { DecisionCenterSlideOver } from './review/DecisionCenterSlideOver';
 import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
 import { DemoReadOnlyNotice } from './DemoReadOnlyNotice';
 import { evaluateProjectFreshness } from '../lib/artifactFreshness';
@@ -54,16 +55,20 @@ import {
     compareReadinessReviewCurrentness,
     compareReadinessReviewProjections,
     assumptionDefaultBatchCandidate,
+    buildDownstreamUpdatePlanCurrentContext,
     deferBatchCandidate,
     deriveAssumptionArrival,
     deriveAnswerableAssumptionRecords,
     derivePlanningAttention,
     derivePlanningReadiness,
+    deriveMaterialityGateSnapshot,
     deriveReadinessChallengeState,
     deriveReadinessCommitmentState,
     deriveReadinessReview,
     hasReadinessProvenanceForSpine,
+    materialityGateAcceptanceStatus,
     planningContentHash,
+    projectOutputSyncReviewQueue,
     projectDecision,
     type PlanningAttentionItem,
 } from '../lib/planning';
@@ -81,6 +86,7 @@ import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
     PLANNING_NAVIGATION_QUERY_PARAM,
     dispatchPlanningAttentionItem,
+    isDecisionOverlayDestination,
     parsePlanningNavigationIntent,
     planningReturnTargetForSurface,
     planningStageForDestination,
@@ -100,6 +106,14 @@ import {
     type WorkflowCheckpointPlanningVerdict,
 } from '../lib/workflowCheckpointSummary';
 import { WorkflowCheckpointSummaryCard } from './workflow/WorkflowCheckpointSummaryCard';
+import {
+    OutputSyncReviewQueue,
+    type OutputSyncReviewQueueTarget,
+} from './review/OutputSyncReviewQueue';
+import {
+    deriveJourneyPresentation,
+    type JourneyStepId,
+} from '../lib/journeyPresentation';
 
 const EMPTY_PROJECT_LIST: never[] = [];
 
@@ -136,6 +150,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
     const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
+    const persistedPipelineStage = useProjectStore((s) => (
+        projectId ? s.projects[projectId]?.currentStage : undefined
+    ));
     const planningRecords = useProjectStore((s) => (projectId ? s.planningRecords[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const canEditPlan = !!projectId && canPerformProjectAction(projectId, 'persist');
     // The sharpen flow records verdicts through the same append-only
@@ -172,6 +189,12 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const navigationArtifacts = useProjectStore((s) => (projectId ? s.artifacts[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const planningArtifactVersions = useProjectStore((s) => (projectId ? s.artifactVersions[projectId] : undefined));
     const downstreamUpdatePlans = useProjectStore((s) => (projectId ? s.downstreamUpdatePlans[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const downstreamArtifactUpdateProposals = useProjectStore((s) => (
+        projectId ? s.downstreamArtifactUpdateProposals[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST
+    ));
+    const downstreamArtifactUpdateReviewEvents = useProjectStore((s) => (
+        projectId ? s.downstreamArtifactUpdateReviewEvents[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST
+    ));
     const planningSourceSpine = useProjectStore((s) => projectId
         ? (s.spineVersions[projectId] ?? EMPTY_PROJECT_LIST).find(spine => spine.isLatest)
         : undefined);
@@ -280,13 +303,13 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
             ? deriveAssumptionArrival(planningRecords, assumptionArrival.recordIds)
             : undefined
     ), [assumptionArrival, planningRecords, planningSourceSpine?.id, projectId]);
-    // Keep immutable Careful-sync snapshots ready in the background whenever
-    // output inputs drift. The derivation emits nothing for aligned outputs and
-    // deduplicates matching snapshots, so rerunning on source changes is
-    // deterministic and does not create review decisions or apply work.
+    // Keep immutable Careful-sync snapshots and their exact-region proposals
+    // ready in the background whenever output inputs drift. This preparation
+    // never records a review decision, applies content, or promotes an
+    // artifact version; user authority remains in the Review queue.
     useEffect(() => {
         if (!projectId || !planningSourceSpine?.structuredPRD || !capabilities.canPersistWorkflowState) return;
-        useProjectStore.getState().generateDownstreamUpdatePlans(projectId);
+        useProjectStore.getState().prepareCurrentDownstreamArtifactUpdateProposals(projectId);
     }, [
         capabilities.canPersistWorkflowState,
         navigationArtifacts,
@@ -366,6 +389,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const [isReadinessSubmitting, setIsReadinessSubmitting] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
     const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
+    const [decisionCenterOpen, setDecisionCenterOpen] = useState(false);
+    const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+    const [explicitJourneyStep, setExplicitJourneyStep] = useState<JourneyStepId>();
     // Guided sharpen flow: the answerable-assumption queue is frozen at open
     // so answering one question never reshuffles the remaining ones.
     const [sharpenQueueIds, setSharpenQueueIds] = useState<string[] | null>(null);
@@ -434,6 +460,12 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         else setReadOnlyStage(stage);
     }, [capabilities.canPersistWorkflowState, projectId, setProjectStage]);
 
+    useEffect(() => {
+        if (persistedPipelineStage !== 'history') return;
+        setHistoryPanelOpen(true);
+        applyPresentationStage('prd');
+    }, [applyPresentationStage, persistedPipelineStage]);
+
     const writePlanningIntent = (intent?: PlanningNavigationIntent, replace = false) => {
         if (!intent) lastPlanningIntentRef.current = undefined;
         setSearchParams(current => {
@@ -445,7 +477,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 } else {
                     next.delete('screenTab');
                 }
-            } else {
+            } else if (intent && !isDecisionOverlayDestination(intent.destination)) {
                 next.delete('screen');
                 next.delete('screenTab');
             }
@@ -467,6 +499,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
             ? { destination: previousIntent.returnTo.destination }
             : undefined);
         if (!effectiveIntent) {
+            setDecisionCenterOpen(false);
+            setHistoryPanelOpen(false);
             lastAppliedPlanningIntentRef.current = undefined;
             return;
         }
@@ -487,21 +521,27 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         const serializedIntent = `${JSON.stringify(effectiveIntent)}=>${JSON.stringify(destination)}`;
         if (serializedIntent === lastAppliedPlanningIntentRef.current) return;
         lastAppliedPlanningIntentRef.current = serializedIntent;
-        if (destination.kind === 'prd') {
-            setSelectedReadinessReviewId(null);
-            applyPresentationStage('prd');
-            if (destination.anchorId) window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-                document.getElementById(destination.anchorId!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }));
-            return;
-        }
         if (destination.kind === 'decision_center' || destination.kind === 'planning_record') {
             setReviewInitialTab('decisions');
             setReviewInitialRecordId(destination.kind === 'planning_record' ? destination.recordId : undefined);
             setReviewInitialRunId(undefined);
             setReviewInitialIssueId(undefined);
             setReviewInitialFindingId(undefined);
-            applyPresentationStage('review');
+            setDecisionCenterOpen(true);
+            return;
+        }
+        setDecisionCenterOpen(false);
+        if (destination.kind === 'history') {
+            setHistoryPanelOpen(true);
+            return;
+        }
+        setHistoryPanelOpen(false);
+        if (destination.kind === 'prd') {
+            setSelectedReadinessReviewId(null);
+            applyPresentationStage('prd');
+            if (destination.anchorId) window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+                document.getElementById(destination.anchorId!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }));
             return;
         }
         if (destination.kind === 'challenge') {
@@ -516,10 +556,6 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         if (destination.kind === 'readiness') {
             setReadinessInitialConcernId(destination.concernId);
             setSelectedReadinessReviewId(destination.reviewId);
-            return;
-        }
-        if (destination.kind === 'history') {
-            applyPresentationStage('history');
             return;
         }
         if (destination.kind === 'workspace') {
@@ -675,13 +711,6 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         ? project?.currentStage || 'prd'
         : readOnlyStage ?? project?.currentStage ?? 'prd';
     const setPipelineStage = applyPresentationStage;
-    const handlePipelineStageChange = (stage: PipelineStage) => {
-        // Keep decisions-first orientation when planning items are open. The
-        // Findings tab remains available and critique actions are never gated.
-        if (stage === 'review') setReviewInitialTab(planningReadiness.openDecisionCount > 0 ? 'decisions' : 'review');
-        writePlanningIntent(undefined);
-        setPipelineStage(stage);
-    };
 
     const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
     const isOldVersion = activeSpine?.id !== latestSpine?.id;
@@ -794,6 +823,18 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const downstreamUpdatePlanSummary = activeSpine?.id === latestSpine?.id
         ? getDownstreamUpdatePlanSummary(projectId)
         : undefined;
+    const outputSyncReviewQueue = projectOutputSyncReviewQueue({
+        plans: downstreamUpdatePlans,
+        proposals: downstreamArtifactUpdateProposals,
+        reviewEvents: downstreamArtifactUpdateReviewEvents,
+        artifactVersions: planningArtifactVersions ?? [],
+        context: buildDownstreamUpdatePlanCurrentContext({
+            spineVersions: allSpines,
+            planningRecords,
+            artifacts: navigationArtifacts,
+            artifactVersions: planningArtifactVersions ?? [],
+        }),
+    });
     const staleOutputCount = outputAlignment.blockingCount;
     const readinessReviewInput = activeSpine ? {
         projectId,
@@ -885,6 +926,12 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     };
     const planningReadiness = derivePlanningReadiness(planningReadinessInput);
+    const materialityGateSnapshot = planningSourceSpine
+        ? deriveMaterialityGateSnapshot({
+            currentSpineVersionId: planningSourceSpine.id,
+            planningRecords,
+        })
+        : undefined;
     // Items the advisory pre-build check surfaces when output generation starts
     // (risks stay advisory-only).
     const openPlanningItems = planningRecords.filter(record =>
@@ -931,18 +978,38 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
             .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0]
         : undefined;
     const readinessAuthorization = checkpointCommittedReadiness?.commitment.authorization;
+    const buildMaterialityGate = readinessAuthorization?.eventSchemaVersion === 1
+        // A valid, current v1 commitment was recorded under the stricter Tier
+        // 1/2 policy (all concerns accepted, with containment for blockers).
+        // Keep that append-only user authority valid; only new commitments use
+        // the narrower exact-blocker v2 snapshot.
+        ? { canProceed: true as const, status: 'accepted' as const }
+        : materialityGateSnapshot
+        ? materialityGateAcceptanceStatus(
+            materialityGateSnapshot,
+            readinessAuthorization,
+        )
+        : { canProceed: true as const, status: 'clear' as const };
     const checkpointPlanningVerdict: WorkflowCheckpointPlanningVerdict =
         checkpointCommittedReadiness?.commitment.activeCommit && readinessAuthorization
             ? {
                 kind: 'finalized',
-                label: checkpointCommittedReadiness.review.conclusion === 'ready_to_build'
-                    ? 'Plan finalized'
-                    : 'Proceeding with accepted risk',
-                acceptedRisks: [...new Set(
-                    checkpointCommittedReadiness.review.concerns
-                        .filter(concern => readinessAuthorization.acceptedConcernIds.includes(concern.id))
-                        .map(concern => concern.title),
-                )],
+                label: readinessAuthorization.eventSchemaVersion === 2
+                    ? (readinessAuthorization.acceptedBlockingRecordIds?.length ?? 0) > 0
+                        ? 'Finalized with accepted risk'
+                        : 'Plan finalized'
+                    : checkpointCommittedReadiness.review.conclusion === 'ready_to_build'
+                        ? 'Plan finalized'
+                        : 'Proceeding with accepted risk',
+                acceptedRisks: readinessAuthorization.eventSchemaVersion === 2
+                    ? materialityGateSnapshot?.blockingRecords
+                        .filter(record => readinessAuthorization.acceptedBlockingRecordIds?.includes(record.recordId))
+                        .map(record => record.title) ?? []
+                    : [...new Set(
+                        checkpointCommittedReadiness.review.concerns
+                            .filter(concern => readinessAuthorization.acceptedConcernIds.includes(concern.id))
+                            .map(concern => concern.title),
+                    )],
                 rationale: readinessAuthorization.rationale,
                 containment: readinessAuthorization.containmentPlan,
             }
@@ -1089,6 +1156,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
             readinessCommitmentEvents,
             selectedReadinessVersionLabel ?? selectedReadinessReview.spineVersionId,
             readinessComparisonSummary,
+            materialityGateSnapshot?.blockingRecordIds,
         )
         : undefined;
 
@@ -1356,6 +1424,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         if (reason === 'stale') return 'The plan or its evidence changed. Review the current plan before committing.';
         if (reason === 'tampered' || reason === 'hash_mismatch') return 'This checkpoint no longer passes its integrity check. Create a fresh checkpoint.';
         if (reason === 'accepted_concerns_mismatch') return 'The set of open items changed. Create a fresh checkpoint before committing.';
+        if (reason === 'accepted_blockers_mismatch' || reason === 'blocking_snapshot_mismatch') {
+            return 'The set of blocking planning items changed. Review the current checkpoint before finalizing.';
+        }
         if (reason === 'authorization_consumed') return 'That commitment authorization was already used. Review and authorize this checkpoint again.';
         if (reason === 'rationale_required') return 'Explain why proceeding is worth the remaining uncertainty.';
         if (reason === 'containment_required') return 'Describe how the remaining implementation risk will be contained.';
@@ -1366,6 +1437,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
     const openCurrentReadinessCheckpoint = () => {
         if (!projectId || !activeSpine || !canPerformProjectAction(projectId, 'persist')) return;
+        setExplicitJourneyStep('finalize');
         setReadinessSubmitError(null);
         const result = createReadinessReview(projectId);
         if (result.status === 'created') {
@@ -1388,6 +1460,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 acceptedConcernIds: selectedReadinessReview.concerns.map(concern => concern.id),
                 rationale: override?.rationale,
                 containmentPlan: override?.containment,
+                acceptedBlockingRecordIds: materialityGateSnapshot?.blockingRecordIds ?? [],
+                blockingSnapshotHash: materialityGateSnapshot?.blockingSnapshotHash,
             });
             if (authorization.status === 'rejected') {
                 setReadinessSubmitError(readinessFailureMessage(authorization.reason));
@@ -1443,6 +1517,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
     const startAssetGeneration = () => {
         if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return;
+        setExplicitJourneyStep('generate');
         artifactJobController.startAll({
             projectId,
             spineVersionId: activeSpine.id,
@@ -1471,6 +1546,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // and selects the first non-PRD artifact instead of defaulting to the PRD.
     const handleOpenAssets = () => {
         if (!projectId) return;
+        setExplicitJourneyStep('review');
         setShowFinalizeSuccess(false);
         setFinalizeAutoOpen(true);
         setProjectStage(projectId, 'workspace');
@@ -1523,13 +1599,28 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         setReviewInitialRunId(undefined);
         setReviewInitialIssueId(undefined);
         setReviewInitialFindingId(undefined);
+        setDecisionCenterOpen(true);
         writePlanningIntent(recordId
             ? { destination: { kind: 'planning_record', recordId }, ...(returnTo ? { returnTo } : {}) }
             : { destination: { kind: 'decision_center' }, ...(returnTo ? { returnTo } : {}) });
-        setPipelineStage('review');
+    };
+
+    const closeDecisionCenter = () => {
+        setDecisionCenterOpen(false);
+        const returnDestination = planningIntent?.returnTo?.destination;
+        writePlanningIntent(
+            returnDestination ? { destination: returnDestination } : undefined,
+            true,
+        );
+    };
+
+    const openHistoryPanel = () => {
+        setHistoryPanelOpen(true);
+        writePlanningIntent({ destination: { kind: 'history' } });
     };
 
     const openChallenge = (reviewId?: string, issueId?: string, findingId?: string, returnTo?: PlanningReturnTarget) => {
+        setExplicitJourneyStep('refine');
         setReviewInitialTab('review');
         setReviewInitialRecordId(undefined);
         setReviewInitialRunId(reviewId);
@@ -1598,8 +1689,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         dispatchPlanningAttentionItem(item, {
             onCommit: handleToggleFinal,
             onNavigate: destination => {
-                const leavesSurface = planningStageForDestination(destination)
-                    !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+                const leavesSurface = isDecisionOverlayDestination(destination)
+                    || planningStageForDestination(destination)
+                        !== planningStageForDestination(activeSurfaceReturnTarget.destination);
                 writePlanningIntent({
                     destination,
                     ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
@@ -1609,16 +1701,95 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     };
 
     const openCheckpointDestination = (destination: PlanningDestination) => {
-        const leavesSurface = planningStageForDestination(destination)
-            !== planningStageForDestination(activeSurfaceReturnTarget.destination);
+        setIsExportOpen(false);
+        const leavesSurface = isDecisionOverlayDestination(destination)
+            || planningStageForDestination(destination)
+                !== planningStageForDestination(activeSurfaceReturnTarget.destination);
         writePlanningIntent({
             destination,
             ...(leavesSurface ? { returnTo: activeSurfaceReturnTarget } : {}),
         });
     };
 
+    const openOutputSyncReview = ({ planId, itemId }: OutputSyncReviewQueueTarget) => {
+        const plan = downstreamUpdatePlans.find(candidate => candidate.id === planId);
+        if (!plan) return;
+        setFinalizeAutoOpen(false);
+        setWorkspaceInitialNode(plan.artifact.slot);
+        setWorkspaceInitialArtifactId(plan.artifact.artifactId);
+        setWorkspaceInitialUpdatePlanId(plan.id);
+        setWorkspaceInitialUpdatePlanItemId(itemId);
+        writePlanningIntent({
+            destination: {
+                kind: 'update_plan',
+                planId: plan.id,
+                itemId,
+                artifactId: plan.artifact.artifactId,
+                nodeId: plan.artifact.slot,
+            },
+        });
+        setPipelineStage('workspace');
+    };
+
     const handleExport = () => {
+        setExplicitJourneyStep('build');
         setIsExportOpen(true);
+    };
+
+    const journeyPresentation = deriveJourneyPresentation({
+        currentStage: pipelineStage,
+        hasStructuredPlan: Boolean(activeSpine?.structuredPRD),
+        safetyBlocked: activeSpine?.safetyReview?.status === 'blocked',
+        readinessOpen: Boolean(selectedReadinessView),
+        exportOpen: isExportOpen,
+        generationActive: assetsBuilding,
+        outputsAvailable: assetsReady,
+        // A spine-level commitment can remain historically current while a
+        // newly changed explicit blocker invalidates its build authority. In
+        // that case Finalize becomes available again instead of displaying a
+        // misleading completed step.
+        planFinalized: displaysCurrentCommitment && buildMaterialityGate.canProceed,
+        explicitStep: selectedReadinessView || isExportOpen
+            ? undefined
+            : explicitJourneyStep,
+        canFinalize: canPerformProjectAction(projectId, 'persist') && !isOldVersion,
+        canGenerate: capabilities.canGenerateArtifacts && !isOldVersion,
+        canReview: capabilities.canReviewArtifacts,
+        canBuild: Boolean(activeSpine?.structuredPRD),
+    });
+
+    const handleJourneyStepChange = (step: JourneyStepId) => {
+        setExplicitJourneyStep(step);
+        if (step === 'define') {
+            setDecisionCenterOpen(false);
+            writePlanningIntent(undefined);
+            setPipelineStage('prd');
+            return;
+        }
+        if (step === 'refine') {
+            setDecisionCenterOpen(false);
+            writePlanningIntent(undefined);
+            if (pipelineStage !== 'review') setPipelineStage('prd');
+            return;
+        }
+        if (step === 'finalize') {
+            openCurrentReadinessCheckpoint();
+            return;
+        }
+        if (step === 'generate') {
+            if (assetsReady || assetsBuilding) {
+                setFinalizeAutoOpen(true);
+                setPipelineStage('workspace');
+            } else {
+                handleGenerateAssets();
+            }
+            return;
+        }
+        if (step === 'review') {
+            handleOpenAssets();
+            return;
+        }
+        handleExport();
     };
 
     const headerPlanStatus = activeSpine?.safetyReview?.status === 'blocked'
@@ -1749,6 +1920,26 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                     Version History
                                 </button>
                                 <button
+                                    onClick={() => {
+                                        openDecisionCenter();
+                                        setShowNavOverflow(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <ListChecks size={14} className="text-indigo-400" />
+                                    Decision Center
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        openHistoryPanel();
+                                        setShowNavOverflow(false);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <History size={14} className="text-indigo-400" />
+                                    Project History
+                                </button>
+                                <button
                                     onClick={() => { navigate('/metrics'); setShowNavOverflow(false); }}
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
                                 >
@@ -1812,6 +2003,26 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     onCommitWithOpenQuestions={commitSelectedReadiness}
                 />
             )}
+            <DecisionCenterSlideOver
+                open={decisionCenterOpen}
+                projectId={projectId}
+                initialRecordId={reviewInitialRecordId}
+                onClose={closeDecisionCenter}
+                onContinueToExplore={() => {
+                    closeDecisionCenter();
+                    setPipelineStage('workspace');
+                }}
+            />
+            <HistoryPanel
+                open={historyPanelOpen}
+                projectId={projectId}
+                onClose={() => {
+                    setHistoryPanelOpen(false);
+                    if (planningIntent?.destination.kind === 'history') {
+                        writePlanningIntent(undefined, true);
+                    }
+                }}
+            />
             {showPresetChoice && (
                 <DesignSystemPresetChoice
                     onChoose={handleChooseDesignSystemPreset}
@@ -1854,6 +2065,12 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 <ExportModal
                     projectId={projectId}
                     checkpointSummary={exportCheckpointSummary}
+                    buildBlocked={!buildMaterialityGate.canProceed}
+                    blockingPlanningItems={materialityGateSnapshot?.blockingRecords}
+                    onResolveBuildBlockers={() => {
+                        setIsExportOpen(false);
+                        openCurrentReadinessCheckpoint();
+                    }}
                     onNavigateCheckpoint={openCheckpointDestination}
                     onClose={() => setIsExportOpen(false)}
                 />
@@ -1902,14 +2119,13 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 />
             )}
 
-            {/* Pipeline Stage Bar — shrink-0, no absolute */}
+            {/* Six-step journey presentation over the existing persisted stage
+                keys. Finalize and Build remain integrity-bound actions rather
+                than new persisted pipeline states. */}
             <div className="shrink-0 z-10">
-                <PipelineStageBar
-                    currentStage={pipelineStage}
-                    onStageChange={handlePipelineStageChange}
-                    canExploreOutputs={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
-                    isReadyToBuild={planningReadiness.isReadyToBuild}
-                    canReview={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
+                <JourneyRail
+                    presentation={journeyPresentation}
+                    onStepChange={handleJourneyStepChange}
                 />
             </div>
 
@@ -1951,7 +2167,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 </div>
             )}
 
-            {planningIntent?.returnTo && (
+            {planningIntent?.returnTo && !decisionCenterOpen && !historyPanelOpen && (
                 <div className="shrink-0 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-950 z-10">
                     <button
                         type="button"
@@ -1987,6 +2203,16 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                 </div>
                             </div>
                         )}
+                        {outputSyncReviewQueue.length > 0 && (
+                            <div className="shrink-0 border-b border-indigo-100 bg-white px-4 py-3">
+                                <div className="mx-auto max-w-6xl">
+                                    <OutputSyncReviewQueue
+                                        items={outputSyncReviewQueue}
+                                        onOpen={openOutputSyncReview}
+                                    />
+                                </div>
+                            </div>
+                        )}
                         <ArtifactWorkspace
                             projectId={projectId}
                             spineVersionId={activeSpine.id}
@@ -2002,6 +2228,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             initialUpdatePlanItemId={workspaceInitialUpdatePlanItemId}
                             onOpenPlanningRecord={openDecisionCenter}
                             onNavigatePlanning={intent => writePlanningIntent(intent)}
+                            buildBlocked={!buildMaterialityGate.canProceed}
+                            blockingPlanningItems={materialityGateSnapshot?.blockingRecords}
+                            onResolveBuildBlockers={openCurrentReadinessCheckpoint}
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);
@@ -2014,12 +2243,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 ) : pipelineStage === 'review' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
                     <ReviewWorkspaceContainer
                         projectId={projectId}
-                        initialTab={reviewInitialTab}
-                        initialRecordId={reviewInitialRecordId}
+                        initialTab={reviewInitialTab === 'decisions' ? 'review' : reviewInitialTab}
                         initialReviewId={reviewInitialRunId}
                         initialIssueId={reviewInitialIssueId}
                         initialFindingId={reviewInitialFindingId}
-                        onContinueToExplore={() => handlePipelineStageChange('workspace')}
                     />
                 ) : (
                 <>
@@ -2089,7 +2316,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                                     messages={prdProgress?.messages}
                                                     onRetryStep={handleRetrySection}
                                                     retryingStepId={retryingStepId ?? undefined}
-                                                    onViewHistory={() => setPipelineStage('history')}
+                                                    onViewHistory={openHistoryPanel}
                                                 />
                                             </div>
                                         )}
@@ -2296,7 +2523,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                             messages={prdProgress?.messages}
                                             onRetryStep={handleRetrySection}
                                             retryingStepId={retryingStepId ?? undefined}
-                                            onViewHistory={() => setPipelineStage('history')}
+                                            onViewHistory={openHistoryPanel}
                                         />
                                         <div className="mt-6 space-y-4 animate-pulse">
                                             <div className="h-5 bg-neutral-100 rounded w-2/5" />
@@ -2311,10 +2538,6 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             </>
                         )}
 
-                        {/* History Stage */}
-                        {pipelineStage === 'history' && (
-                            <HistoryView projectId={projectId} />
-                        )}
                     </div>
                 </div>
 

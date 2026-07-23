@@ -45,40 +45,46 @@ const callbacks = () => ({
 });
 
 describe('ReadinessCheckpoint', () => {
-    it('makes acting on the next open item primary and keeps override secondary', () => {
+    it('keeps advisory items actionable without making them a finalization gate', () => {
         const props = callbacks();
         render(<ReadinessCheckpoint review={baseReview()} {...props} />);
 
-        const primary = screen.getAllByRole('button', { name: 'Resolve in Decision Center' }).at(-1)!;
-        expect(primary).toHaveClass('min-h-11', 'w-full');
-        fireEvent.click(primary);
+        const action = screen.getByRole('button', { name: 'Resolve in Decision Center' });
+        fireEvent.click(action);
         expect(props.onAddressConcern).toHaveBeenCalledWith('decision-auth');
 
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with accepted risk' }));
-        expect(screen.getByLabelText('Why proceed now?')).toBeInTheDocument();
-        expect(screen.getByText(/does not resolve the 1 open item/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize plan' }));
+        expect(props.onCommitReady).toHaveBeenCalledTimes(1);
+        expect(screen.queryByLabelText('Why proceed now?')).not.toBeInTheDocument();
     });
 
-    it('requires meaningful user rationale before authorizing an override', () => {
+    it('requires meaningful user rationale before accepting an explicit materiality blocker', () => {
         const props = callbacks();
-        render(<ReadinessCheckpoint review={baseReview()} {...props} />);
+        render(<ReadinessCheckpoint review={baseReview({
+            hardBlockerCount: 1,
+            concerns: [{
+                ...baseReview().concerns[0],
+                severity: 'blocker',
+                hardBlocking: true,
+            }],
+        })} {...props} />);
 
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with accepted risk' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize with accepted risk' }));
         fireEvent.change(screen.getByLabelText('Why proceed now?'), { target: { value: 'Too short' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with 1 open item' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize with 1 accepted blocker' }));
         expect(screen.getByText(/meaningful rationale of at least 20 characters/i)).toBeInTheDocument();
         expect(props.onCommitWithOpenQuestions).not.toHaveBeenCalled();
 
         fireEvent.change(screen.getByLabelText('Why proceed now?'), {
             target: { value: 'We need a prototype to validate demand before deciding.' },
         });
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with 1 open item' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize with 1 accepted blocker' }));
         expect(props.onCommitWithOpenQuestions).toHaveBeenCalledWith({
             rationale: 'We need a prototype to validate demand before deciding.',
         });
     });
 
-    it('requires containment when the exact checkpoint includes a build blocker', () => {
+    it('does not promote a broad analytical blocker into a materiality hard stop', () => {
         const props = callbacks();
         const review = baseReview({
             concerns: [{
@@ -91,22 +97,9 @@ describe('ReadinessCheckpoint', () => {
         });
         render(<ReadinessCheckpoint review={review} {...props} />);
 
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with accepted risk' }));
-        fireEvent.change(screen.getByLabelText('Why proceed now?'), {
-            target: { value: 'A time-boxed prototype is needed for a user study.' },
-        });
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with 1 open item' }));
-        expect(screen.getByText(/build blocker requires a concrete containment plan/i)).toBeInTheDocument();
-        expect(props.onCommitWithOpenQuestions).not.toHaveBeenCalled();
-
-        fireEvent.change(screen.getByLabelText('How will the implementation risk be contained?'), {
-            target: { value: 'Use synthetic credentials only and prohibit any production deployment.' },
-        });
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with 1 open item' }));
-        expect(props.onCommitWithOpenQuestions).toHaveBeenCalledWith({
-            rationale: 'A time-boxed prototype is needed for a user study.',
-            containment: 'Use synthetic credentials only and prohibit any production deployment.',
-        });
+        expect(screen.queryByRole('button', { name: 'Finalize with accepted risk' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize plan' }));
+        expect(props.onCommitReady).toHaveBeenCalledTimes(1);
     });
 
     it('commits a ready exact checkpoint without asking for an override rationale', () => {
@@ -120,8 +113,8 @@ describe('ReadinessCheckpoint', () => {
             }],
         })} {...props} />);
 
-        expect(screen.getByText('Ready to build')).toBeInTheDocument();
-        const commit = screen.getByRole('button', { name: 'Commit plan' });
+        expect(screen.getByText('Ready to finalize')).toBeInTheDocument();
+        const commit = screen.getByRole('button', { name: 'Finalize plan' });
         expect(commit).toHaveClass('min-h-11', 'w-full');
         fireEvent.click(commit);
         expect(props.onCommitReady).toHaveBeenCalledTimes(1);
@@ -150,7 +143,7 @@ describe('ReadinessCheckpoint', () => {
         expect(screen.getByText(/The planning decisions changed/)).toBeInTheDocument();
         expect(screen.getByText(/committed a contained prototype/i)).toBeInTheDocument();
         expect(screen.getByText(/No production data/i)).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Proceed with accepted risk' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Finalize with accepted risk' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Resolve in Decision Center' })).toBeNull();
     });
 
@@ -163,7 +156,7 @@ describe('ReadinessCheckpoint', () => {
         />);
 
         expect(screen.getByRole('alert')).toHaveTextContent(/plan changed before commitment/i);
-        expect(screen.queryByRole('button', { name: 'Proceed with accepted risk' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Finalize with accepted risk' })).toBeNull();
         fireEvent.click(screen.getByRole('button', { name: 'Review current plan' }));
         expect(props.onRefresh).toHaveBeenCalledTimes(1);
     });
@@ -183,7 +176,7 @@ describe('ReadinessCheckpoint', () => {
         expect(screen.getByRole('heading', { name: 'Needs a fresh review' })).toBeInTheDocument();
         expect(screen.getByRole('alert')).toHaveTextContent(/needs a fresh review/i);
         expect(screen.queryByText('Plan committed')).toBeNull();
-        expect(screen.queryByRole('button', { name: 'Commit plan' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Finalize plan' })).toBeNull();
     });
 
     it('shows a reopened checkpoint as recommittable instead of actively committed', () => {
@@ -198,14 +191,17 @@ describe('ReadinessCheckpoint', () => {
         })} {...props} />);
 
         expect(screen.getByText('Previously committed, then reopened')).toBeInTheDocument();
-        expect(screen.getByRole('heading', { name: 'Not ready' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Proceed with accepted risk' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Ready to finalize' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Finalize plan' })).toBeInTheDocument();
     });
 
     it('moves focus to the mobile override rationale when the form is revealed', async () => {
         const props = callbacks();
-        render(<ReadinessCheckpoint review={baseReview()} {...props} />);
-        fireEvent.click(screen.getByRole('button', { name: 'Proceed with accepted risk' }));
+        render(<ReadinessCheckpoint review={baseReview({
+            hardBlockerCount: 1,
+            concerns: [{ ...baseReview().concerns[0], hardBlocking: true }],
+        })} {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Finalize with accepted risk' }));
         await waitFor(() => expect(screen.getByLabelText('Why proceed now?')).toHaveFocus());
     });
 
@@ -219,7 +215,7 @@ describe('ReadinessCheckpoint', () => {
         const close = screen.getByRole('button', { name: 'Close readiness review' });
         await waitFor(() => expect(close).toHaveFocus());
         fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
-        expect(screen.getAllByRole('button', { name: 'Resolve in Decision Center' }).at(-1)).toHaveFocus();
+        expect(screen.getByRole('button', { name: 'Finalize plan' })).toHaveFocus();
         fireEvent.keyDown(window, { key: 'Escape' });
         expect(props.onClose).toHaveBeenCalledTimes(1);
 

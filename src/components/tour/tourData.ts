@@ -416,16 +416,17 @@ export const TOUR_PROJECT = {
 
 /**
  * The workspace's planning progression, mirroring the production
- * `PipelineStageBar` (src/components/PipelineStageBar.tsx): Plan → Challenge →
- * Build → History. (In the live app the Build tab reads "Explore" until the
- * plan is committed; the tour shows the committed state.) Keep these labels in
- * sync if the stage bar changes.
+ * `JourneyRail` (src/components/JourneyRail.tsx): Define → Refine → Finalize →
+ * Generate → Review → Build. Persisted stage keys remain an implementation
+ * detail, and project history opens as a panel instead of occupying a step.
  */
 export const WORKSPACE_NAV = [
-    'Plan',
-    'Challenge',
+    'Define',
+    'Refine',
+    'Finalize',
+    'Generate',
+    'Review',
     'Build',
-    'History',
 ];
 
 export interface ActivityEntry {

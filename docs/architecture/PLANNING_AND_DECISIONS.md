@@ -4,19 +4,23 @@
 
 ### Uncertainty-first planning, adversarial review, and Decision Center
 
-The workspace progression is **Plan → Challenge → Build → History**. The
-Challenge stage is reachable as soon as a safe structured working PRD exists and
-always exposes the Decision Center and review history. Its sub-tabs are ordered
-**Decision Center → Findings → History** — decisions first, critique second.
+The user-facing workspace progression is **Define → Refine → Finalize →
+Generate → Review → Build**. This is a presentation projection over the
+existing persisted stage keys: Plan and Challenge both belong to Refine,
+Finalize is the readiness checkpoint, and project history opens as a panel.
+The **Decision Center is a universal slide-over** that preserves the originating
+surface and exact return context; it is also available from the workspace
+overflow menu. The Refine review surface contains **Findings → History**.
 The specialist critique (the Findings tab) is **optional and never
 decision-count gated**. Starting a new run, resuming an interrupted/failed run,
 retrying partial coverage, and reviewing again remain available while decisions
 are open. Those surfaces show one quiet advisory — “N open items; critiquing now
 may re-raise them” — rather than disabling the action or bulk-deferring records.
-The Decision Center, history, and completed runs stay visible throughout.
+The Decision Center layer, critique history, and completed runs stay visible
+throughout.
 A completed critique's findings still promote into new planning records. When
-open decisions remain, entering Challenge still lands on the Decision Center
-tab as a presentation default, not an authority gate.
+open decisions remain, the global attention action opens the exact Decision
+Center record without changing the underlying stage.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
@@ -156,7 +160,7 @@ impact previews / the write-barrier apply path in
   count — recording a verdict must never unload proposal cards onto the
   user. Do not re-add `requiresValidation` to the queue's attention
   predicate or re-expand these sections by default.
-- **Open decisions never block Explore, critique, or Build.** The Decision
+- **Ordinary open decisions never block Refine, Generate, or Review.** The Decision
   Center keeps its "Continue to Explore" action (`onContinueToExplore`, threaded
   from `ProjectWorkspace`). At output generation, one inline
   `PreBuildCheckpointCard` appears below the stage rail at most once per
@@ -166,6 +170,16 @@ impact previews / the write-barrier apply path in
   Do not re-introduce a decision-count or readiness gate on Challenge,
   `workspace`, or artifact generation (`artifactGenerationGate.ts` stays
   safety/PRD-only).
+- **Only explicit `materiality: 'blocking'` records are decision-driven hard
+  stops.** `deriveMaterialityGateSnapshot` follows authoritative verdicts and
+  supersession, binds the exact sorted blocker fingerprints to the current
+  spine, and ignores high/normal/low or missing materiality. Finalize may record
+  a v2 append-only acceptance for that exact snapshot with a meaningful
+  rationale. Build bundle export and external task export require the same
+  current acceptance; resolving or changing a blocker invalidates the old
+  snapshot. Advisory concerns remain visible but never acquire hard-stop
+  authority. Valid current v1 commitments remain readable under the stricter
+  policy that originally authorized them.
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
   which tracks the last-applied serialized intent **plus its validated
@@ -175,9 +189,9 @@ impact previews / the write-barrier apply path in
   (initially validated down to the PRD fallback) still re-applies once the
   target exists. Do not remove that guard. Every jump that starts from the Plan stage
   (state bar, attention items, PRD decision surfaces) carries a
-  `returnTo: { kind: 'prd' }` target so a persistent "Back to Plan" banner is
-  available in Challenge, and the Decision Center offers the next unresolved
-  item immediately after an answer is recorded.
+  `returnTo: { kind: 'prd' }` target so the Decision Center can close back to
+  the exact originating surface, and it offers the next unresolved item
+  immediately after an answer is recorded.
 - Decision impact previews are bound to a PRD version and deterministic content
   hash (`decisionImpact.ts`). The first implementation safely patches imported
   PRD assumptions. Source-less or ambiguous records require a later

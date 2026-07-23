@@ -649,8 +649,11 @@ preserving the authority model described in this document.
 | Tier 2.10 · Checkpoint summaries | A session-bound generation-complete card and every export aggregate current generation, critique, validation, alignment, and accepted planning-risk context without blocking progress. |
 | Tier 2.11 · Decision grouping | Related records are grouped conservatively for presentation by critique cluster or exact PRD section; records, actions, and history remain individual. |
 | Tier 2.12 · Critique gate | Critique remains optional and always available. Open decisions produce advisory copy, not a decision-count gate or bulk-defer ceremony. |
+| Tier 3.13 · Six-step rail | The workspace presents Define → Refine → Finalize → Generate → Review → Build over unchanged persisted stage keys; History is a panel. |
+| Tier 3.14 · Decision Center layer | Decision Center is a focus-contained slide-over available from every stage, with exact deep links and return context; Refine critique remains Findings + History. |
+| Tier 3.15 · Background review queue | Current downstream plans and exact-region proposals prepare idempotently in the background and appear as a Review-stage queue; preparation never applies, verifies, or promotes. |
+| Tier 3.16 · Materiality blocking | Only unresolved `materiality: 'blocking'` records hard-stop Finalize and Build/export. V2 authorization binds exact blocker ids and fingerprints to the current spine; other concerns remain advisory. |
 
-Tier 3 remains intentionally deferred: the six-step rail remap, universal
-Decision Center slide-over, background auto-propagation review queue, and
-materiality-driven hard blocking require broader structural and persistence
-work.
+All three roadmap tiers are implemented. The retained `prd` / `review` /
+`workspace` persistence model and append-only user-authority boundaries remain
+unchanged.

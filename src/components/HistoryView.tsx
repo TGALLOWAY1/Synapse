@@ -14,6 +14,8 @@ import { buildReviewContextManifest } from '../lib/review/manifest';
 
 interface HistoryViewProps {
     projectId: string;
+    /** Panels provide their own labelled header. */
+    showHeader?: boolean;
 }
 
 const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string; bgColor: string }> = {
@@ -34,7 +36,7 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
     PlanReopened: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },
 };
 
-export function HistoryView({ projectId }: HistoryViewProps) {
+export function HistoryView({ projectId, showHeader = true }: HistoryViewProps) {
     const {
         getHistoryEvents, getSpineVersions, getProjectOutputAlignment, getProject,
         readinessReviews, readinessCommitmentEvents, planningRecords,
@@ -158,14 +160,15 @@ export function HistoryView({ projectId }: HistoryViewProps) {
 
     return (
         <div className="max-w-3xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex items-center gap-3">
-                <Clock size={24} className="text-indigo-600" />
-                <h2 className="text-xl font-bold text-neutral-900">Project History</h2>
-                <span className="bg-neutral-100 text-neutral-600 text-xs px-2 py-0.5 rounded-full font-medium">
-                    {events.length} events
-                </span>
-            </div>
+            {showHeader && (
+                <div className="flex items-center gap-3">
+                    <Clock size={24} className="text-indigo-600" />
+                    <h2 className="text-xl font-bold text-neutral-900">Project History</h2>
+                    <span className="bg-neutral-100 text-neutral-600 text-xs px-2 py-0.5 rounded-full font-medium">
+                        {events.length} events
+                    </span>
+                </div>
+            )}
 
             {events.length === 0 ? (
                 <div className="text-center py-16 text-neutral-400">

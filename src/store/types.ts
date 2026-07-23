@@ -36,6 +36,7 @@ import type {
     DownstreamArtifactUpdateVerificationEvent,
     DownstreamArtifactUpdateOperation,
 } from '../lib/planning/downstreamArtifactUpdateProposal';
+import type { PrepareCurrentDownstreamProposalsResult } from '../lib/planning/outputSyncReviewQueue';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -70,6 +71,8 @@ export type ReadinessMutationFailureReason =
     | 'tampered'
     | 'hash_mismatch'
     | 'accepted_concerns_mismatch'
+    | 'accepted_blockers_mismatch'
+    | 'blocking_snapshot_mismatch'
     | 'rationale_required'
     | 'containment_required'
     | 'safety_blocked'
@@ -474,6 +477,10 @@ export interface ProjectState {
             acceptedConcernIds: string[];
             rationale?: string;
             containmentPlan?: string;
+            /** Required when the current checkpoint has explicit materiality
+             * blockers; omitted for legacy/no-blocker callers. */
+            acceptedBlockingRecordIds?: string[];
+            blockingSnapshotHash?: string;
         },
     ) => AuthorizeReadinessCommitmentResult;
     commitReadinessReview: (
@@ -521,6 +528,9 @@ export interface ProjectState {
         itemId: string,
     ) => { status: 'generated'; proposalId: string; operation: DownstreamArtifactUpdateOperation }
         | { status: 'rejected'; reason: string };
+    prepareCurrentDownstreamArtifactUpdateProposals: (
+        projectId: string,
+    ) => PrepareCurrentDownstreamProposalsResult;
     appendDownstreamArtifactUpdateReviewEvent: (
         projectId: string,
         proposalId: string,

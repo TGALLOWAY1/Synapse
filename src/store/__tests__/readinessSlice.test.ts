@@ -9,6 +9,7 @@ import {
     assumptionStatementHash,
     assumptionValidationDecisionEvent,
     compareReadinessReviewCurrentness,
+    deriveMaterialityGateSnapshot,
     derivePlanningReadiness,
     planningContentHash,
     projectAssumptionValidation,
@@ -44,6 +45,21 @@ const assumption = (): PlanningRecord => ({
         id: 'assumption-answer', planningRecordId: 'assumption-1', type: 'custom_answered', actor: 'user',
         at: 2, answer: 'Proceed with the premise for now.',
     }],
+});
+
+const blockingDecision = (): PlanningRecord => ({
+    id: 'blocking-decision',
+    projectId,
+    type: 'decision',
+    status: 'open',
+    title: 'Choose the regulated operating boundary',
+    statement: 'The first release cannot be scoped until the operating boundary is chosen.',
+    materiality: 'blocking',
+    evidence: [],
+    sourceFindingIds: [],
+    createdBy: 'user',
+    createdAt: 1,
+    updatedAt: 1,
 });
 
 const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
@@ -236,7 +252,7 @@ describe('durable readiness authority boundary', () => {
         ).status).toBe('committed');
     });
 
-    it('preserves not-ready evidence and requires exact accepted concerns, rationale, and containment', () => {
+    it('preserves advisory not-ready evidence without requiring rationale or containment', () => {
         useProjectStore.setState({ planningRecords: { [projectId]: [assumption()] } });
         const created = useProjectStore.getState().createReadinessReview(projectId);
         expect(created.status).toBe('created');
@@ -244,29 +260,84 @@ describe('durable readiness authority boundary', () => {
         expect(created.review.conclusion).toBe('not_ready');
         const acceptedConcernIds = created.review.concerns.map(item => item.id);
 
-        expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
-            expectedIntegrityHash: created.review.integrityHash,
-            expectedAggregateHash: created.review.snapshotHashes.aggregate,
-            acceptedConcernIds,
-        })).toMatchObject({ status: 'rejected', reason: 'rationale_required' });
-
-        expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
-            expectedIntegrityHash: created.review.integrityHash,
-            expectedAggregateHash: created.review.snapshotHashes.aggregate,
-            acceptedConcernIds,
-            rationale: 'We need to begin a bounded implementation learning step.',
-        })).toMatchObject({ status: 'rejected', reason: 'containment_required' });
-
         const authorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
             expectedIntegrityHash: created.review.integrityHash,
             expectedAggregateHash: created.review.snapshotHashes.aggregate,
             acceptedConcernIds,
-            rationale: 'We need to begin a bounded implementation learning step.',
-            containmentPlan: 'Limit implementation to a reversible prototype and validate the premise before expansion.',
         });
         expect(authorized.status).toBe('authorized');
         expect(useProjectStore.getState().readinessReviews[projectId][0].conclusion).toBe('not_ready');
         expect(useProjectStore.getState().planningRecords[projectId][0].status).toBe('confirmed');
+        expect(useProjectStore.getState().readinessCommitmentEvents[projectId][0]).toMatchObject({
+            eventSchemaVersion: 2,
+            acceptedBlockingRecordIds: [],
+            rationale: '',
+        });
+    });
+
+    it('binds accepted blocking records to the exact spine snapshot and requires only rationale', () => {
+        const decision = blockingDecision();
+        useProjectStore.setState({ planningRecords: { [projectId]: [decision] } });
+        const created = useProjectStore.getState().createReadinessReview(projectId);
+        expect(created.status).toBe('created');
+        if (created.status !== 'created') return;
+        const acceptedConcernIds = created.review.concerns.map(item => item.id);
+        const snapshot = deriveMaterialityGateSnapshot({
+            currentSpineVersionId: spineId,
+            planningRecords: [decision],
+        });
+        const base = {
+            expectedIntegrityHash: created.review.integrityHash,
+            expectedAggregateHash: created.review.snapshotHashes.aggregate,
+            acceptedConcernIds,
+        };
+
+        expect(useProjectStore.getState().authorizeReadinessCommitment(
+            projectId,
+            created.reviewId,
+            base,
+        )).toMatchObject({ status: 'rejected', reason: 'accepted_blockers_mismatch' });
+        expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            ...base,
+            acceptedBlockingRecordIds: snapshot.blockingRecordIds,
+        })).toMatchObject({ status: 'rejected', reason: 'blocking_snapshot_mismatch' });
+        expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            ...base,
+            acceptedBlockingRecordIds: snapshot.blockingRecordIds,
+            blockingSnapshotHash: 'stale',
+        })).toMatchObject({ status: 'rejected', reason: 'blocking_snapshot_mismatch' });
+        expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            ...base,
+            acceptedBlockingRecordIds: snapshot.blockingRecordIds,
+            blockingSnapshotHash: snapshot.blockingSnapshotHash,
+        })).toMatchObject({ status: 'rejected', reason: 'rationale_required' });
+
+        const authorized = useProjectStore.getState().authorizeReadinessCommitment(
+            projectId,
+            created.reviewId,
+            {
+                ...base,
+                acceptedBlockingRecordIds: snapshot.blockingRecordIds,
+                blockingSnapshotHash: snapshot.blockingSnapshotHash,
+                rationale: 'Proceed with a bounded prototype while this decision remains open.',
+            },
+        );
+        expect(authorized.status).toBe('authorized');
+        const event = useProjectStore.getState().readinessCommitmentEvents[projectId][0];
+        expect(event).toMatchObject({
+            eventSchemaVersion: 2,
+            type: 'commit_authorized',
+            acceptedBlockingRecordIds: ['blocking-decision'],
+            blockingSnapshotHash: snapshot.blockingSnapshotHash,
+            rationale: 'Proceed with a bounded prototype while this decision remains open.',
+        });
+        expect(event).not.toHaveProperty('containmentPlan');
+        if (authorized.status !== 'authorized') return;
+        expect(useProjectStore.getState().commitReadinessReview(
+            projectId,
+            created.reviewId,
+            authorized.authorizationEventId,
+        ).status).toBe('committed');
     });
 
     it('rejects commitment after planning authority changes between authorization and commit', () => {

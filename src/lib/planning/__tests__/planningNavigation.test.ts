@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     dispatchPlanningAttentionItem,
+    isDecisionOverlayDestination,
     isPlanningScreenTab,
     parsePlanningNavigationIntent,
     planningReturnTargetForSurface,
@@ -31,6 +32,17 @@ const attentionItem = (
 });
 
 describe('planning navigation presentation contract', () => {
+    it('classifies only Decision Center destinations as presentation overlays', () => {
+        expect(isDecisionOverlayDestination({ kind: 'decision_center' })).toBe(true);
+        expect(isDecisionOverlayDestination({
+            kind: 'planning_record',
+            recordId: 'decision-7',
+        })).toBe(true);
+        expect(isDecisionOverlayDestination({ kind: 'challenge' })).toBe(false);
+        expect(isDecisionOverlayDestination({ kind: 'workspace' })).toBe(false);
+        expect(isDecisionOverlayDestination(undefined)).toBe(false);
+    });
+
     it('round-trips an exact cross-stage target and explicit return without entering project state', () => {
         const intent: PlanningNavigationIntent = {
             destination: { kind: 'planning_record', recordId: 'decision-7' },
