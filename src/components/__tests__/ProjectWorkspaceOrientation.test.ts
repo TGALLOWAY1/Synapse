@@ -8,14 +8,11 @@ const workspace = readFileSync(
 );
 
 describe('ProjectWorkspace orientation', () => {
-    it('places one global strip after the rail and before stage content', () => {
-        const rail = workspace.indexOf('<JourneyRail');
-        const strip = workspace.indexOf('<GlobalNextActionStrip');
-        const main = workspace.indexOf('{/* Main Workspace Area');
-
-        expect(strip).toBeGreaterThan(rail);
-        expect(strip).toBeLessThan(main);
-        expect(workspace.match(/<GlobalNextActionStrip/g)).toHaveLength(1);
+    it('does not render the retired global next-action strip', () => {
+        // The Plan-stage PlanningStateBar ("Working Plan / Your draft is
+        // ready") now owns the next-action guidance, so the redundant
+        // workspace-wide strip was removed.
+        expect(workspace).not.toContain('GlobalNextActionStrip');
     });
 
     // `structuredPRD` is truthy after the first streamed section, so the
@@ -82,7 +79,7 @@ describe('ProjectWorkspace orientation', () => {
     it('shows the advisory pre-build checkpoint inline below the stage rail', () => {
         const rail = workspace.indexOf('<JourneyRail');
         const checkpoint = workspace.indexOf('<PreBuildCheckpointCard');
-        const strip = workspace.indexOf('<GlobalNextActionStrip');
+        const main = workspace.indexOf('{/* Main Workspace Area');
         const rankingStart = workspace.indexOf('const preBuildAttentionItem');
         const ranking = workspace.slice(
             rankingStart,
@@ -90,7 +87,7 @@ describe('ProjectWorkspace orientation', () => {
         );
 
         expect(checkpoint).toBeGreaterThan(rail);
-        expect(checkpoint).toBeLessThan(strip);
+        expect(checkpoint).toBeLessThan(main);
         expect(workspace).not.toContain('PreBuildCheckModal');
         expect(ranking).toContain('planningAttention.primary');
         expect(ranking).toContain("item.destination.kind !== 'planning_record'");

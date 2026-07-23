@@ -48,12 +48,16 @@ impact previews / the write-barrier apply path in
   equal buried links. The unconfirmed `scope` criterion links directly to the
   Features view (`onOpenFeatures` → `?prdView=features`); the 7-criterion
   breakdown stays behind a collapsed "Readiness checks" disclosure.
-- `GlobalNextActionStrip` is the one workspace-wide aggregate planning-attention
-  surface below the stage rail. `derivePlanningAttention` ranks one primary and
-  a small secondary set, and every action carries an exact destination plus
-  return target. Local surfaces may explain a specific record in context, but
-  they must not repeat aggregate open-item totals; the global strip owns that
-  count/next-action echo.
+- The Plan-stage `PlanningStateBar` owns next-action guidance; there is no
+  separate workspace-wide strip. (A `GlobalNextActionStrip` previously echoed
+  the top ranked attention item below the stage rail, but it duplicated what
+  `PlanningStateBar` already surfaces through its ordered tool cards and
+  readiness checks, so it was removed.) `derivePlanningAttention` still ranks
+  one primary and a small secondary set — every item carries an exact
+  destination plus return target — but it now feeds only the internal
+  `PreBuildCheckpointCard` gate (`preBuildAttentionItem`) and
+  `dispatchPlanningAttentionItem`, not a persistent banner. Do not re-add a
+  standalone aggregate open-item counter surface.
   - **Presentation is invitation-first, never default-alarm**
     (`planningOverviewPresentation.ts`, pure). Every fresh PRD lands in
     `needs_decisions` (imported assumptions open + scope unconfirmed), so that
