@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { WorkflowCheckpointSummary } from '../../lib/workflowCheckpointSummary';
 import { ExportModal } from '../ExportModal';
 
@@ -57,5 +57,25 @@ describe('ExportModal accessibility', () => {
         fireEvent.keyDown(document, { key: 'Escape' });
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         await waitFor(() => expect(opener).toHaveFocus());
+    });
+
+    it('keeps export actions disabled until explicit materiality blockers are finalized', () => {
+        const onResolve = vi.fn();
+        const { container } = render(
+            <ExportModal
+                projectId="missing-project"
+                checkpointSummary={checkpointSummary}
+                buildBlocked
+                blockingPlanningItems={[{ recordId: 'decision-1', title: 'Choose the account boundary' }]}
+                onResolveBuildBlockers={onResolve}
+                onClose={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByRole('alert')).toHaveTextContent(/Finalize blocking decisions before export/i);
+        expect(screen.getByText(/Choose the account boundary/)).toBeInTheDocument();
+        expect(container.querySelector('fieldset')).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Open Finalize checkpoint' }));
+        expect(onResolve).toHaveBeenCalledTimes(1);
     });
 });

@@ -138,7 +138,7 @@ component). It is driven directly by the live `prdSectionStatus` store slice
   padding, branch connector width, child gaps) to reclaim mobile width. Do not
   move the description/model chip back beside the timing block.**
   Mobile collapses per-step detail behind chevrons and shows a `View full
-  history >` link (navigates to the History stage); desktop shows
+  history >` link (opens the project History panel); desktop shows
   description/model/status/est/actual/retry and concurrent groups without
   expansion, plus inline `[Current Run] [History]` tabs (History renders the
   `prdProgress` message log inline). Failed steps stay expanded with a red
@@ -232,7 +232,7 @@ defeats the store's consecutive-dedupe and floods the history list.
 Workflow checkpoints are inline, non-blocking cards rather than modal
 interruptions:
 
-- `PreBuildCheckpointCard` appears below the stage rail at most once per
+- `PreBuildCheckpointCard` appears below the journey rail at most once per
   workspace session when generation starts with open planning attention. It
   names the exact highest-ranked record and offers **Review first**,
   **Generate outputs**, and **Not now**. Review uses the record's exact

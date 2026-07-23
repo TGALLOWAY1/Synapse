@@ -21,6 +21,9 @@ interface ConvertToTasksModalProps {
     sourceSpineVersionId?: string;
     artifactContent: string;
     projectName?: string;
+    buildBlocked?: boolean;
+    blockingPlanningItems?: Array<{ recordId: string; title: string }>;
+    onResolveBuildBlockers?: () => void;
     onClose: () => void;
 }
 
@@ -100,6 +103,9 @@ export function ConvertToTasksModal({
     sourceSpineVersionId,
     artifactContent,
     projectName,
+    buildBlocked = false,
+    blockingPlanningItems = [],
+    onResolveBuildBlockers,
     onClose,
 }: ConvertToTasksModalProps) {
     const { addToast } = useToastStore();
@@ -168,6 +174,10 @@ export function ConvertToTasksModal({
 
     const handleExport = async () => {
         setReadyError(null);
+        if (buildBlocked) {
+            setReadyError('Finalize blocking planning decisions before exporting build tasks.');
+            return;
+        }
         if (tasks.length === 0) {
             setReadyError('Nothing to export — add at least one task or close this dialog.');
             return;
@@ -241,6 +251,32 @@ export function ConvertToTasksModal({
                 {readyError && (
                     <div className="mx-4 mt-4">
                         <ErrorBanner message={readyError} onDismiss={() => setReadyError(null)} />
+                    </div>
+                )}
+
+                {buildBlocked && (
+                    <div role="alert" className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-red-950">
+                        <p className="text-sm font-semibold">Task export is waiting on Finalize</p>
+                        <p className="mt-1 text-xs leading-5 text-red-800">
+                            {blockingPlanningItems.length} explicitly blocking planning item{blockingPlanningItems.length === 1 ? '' : 's'} must be
+                            resolved or accepted before tasks leave Synapse.
+                        </p>
+                        {blockingPlanningItems.length > 0 && (
+                            <ul className="mt-2 space-y-1 text-xs text-red-800">
+                                {blockingPlanningItems.slice(0, 3).map(item => (
+                                    <li key={item.recordId}>• {item.title}</li>
+                                ))}
+                            </ul>
+                        )}
+                        {onResolveBuildBlockers && (
+                            <button
+                                type="button"
+                                onClick={onResolveBuildBlockers}
+                                className="mt-3 rounded-md bg-red-700 px-3 py-2 text-xs font-semibold text-white hover:bg-red-800"
+                            >
+                                Open Finalize checkpoint
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -425,7 +461,7 @@ export function ConvertToTasksModal({
                         <button
                             type="button"
                             onClick={handleExport}
-                            disabled={exporting || tasks.length === 0}
+                            disabled={buildBlocked || exporting || tasks.length === 0}
                             className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-neutral-300 rounded-lg transition"
                         >
                             {exporting && <Loader2 size={14} className="animate-spin" />}

@@ -73,7 +73,7 @@ spine has `generationMeta.failedSections` — `startAssetGeneration`'s
 `acknowledgeIncomplete` flag may only ever carry a real user acknowledgement.
 When output generation starts while planning items are still open,
 `handleGenerateAssets` then offers the inline advisory
-`PreBuildCheckpointCard` once per workspace session below the stage rail. It
+`PreBuildCheckpointCard` once per workspace session below the journey rail. It
 names one exact, ranked planning item and offers Review first / Generate
 outputs / Not now. Generating always proceeds; the hard generation gate stays
 safety/PRD-only plus the incomplete-PRD acknowledgement
@@ -227,7 +227,10 @@ stale and why, and the safe update order. See
   `artifactJobController.regenerateSlots(slots, args)` batch. Careful sync is
   advanced disclosure over the existing immutable per-region downstream update
   plans; those plans are prepared idempotently in the background when inputs
-  drift but never apply changes or verdicts automatically. A dependent cannot
+  drift, and their exact-region proposals are projected into the Review-stage
+  output-sync queue. Preparation returns partial results and never records a
+  review decision, applies content, promotes a version, or manufactures user
+  authority. A dependent cannot
   be marked current while a troubled upstream is skipped or regenerated.
   Manual edits are called out because regeneration appends a version rather
   than overwriting the preferred one. Active jobs, project capabilities,

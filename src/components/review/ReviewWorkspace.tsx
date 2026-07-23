@@ -15,10 +15,9 @@ import {
     Sparkles,
     X,
 } from 'lucide-react';
-import {
-    DecisionCenter,
-    type DecisionAction,
-    type DecisionCenterRecordView,
+import type {
+    DecisionAction,
+    DecisionCenterRecordView,
 } from './DecisionCenter';
 import type {
     AssumptionEvidenceActionGuard,
@@ -154,8 +153,10 @@ export interface ReviewWorkspaceProps {
     onActOnIssue: (runId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => void;
     onReopenIssue: (runId: string, issueId: string, reason: string, expectedUpdatedAt: number) => void;
     onTriageFinding: (runId: string, findingId: string) => void;
-    onConfirmPlanningRecord: (recordId: string) => void;
-    onReopenPlanningRecord: (recordId: string) => void;
+    /** @deprecated Decision Center authority now lives in DecisionCenterContainer. */
+    onConfirmPlanningRecord?: (recordId: string) => void;
+    /** @deprecated Decision Center authority now lives in DecisionCenterContainer. */
+    onReopenPlanningRecord?: (recordId: string) => void;
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPrepareDecisionOptions?: (recordId: string) => void;
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
@@ -852,11 +853,13 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
 
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     const openDecisionCount = props.openDecisionCount ?? 0;
-    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? (openDecisionCount > 0 ? 'decisions' : 'review'));
+    const normalizeTab = (tab: ReviewWorkspaceProps['initialTab']): 'review' | 'history' =>
+        tab === 'history' ? 'history' : 'review';
+    const [tab, setTab] = useState<'review' | 'history'>(() => normalizeTab(props.initialTab));
     const [lastInitialTab, setLastInitialTab] = useState(props.initialTab);
     if (props.initialTab !== lastInitialTab) {
         setLastInitialTab(props.initialTab);
-        if (props.initialTab) setTab(props.initialTab);
+        if (props.initialTab) setTab(normalizeTab(props.initialTab));
     }
     const [startingNewReview, setStartingNewReview] = useState(false);
     const activeRun = startingNewReview ? undefined : (props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0]);
@@ -867,51 +870,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
             <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
                 <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
-                    <button type="button" aria-label="Decision Center" onClick={() => setTab('decisions')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Decisions</span><span aria-hidden="true" className="hidden sm:inline">Decision Center</span></button>
-                    {/* Visible labels stay one naming family across breakpoints —
-                        "Decision Center" is the documented product name, and the
-                        other two tabs read identically on mobile and desktop
-                        ("Findings" / "History"). The fuller aria-label keeps the
-                        accessible name unambiguous regardless of viewport. */}
                     <button type="button" aria-label="Review findings" onClick={() => setTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">Findings</span></button>
                     <button type="button" aria-label="Review history" onClick={() => setTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">History</span></button>
                 </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-                {tab === 'decisions' ? (
-                    <DecisionCenter
-                        records={props.planningRecords}
-                        initialSelectedId={props.initialDecisionId}
-                        readOnly={props.readOnly}
-                        onDecide={(recordId, action, value, rationale) => {
-                            if (props.onDecidePlanningRecord) {
-                                props.onDecidePlanningRecord(recordId, action, value, rationale);
-                            } else if (action === 'reopen') {
-                                props.onReopenPlanningRecord(recordId);
-                            } else if (action === 'confirm' || action === 'custom') {
-                                props.onConfirmPlanningRecord(recordId);
-                            }
-                        }}
-                        onPrepareOptions={props.onPrepareDecisionOptions}
-                        onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
-                        onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
-                        onReviewAlignmentProposal={props.onReviewAlignmentProposal}
-                        onRequestAlignmentProposal={props.onRequestAlignmentProposal}
-                        onGenerateAssumptionValidationPlan={props.onGenerateAssumptionValidationPlan}
-                        onRecordAssumptionValidationPlan={props.onRecordAssumptionValidationPlan}
-                        onAddAssumptionEvidence={props.onAddAssumptionEvidence}
-                        onCorrectAssumptionEvidence={props.onCorrectAssumptionEvidence}
-                        onRetractAssumptionEvidence={props.onRetractAssumptionEvidence}
-                        onInterpretAssumptionEvidence={props.onInterpretAssumptionEvidence}
-                        onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
-                        onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
-                        onReopenAssumptionOutcome={props.onReopenAssumptionOutcome}
-                        onContinueToExplore={props.onContinueToExplore}
-                        recommendationBatchBusy={props.recommendationBatchBusy}
-                        recommendationBatchResult={props.recommendationBatchResult}
-                        onAcceptRecommendations={props.onAcceptRecommendations}
-                    />
-                ) : tab === 'history' ? (
+                {tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
                         <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Review history</h1>
                         <p className="mt-1 text-sm text-neutral-500">Each review remains attached to the exact project versions it inspected.</p>

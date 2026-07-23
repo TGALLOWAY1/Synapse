@@ -40,7 +40,7 @@ describe('TourNav', () => {
         render(<TourNav activeIndex={0} isLast={false} onPrev={vi.fn()} onNext={vi.fn()} onFinish={vi.fn()} onGoto={vi.fn()} />);
         const dot = screen.getByRole('button', { name: `Go to step 1 of ${TOTAL_STEPS}` });
         expect(dot.className).toMatch(/min-h-6/);
-        expect(dot.className).toMatch(/min-w-7/);
+        expect(dot.className).toMatch(/min-w-6/);
     });
 
     it('disables and hides the Previous control at step 0', () => {

@@ -5,16 +5,10 @@ import { useProjectStore } from '../../store/projectStore';
 import { ReviewWorkspaceContainer } from '../review/ReviewWorkspaceContainer';
 
 vi.mock('../review/ReviewWorkspace', () => ({
-    ReviewWorkspace: ({ projectName, onReopenAssumptionOutcome, onAcceptRecommendations }: {
+    ReviewWorkspace: ({ projectName }: {
         projectName: string;
-        onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
-        onAcceptRecommendations?: (candidates: unknown[]) => void;
     }) => (
-        <div
-            data-testid="review-workspace"
-            data-reopen-handler={typeof onReopenAssumptionOutcome}
-            data-batch-handler={typeof onAcceptRecommendations}
-        >
+        <div data-testid="review-workspace">
             {projectName}
         </div>
     ),
@@ -83,8 +77,6 @@ describe('ReviewWorkspaceContainer project collection selectors', () => {
 
         expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} />)).not.toThrow();
         expect(screen.getByTestId('review-workspace')).toHaveTextContent('Signal Notes');
-        expect(screen.getByTestId('review-workspace')).toHaveAttribute('data-reopen-handler', 'function');
-        expect(screen.getByTestId('review-workspace')).toHaveAttribute('data-batch-handler', 'function');
     });
 
     it('mounts a real structured project when review collections are seeded', () => {

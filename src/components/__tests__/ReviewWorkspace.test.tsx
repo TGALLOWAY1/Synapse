@@ -82,28 +82,27 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
 });
 
 describe('ReviewWorkspace', () => {
-    it('updates the active surface when an exact target arrives while mounted', () => {
+    it('keeps legacy Decision Center targets on the critique surface during integration', () => {
         const props = baseProps({ initialTab: 'review' });
         const { rerender } = render(<ReviewWorkspace {...props} />);
         expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
 
         rerender(<ReviewWorkspace {...props} initialTab="decisions" />);
-        expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
-        expect(screen.getByRole('heading', { name: 'Decision Center' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
+        expect(screen.queryByRole('heading', { name: 'Decision Center' })).toBeNull();
     });
 
-    it('keeps all three navigation targets reachable at mobile width', () => {
+    it('keeps both critique navigation targets reachable at mobile width', () => {
         render(<ReviewWorkspace {...baseProps()} />);
 
         const findings = screen.getByRole('button', { name: 'Review findings' });
-        const decisions = screen.getByRole('button', { name: 'Decision Center' });
         const history = screen.getByRole('button', { name: 'Review history' });
-        for (const tab of [findings, decisions, history]) {
+        for (const tab of [findings, history]) {
             expect(tab).toHaveClass('min-h-12', 'flex-1', 'min-w-0', 'sm:flex-none');
         }
         expect(findings).toHaveTextContent('Findings');
-        expect(decisions).toHaveTextContent('Decisions');
         expect(history).toHaveTextContent('History');
+        expect(screen.queryByRole('button', { name: 'Decision Center' })).toBeNull();
     });
 
     it('starts a recommended review with the selected panel and optional focus', () => {
@@ -256,32 +255,6 @@ describe('ReviewWorkspace', () => {
         expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
     });
 
-    it('keeps proposed specialist records distinct from confirmed decisions', () => {
-        const records: PlanningRecordView[] = [{
-            id: 'record-1',
-            type: 'decision',
-            title: 'Choose the source-file retention period',
-            status: 'proposed',
-            statement: 'Choose a retention period.',
-            sourceLabels: ['specialist review'],
-            history: [],
-            sourceIssueIds: ['issue-1'],
-            createdAt: 1_700_000_000_000,
-        }];
-        const onConfirmPlanningRecord = vi.fn();
-        render(<ReviewWorkspace {...baseProps({ planningRecords: records, onConfirmPlanningRecord })} />);
-
-        const decisionCenterTab = screen.getByRole('button', { name: 'Decision Center' });
-        expect(decisionCenterTab).not.toHaveTextContent('1');
-        fireEvent.click(decisionCenterTab);
-        expect(screen.getAllByText('Needs your decision').length).toBeGreaterThan(0);
-        const save = screen.getByRole('button', { name: 'Save decision' });
-        expect(save).toBeDisabled();
-        fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Retain source files for 30 days.' } });
-        fireEvent.click(save);
-        expect(onConfirmPlanningRecord).toHaveBeenCalledWith('record-1');
-    });
-
     it('starts a new version-linked review after a completed run', () => {
         const onStartReview = vi.fn();
         render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], onStartReview })} />);
@@ -385,11 +358,11 @@ describe('ReviewWorkspace', () => {
     });
 
     describe('non-blocking critique suggestion', () => {
-        it('renders the Decision Center first, then Findings, then History', () => {
+        it('keeps Findings and critique History together in the Refine surface', () => {
             render(<ReviewWorkspace {...baseProps()} />);
-            const tabs = screen.getAllByRole('button', { name: /Decision Center|Review findings|Review history/ });
+            const tabs = screen.getAllByRole('button', { name: /Review findings|Review history/ });
             expect(tabs.map(tab => tab.getAttribute('aria-label'))).toEqual([
-                'Decision Center', 'Review findings', 'Review history',
+                'Review findings', 'Review history',
             ]);
         });
 
@@ -399,11 +372,9 @@ describe('ReviewWorkspace', () => {
             expect(screen.queryByText(/open items? — critiquing now may re-raise/)).not.toBeInTheDocument();
         });
 
-        it('orients to the Decision Center but keeps critique enabled when items are open', () => {
+        it('keeps critique enabled and shows advisory open-item context', () => {
             render(<ReviewWorkspace {...baseProps({ openDecisionCount: 3 })} />);
-            expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
-
-            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
+            expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
             expect(screen.getByText('3 open items — critiquing now may re-raise them.')).toBeInTheDocument();
             expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeEnabled();
         });

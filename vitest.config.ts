@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -13,5 +13,10 @@ export default defineConfig({
         environment: 'jsdom',
         globals: true,
         setupFiles: ['./src/test/setup.ts'],
+        // Local git worktrees can contain tests from older branches. Running
+        // them from this repository root makes their cwd-based source reads
+        // target the current checkout, producing duplicate and contradictory
+        // assertions.
+        exclude: [...configDefaults.exclude, '**/.worktrees/**'],
     },
 });
