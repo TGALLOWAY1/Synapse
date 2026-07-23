@@ -18,10 +18,13 @@ that work, and what should change next.
 ## 0. Executive summary
 
 **The good news, confirmed in code:** the forward path is already almost entirely
-ungated. Only four things hard-block progress toward outputs: a missing Gemini key
+ungated. Only five things hard-block progress toward outputs: a missing Gemini key
 (`HomePage.tsx:204-207`), a safety-blocked spine (`artifactGenerationGate.ts:44-45`),
-the absence of a structured PRD (`:47-48`), and an unacknowledged incomplete PRD
-(`:56-57`). Open decisions never block Explore/Build
+the absence of a structured PRD (`:47-48`), an unacknowledged incomplete PRD
+(`:56-57`), and — conditionally, when no design-system preset was ever chosen
+(setup skipped or legacy project) — the visual-direction picker, which intercepts
+asset generation until a preset is picked and aborts it on cancel
+(`ProjectWorkspace.tsx:1004-1015,984-992`). Open decisions never block Explore/Build
 (`ProjectWorkspace.tsx:881-883`), export is never blocked
 (`ExportModal.tsx:330,344,357,370`), and the Decision Center itself says "Open items
 never block your design assets" (`DecisionCenter.tsx:334-341`).
@@ -41,12 +44,13 @@ never block your design assets" (`DecisionCenter.tsx:334-341`).
    apply → verify → verification review. That is 8–10 distinct approvals across
    three different UI vocabularies for one intent (evidence in §1.4, Loops A+C).
 3. **Asymmetry.** The *forward* path got the Phase 6 simplification; the
-   *backward* (correction) path did not. There are **three competing correction
-   systems** — the surgical per-region update-plan flow
-   (`DownstreamUpdatePlanReview.tsx`), the coarse re-finalize
-   `UpdateAssetsPlanModal` (Regenerate / Mark up to date / Decide later), and the
-   Dependency Graph's Update / Confirm aligned actions — with no guidance on
-   which to use, plus three distinct "confirm aligned" flows.
+   *backward* (correction) path did not. There are **two competing live
+   correction systems** — the surgical per-region update-plan flow
+   (`DownstreamUpdatePlanReview.tsx`) and the Dependency Graph's Update /
+   Confirm aligned actions — with no guidance on which to use, plus three
+   distinct "confirm aligned" flows. A third, friendlier triage UI
+   (`UpdateAssetsPlanModal`: Regenerate / Mark up to date / Decide later) is
+   fully built and tested but **wired into no render path** — dead UI.
 4. **A severed loop.** The single most common real-world backward journey —
    *"I found a missing requirement while reviewing a generated screen"* — has
    **no affordance**. Screens review offers only local edit / dismiss / risk
@@ -60,7 +64,7 @@ never block your design assets" (`DecisionCenter.tsx:334-341`).
 The proposal (§4–§8): keep the four hard gates exactly as they are, present the
 journey as a six-step linear rail (Define → Refine → Finalize → Generate →
 Review → Build), turn the Decision Center into a persistent slide-over layer
-instead of a stage destination, collapse the three correction systems into one
+instead of a stage destination, collapse the correction systems into one
 two-speed "Sync outputs" flow, and add the missing screen→plan affordance.
 
 ---
@@ -127,7 +131,10 @@ flowchart TD
         IG -->|yes| ACK["ConfirmDialog: 'Generate anyway'<br/>(HARD until acknowledged)"]
         IG -->|no| PBC
         ACK --> PBC["PreBuildCheckModal (once/session):<br/>'Review decisions first' / 'Generate anyway'<br/>(ADVISORY)"]
-        PBC --> ARTS["Bundle generation: 7 core artifacts<br/>in dependency layers + mockup last"]
+        PBC --> PRE{"Design preset set?"}
+        PRE -->|no| DSP["DesignSystemPresetChoice<br/>(HARD until chosen; cancel aborts)"]
+        DSP --> ARTS
+        PRE -->|yes| ARTS["Bundle generation: 7 core artifacts<br/>in dependency layers + mockup last"]
         ARTS --> NR{"Blocking validation?"}
         NR -->|fails| AMBER["needs_review amber banner —<br/>only remedy: Regenerate<br/>(no accept-anyway)"]
         NR -->|passes| DONE["Artifacts done<br/>(advisory warnings computed<br/>but never rendered)"]
@@ -160,6 +167,7 @@ echo surfaces. "HARD" appears exactly four times; everything else is advisory.
 | Safety `allowed_with_restrictions` | Advisory (constraint directive + card) | `prdService.ts:99-102`, `ProjectWorkspace.tsx:1605-1607` |
 | No structured PRD | **Hard** (Challenge/Build tabs disabled; generation gate) | `ProjectWorkspace.tsx:1433-1435`, `artifactGenerationGate.ts:47-48` |
 | Incomplete PRD → asset generation | **Hard until acknowledged** ("Generate anyway") | `ProjectWorkspace.tsx:1037-1041`, `artifactGenerationGate.ts:56-57` |
+| No design-system preset → asset generation | **Hard until chosen** (picker interposed; cancel aborts the generate attempt) — conditional: fires only when setup was skipped or on legacy projects | `ProjectWorkspace.tsx:1004-1015,984-992` |
 | Critique (Findings tab) while decisions open | **Soft gate** — bulk "defer remaining N" escape hatch | `ProjectWorkspace.tsx:582`, `ReviewWorkspaceContainer.tsx:134-141` |
 | PreBuildCheckModal | Advisory, once per session, "Generate anyway" always proceeds | `PreBuildCheckModal.tsx:56-63` |
 | Dependency sufficiency (required deps) | **Hard per-artifact**, pre-model-call | `artifactDependencyGate.ts:44-53`, `coreArtifactService.ts:538-540` |
@@ -207,11 +215,14 @@ generation; 8 conservative guards; user never approves it; only trace is a
 version-history one-liner (`prdConsistencyReview.ts:429-430,517`). This is the
 one loop with the *right* shape: automatic, guarded, invisible.
 
-**Competing with Loop C** are two other correction systems: the re-finalize
-`UpdateAssetsPlanModal` (Regenerate / Mark up to date / Decide later per asset —
-far coarser and friendlier, `UpdateAssetsPlanModal.tsx:10,45-49`) and the
-Dependency Graph's per-node Update / Confirm aligned / batch regenerate in
-dependency order (`DependencyGraphView.tsx:766-812`).
+**Competing with Loop C** is one other *live* correction system: the Dependency
+Graph's per-node Update / Confirm aligned / batch regenerate in dependency order
+(`DependencyGraphView.tsx:766-812`). A third triage UI exists in the codebase —
+`UpdateAssetsPlanModal` (Regenerate / Mark up to date / Decide later per asset,
+far coarser and friendlier, `UpdateAssetsPlanModal.tsx:10,45-49`) — but it is
+**unreachable**: it is exported and tested, yet no component renders it; the
+commit/readiness flow goes straight from `FinalizationSuccessModal` to
+`startAssetGeneration` (`ProjectWorkspace.tsx:917-945,969-982`).
 
 ### 1.5 Where the Decision Center appears, and how users get back
 
@@ -310,9 +321,10 @@ user faces **three uncoordinated repair options**: surgical update plans (not
 available for design_system or mockups — `ArtifactWorkspace.tsx:989`), Dependency
 Graph batch regenerate, or per-artifact Regenerate. No surface compares their
 cost ("surgical preserves your overlays and versions region-by-region;
-regenerate is faster but starts overlays clean"). The re-finalize
-`UpdateAssetsPlanModal` — the friendliest triage UI — only appears if the user
-happens to go re-commit the plan (`UpdateAssetsPlanModal.tsx:1-6`).
+regenerate is faster but starts overlays clean"). The friendliest triage UI for
+exactly this moment — `UpdateAssetsPlanModal` — is built and tested but wired
+into no render path, so the user never sees it (confirmed by repo-wide search:
+component/barrel/test/docs only).
 
 ### 2.7 "Returning user with an unfinished project"
 
@@ -342,9 +354,9 @@ open decisions, stale outputs, or unfinished reviews.
    (attention items, dedup by durable identity) but the echo surfaces each still
    render their own copy of the count. The user can't distinguish "one thing,
    mentioned often" from "many things."
-4. **Three correction systems + three confirm-aligned flows** (§1.4, §2.6) with
-   no routing guidance. Duplicate review ceremonies for the same underlying
-   question ("is this output still right?").
+4. **Two live correction systems (plus one unreachable) + three confirm-aligned
+   flows** (§1.4, §2.6) with no routing guidance. Duplicate review ceremonies
+   for the same underlying question ("is this output still right?").
 5. **Every fresh project opens with 4–8 'decisions.'** Imported assumptions are
    queued before the user has read the PRD; the critique is gated behind
    answering/deferring all of them. The calm "Sharpen my plan" framing (Phase 6)
@@ -357,7 +369,8 @@ open decisions, stale outputs, or unfinished reviews.
    computed and persisted but rendered by no component — pure cost, zero user
    value **(assumption: no dynamic read path missed)**. Meanwhile the screens
    review checklist model (`screenReviewWorkflow.ts:424-468`) is computed but
-   unrendered, and `createFeedbackItem` has no callers — dead UX mass.
+   unrendered, `createFeedbackItem` has no callers, and `UpdateAssetsPlanModal`
+   is built and tested but rendered by nothing — dead UX mass.
 8. **Completion criteria are unclear at the end.** There is no "Build the
    application" moment: the terminal state is an export modal whose handoff is
    stamped "exploratory" unless a governance ritual (commit) was performed —
@@ -555,8 +568,9 @@ products.
 ### Tier 2 — medium-term changes
 
 8. **Two-speed "Sync outputs":** one entry point for post-change correction.
-   Quick sync = `regenerateSlots` in dependency order with the
-   `UpdateAssetsPlanModal`-style triage (Regenerate / Mark up to date / Later);
+   Quick sync = `regenerateSlots` in dependency order fronted by the triage UI
+   that already exists but is unwired (`UpdateAssetsPlanModal`: Regenerate /
+   Mark up to date / Later — revive it rather than building new);
    Careful sync = the existing per-region proposal flow, behind an "advanced"
    disclosure. Auto-generate the update plans in the background when drift is
    detected (generation is already deterministic and stale-safe) so the user
@@ -599,8 +613,9 @@ products.
 **Confirmed** (direct code evidence, cited inline throughout): every gate in
 §1.3; the loop sequences in §1.4; the ten Decision Center entry surfaces; the
 absence of a screens→plan affordance; the absence of a global resume surface;
-the unrendered advisory warnings / checklist / feedback-item paths (via
-zero-caller greps); the three correction systems; export never blocking.
+the unrendered advisory warnings / checklist / feedback-item /
+`UpdateAssetsPlanModal` paths (via zero-caller greps); the two live correction
+systems; the conditional design-preset gate; export never blocking.
 
 **Assumptions** (flagged where used): the "4–8 decisions per fresh run" figure
 comes from prompt-declared ranges, not live pipeline runs; advisory
