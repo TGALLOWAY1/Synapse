@@ -75,7 +75,7 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
     {
         subtype: 'implementation_plan',
         title: 'Implementation Plan',
-        description: 'Milestones, prompt packs, and quality gates',
+        description: 'Milestones and copy-ready prompt packs',
         // True data deps: the consolidated plan links milestones to screen and
         // entity names and writes prompt packs that reference them, so it
         // needs those artifacts' output as prompt context. user_flows is

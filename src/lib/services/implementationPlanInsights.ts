@@ -1,56 +1,39 @@
 /**
  * Pure render-time derivations for the Implementation Plan view: prompt-pack
- * build order and "next prompt" resolution, quality-gate rows with milestone/
- * prompt linkage, the coverage matrix with change-impact analysis, critical
- * path resolution, and structured prompt previews. No store/LLM/React access.
+ * build order and "next prompt" resolution, the coverage matrix with
+ * change-impact analysis, and structured prompt previews. No store/LLM/React
+ * access.
  *
- * Gate run-status is NEVER invented: every gate defaults to `not_run`. Only a
- * user-set status — persisted as the `planProgress` metadata overlay on the
- * implementation_plan ArtifactVersion (same pattern as screenEdits /
- * promptEdits: per-version, cleared by regeneration) — can change it. Copied
- * prompt packs are tracked in the same overlay so "Copy next prompt" advances.
+ * Copied prompt packs are tracked in the `planProgress` metadata overlay on
+ * the implementation_plan ArtifactVersion (same pattern as screenEdits /
+ * promptEdits: per-version, cleared by regeneration) so "Copy next prompt"
+ * advances. (Synapse ends at the plan + prompts handoff — there is no
+ * validation/quality-gate tracking, so no gate status is persisted.)
  */
 
 import type {
     ConsolidatedImplementationPlan,
     ImplementationPromptPack,
-    ImplementationQualityGate,
 } from '../../types';
 
 // --- planProgress metadata overlay ------------------------------------------
 
-export type QualityGateRunStatus = 'not_run' | 'passed' | 'failed' | 'needs_review' | 'blocked';
-
-export const GATE_RUN_STATUSES: QualityGateRunStatus[] = [
-    'not_run', 'passed', 'failed', 'needs_review', 'blocked',
-];
-
 export interface ImplementationPlanProgress {
-    /** User-verified gate outcomes keyed by gate id. Absent = not run. */
-    gateStatuses: Record<string, QualityGateRunStatus>;
     /** Prompt-pack ids the user has copied, in the order they copied them. */
     copiedPacks: string[];
 }
 
-export const EMPTY_PLAN_PROGRESS: ImplementationPlanProgress = { gateStatuses: {}, copiedPacks: [] };
+export const EMPTY_PLAN_PROGRESS: ImplementationPlanProgress = { copiedPacks: [] };
 
 /** Defensively read the overlay off persisted version metadata. */
 export function readPlanProgress(metadata?: Record<string, unknown>): ImplementationPlanProgress {
     const raw = metadata?.planProgress;
     if (!raw || typeof raw !== 'object') return EMPTY_PLAN_PROGRESS;
     const candidate = raw as Partial<ImplementationPlanProgress>;
-    const gateStatuses: Record<string, QualityGateRunStatus> = {};
-    if (candidate.gateStatuses && typeof candidate.gateStatuses === 'object') {
-        for (const [id, status] of Object.entries(candidate.gateStatuses)) {
-            if (GATE_RUN_STATUSES.includes(status as QualityGateRunStatus)) {
-                gateStatuses[id] = status as QualityGateRunStatus;
-            }
-        }
-    }
     const copiedPacks = Array.isArray(candidate.copiedPacks)
         ? candidate.copiedPacks.filter((id): id is string => typeof id === 'string')
         : [];
-    return { gateStatuses, copiedPacks };
+    return { copiedPacks };
 }
 
 // --- Plan scope ---------------------------------------------------------------
@@ -87,8 +70,6 @@ export interface OrderedPromptPack {
     milestoneIndex?: number;
     /** Display names of milestones that must complete first. Empty = start anywhere. */
     prerequisiteNames: string[];
-    /** Titles of the owning milestone's quality gates. */
-    relatedGateTitles: string[];
 }
 
 /** All prompt packs in recommended execution order (milestone order, then unassigned). */
@@ -105,12 +86,11 @@ export function orderPromptPacks(plan: ConsolidatedImplementationPlan): OrderedP
                 milestoneName: m.name,
                 milestoneIndex,
                 prerequisiteNames: (m.dependencies ?? []).map(d => nameById.get(d) ?? d),
-                relatedGateTitles: (m.qualityGates ?? []).map(g => g.title),
             });
         }
     });
     for (const pack of plan.unassignedPromptPacks) {
-        out.push({ pack, order: order++, prerequisiteNames: [], relatedGateTitles: [] });
+        out.push({ pack, order: order++, prerequisiteNames: [] });
     }
     return out;
 }
@@ -121,107 +101,6 @@ export function findNextPromptPack(
     copiedPackIds: ReadonlySet<string>,
 ): OrderedPromptPack | null {
     return ordered.find(o => !copiedPackIds.has(o.pack.id)) ?? null;
-}
-
-// --- Quality-gate rows ----------------------------------------------------------
-
-export interface QualityGateRowModel {
-    gate: ImplementationQualityGate;
-    /** Absent for plan-wide (global) gates. */
-    milestoneId?: string;
-    milestoneName?: string;
-    milestoneIndex?: number;
-    /** Titles of the owning milestone's prompt packs (the work this gate checks). */
-    relatedPackTitles: string[];
-    /** The owning milestone's validation commands — the concrete "how to verify". */
-    verifyCommands: string[];
-    /** "M2 · Ingestion UI" for required milestone gates — what this gate blocks. */
-    blocksLabel?: string;
-}
-
-export function buildGateRows(plan: ConsolidatedImplementationPlan): QualityGateRowModel[] {
-    const rows: QualityGateRowModel[] = plan.globalQualityGates.map(gate => ({
-        gate,
-        relatedPackTitles: [],
-        verifyCommands: [],
-    }));
-    plan.milestones.forEach((m, milestoneIndex) => {
-        for (const gate of m.qualityGates ?? []) {
-            rows.push({
-                gate,
-                milestoneId: m.id,
-                milestoneName: m.name,
-                milestoneIndex,
-                relatedPackTitles: (m.promptPacks ?? []).map(p => p.title),
-                verifyCommands: m.validationCommands ?? [],
-                blocksLabel: gate.required ? `M${milestoneIndex + 1} · ${m.name}` : undefined,
-            });
-        }
-    });
-    return rows;
-}
-
-export interface GateStatusSummary {
-    total: number;
-    required: number;
-    byStatus: Record<QualityGateRunStatus, number>;
-}
-
-export function summarizeGateStatuses(
-    rows: QualityGateRowModel[],
-    statuses: Record<string, QualityGateRunStatus>,
-): GateStatusSummary {
-    const byStatus: Record<QualityGateRunStatus, number> = {
-        not_run: 0, passed: 0, failed: 0, needs_review: 0, blocked: 0,
-    };
-    for (const row of rows) {
-        byStatus[statuses[row.gate.id] ?? 'not_run']++;
-    }
-    return {
-        total: rows.length,
-        required: rows.filter(r => r.gate.required).length,
-        byStatus,
-    };
-}
-
-const GATE_STATUS_MARKDOWN_LABELS: Record<QualityGateRunStatus, string> = {
-    not_run: 'Not run',
-    passed: 'Passed',
-    failed: 'Failed',
-    needs_review: 'Needs review',
-    blocked: 'Blocked',
-};
-
-/** A copyable manual-validation checklist (checked only for user-verified passes). */
-export function validationChecklistMarkdown(
-    rows: QualityGateRowModel[],
-    statuses: Record<string, QualityGateRunStatus>,
-): string {
-    const lines: string[] = ['# Validation Checklist', ''];
-    const render = (row: QualityGateRowModel) => {
-        const status = statuses[row.gate.id] ?? 'not_run';
-        const mark = status === 'passed' ? 'x' : ' ';
-        const meta = [row.gate.category, row.gate.required ? 'required' : 'optional'];
-        if (status !== 'not_run') meta.push(GATE_STATUS_MARKDOWN_LABELS[status]);
-        lines.push(`- [${mark}] ${row.gate.title} _(${meta.join(' · ')})_`);
-        if (row.gate.description) lines.push(`  - Why: ${row.gate.description}`);
-        for (const cmd of row.verifyCommands) lines.push(`  - Verify: \`${cmd}\``);
-    };
-    const global = rows.filter(r => !r.milestoneId);
-    if (global.length) {
-        lines.push('## Plan-wide gates', '');
-        global.forEach(render);
-        lines.push('');
-    }
-    const seen = new Set<string>();
-    for (const row of rows) {
-        if (!row.milestoneId || seen.has(row.milestoneId)) continue;
-        seen.add(row.milestoneId);
-        lines.push(`## M${(row.milestoneIndex ?? 0) + 1} · ${row.milestoneName}`, '');
-        rows.filter(r => r.milestoneId === row.milestoneId).forEach(render);
-        lines.push('');
-    }
-    return lines.join('\n').trim() + '\n';
 }
 
 // --- Coverage matrix + change impact ---------------------------------------------
@@ -241,7 +120,6 @@ export interface CoverageRowModel {
     dataModels: CoverageCell;
     components: CoverageCell;
     promptPacks: CoverageCell;
-    qualityGates: CoverageCell;
     /** Human-readable gaps ("No prompt pack", "No linked screens"). Empty = covered. */
     gaps: string[];
 }
@@ -258,7 +136,6 @@ export interface ChangeImpactEntry {
     scope: 'all' | 'some' | 'none' | 'unknown';
     milestones: Array<{ id: string; title: string; index: number }>;
     promptPackCount: number;
-    qualityGateCount: number;
     note: string;
 }
 
@@ -279,9 +156,6 @@ function coverageCell(items: string[], kindTracked: boolean): CoverageCell {
 export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): CoverageMatrix {
     const packTitleById = new Map<string, string>();
     for (const o of orderPromptPacks(plan)) packTitleById.set(o.pack.id, o.pack.title);
-    const gateTitleById = new Map<string, string>();
-    plan.globalQualityGates.forEach(g => gateTitleById.set(g.id, g.title));
-    plan.milestones.forEach(m => (m.qualityGates ?? []).forEach(g => gateTitleById.set(g.id, g.title)));
 
     const tracked = {
         screens: plan.traceability.some(r => r.screens.length > 0),
@@ -294,10 +168,8 @@ export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): Cover
         const dataModels = coverageCell(r.dataModels, tracked.dataModels);
         const components = coverageCell(r.components, tracked.components);
         const promptPacks = coverageCell(r.promptPackIds.map(id => packTitleById.get(id) ?? id), true);
-        const qualityGates = coverageCell(r.qualityGateIds.map(id => gateTitleById.get(id) ?? id), true);
         const gaps: string[] = [];
         if (promptPacks.state === 'missing') gaps.push('No prompt pack');
-        if (qualityGates.state === 'missing') gaps.push('No quality gates');
         if (screens.state === 'missing') gaps.push('No linked screens');
         if (dataModels.state === 'missing') gaps.push('No linked data models');
         if (components.state === 'missing') gaps.push('No linked components');
@@ -305,7 +177,7 @@ export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): Cover
             milestoneId: r.milestoneId,
             milestoneTitle: r.milestoneTitle,
             milestoneIndex: index,
-            screens, dataModels, components, promptPacks, qualityGates,
+            screens, dataModels, components, promptPacks,
             gaps,
         };
     });
@@ -319,14 +191,13 @@ export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): Cover
     ): ChangeImpactEntry => {
         const milestones = affected.map(r => ({ id: r.milestoneId, title: r.milestoneTitle, index: r.milestoneIndex }));
         const promptPackCount = affected.reduce((n, r) => n + r.promptPacks.items.length, 0);
-        const qualityGateCount = affected.reduce((n, r) => n + r.qualityGates.items.length, 0);
         if (!kindTracked) {
-            return { source, label, scope: 'unknown', milestones: [], promptPackCount: 0, qualityGateCount: 0, note: notes.unknown };
+            return { source, label, scope: 'unknown', milestones: [], promptPackCount: 0, note: notes.unknown };
         }
         if (affected.length === 0) {
-            return { source, label, scope: 'none', milestones: [], promptPackCount: 0, qualityGateCount: 0, note: notes.none };
+            return { source, label, scope: 'none', milestones: [], promptPackCount: 0, note: notes.none };
         }
-        return { source, label, scope: 'some', milestones, promptPackCount, qualityGateCount, note: notes.some };
+        return { source, label, scope: 'some', milestones, promptPackCount, note: notes.some };
     };
 
     const uiRows = rows.filter(r => r.screens.state === 'covered' || r.components.state === 'covered');
@@ -337,8 +208,7 @@ export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): Cover
             scope: 'all',
             milestones: rows.map(r => ({ id: r.milestoneId, title: r.milestoneTitle, index: r.milestoneIndex })),
             promptPackCount: rows.reduce((n, r) => n + r.promptPacks.items.length, 0),
-            qualityGateCount: rows.reduce((n, r) => n + r.qualityGates.items.length, 0) + plan.globalQualityGates.length,
-            note: 'Every milestone, prompt, and gate derives from the PRD — regenerate this plan after meaningful PRD changes.',
+            note: 'Every milestone and prompt derives from the PRD — regenerate this plan after meaningful PRD changes.',
         },
         impactFor('screens', 'Screens changes', rows.filter(r => r.screens.state === 'covered'), tracked.screens, {
             some: 'Milestones that build against the screen inventory.',
@@ -363,35 +233,6 @@ export function buildCoverageMatrix(plan: ConsolidatedImplementationPlan): Cover
         impact,
         gapCount: rows.reduce((n, r) => n + r.gaps.length, 0),
     };
-}
-
-// --- Critical path resolution ------------------------------------------------------
-
-export interface CriticalPathStep {
-    label: string;
-    /** Set when the step resolves to a plan milestone (clickable in the UI). */
-    milestoneId?: string;
-}
-
-/**
- * Resolve `summary.criticalPath` entries — which may be milestone ids
- * (`m_setup`), milestone names, or free text with `→` chains — into display
- * steps linked back to milestones where possible.
- */
-export function resolveCriticalPath(plan: ConsolidatedImplementationPlan): CriticalPathStep[] {
-    const entries = plan.summary.criticalPath ?? [];
-    const byId = new Map(plan.milestones.map(m => [m.id, m] as const));
-    const byName = new Map(plan.milestones.map(m => [m.name.trim().toLowerCase(), m] as const));
-    const steps: CriticalPathStep[] = [];
-    for (const entry of entries) {
-        for (const part of entry.split(/→|->/)) {
-            const label = part.trim();
-            if (!label) continue;
-            const milestone = byId.get(label) ?? byName.get(label.toLowerCase());
-            steps.push(milestone ? { label: milestone.name, milestoneId: milestone.id } : { label });
-        }
-    }
-    return steps;
 }
 
 // --- Structured prompt preview --------------------------------------------------------
