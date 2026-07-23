@@ -197,6 +197,25 @@ const USE_RELAY = args.relay ?? Boolean(PROXY_URL);
 const PROJECTS_KEY_BASE = 'synapse-projects-storage';
 const PROJECTS_KEY_DEV_USER = 'synapse-projects-storage::u:dev-user';
 
+// The app compresses persisted blobs over 16KB with an '__SYNLZ1__' +
+// lz-string UTF-16 prefix (src/store/persistCodec.ts), so any poll that
+// JSON.parses localStorage directly goes blind as soon as the PRD grows past
+// the threshold — generation then "never settles" even though it finished.
+// The lz-string lib is injected into every page (addInitScript below) and
+// polls decode through window.__e2eDecodeBlob.
+const LZ_STRING_SOURCE = readFileSync(
+    join(repoRoot, 'node_modules', 'lz-string', 'libs', 'lz-string.min.js'), 'utf8');
+const DECODE_HELPER_SOURCE = `
+    window.__e2eDecodeBlob = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        if (!raw.startsWith('__SYNLZ1__')) return raw;
+        try {
+            const json = window.LZString.decompressFromUTF16(raw.slice('__SYNLZ1__'.length));
+            return json && json.startsWith('{') ? json : null;
+        } catch { return null; }
+    };
+`;
+
 // ---------------------------------------------------------------------------
 // Chromium / dev-server helpers (mirrors capture-demo-screenshots.mjs)
 // ---------------------------------------------------------------------------
@@ -873,6 +892,10 @@ try {
             .push({ url, method: req.method(), failure });
     });
 
+    // Make the persist-codec decoder available in every page before app code
+    // runs (see LZ_STRING_SOURCE above).
+    await context.addInitScript({ content: LZ_STRING_SOURCE + DECODE_HELPER_SOURCE });
+
     // Seed browser state before any app code runs: the Gemini key in the same
     // localStorage slot the app uses (its legacy-key migration namespaces it to
     // the active user on first read), the tour-completed flag, and — in state
@@ -994,7 +1017,8 @@ try {
                             const k = localStorage.key(i);
                             if (!k || !k.startsWith('synapse-projects-storage')) continue;
                             try {
-                                const state = JSON.parse(localStorage.getItem(k) || '{}').state;
+                                const json = window.__e2eDecodeBlob(localStorage.getItem(k));
+                                const state = JSON.parse(json || '{}').state;
                                 const spines = state?.spineVersions?.[projectId];
                                 if (!spines?.length) continue;
                                 const latest = spines[spines.length - 1];
@@ -1141,7 +1165,8 @@ try {
                                     const k = localStorage.key(i);
                                     if (!k || !k.startsWith('synapse-projects-storage')) continue;
                                     try {
-                                        const state = JSON.parse(localStorage.getItem(k) || '{}').state;
+                                        const json = window.__e2eDecodeBlob(localStorage.getItem(k));
+                                        const state = JSON.parse(json || '{}').state;
                                         const arr = state?.artifacts?.[projectId];
                                         if (!arr?.length) continue;
                                         const ready = arr.filter((a) => a.currentVersionId);

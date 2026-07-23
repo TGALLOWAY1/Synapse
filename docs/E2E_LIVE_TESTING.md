@@ -252,7 +252,11 @@ update the script in the same change (treat drift here like docs drift):
   `Commit to New Spine` buttons (`ConsolidationModal.tsx`).
 - PRD settle signal: `SpineVersion.generationPhase` and the
   `synapse-projects-storage*` persist key prefix (also the `--state`
-  export/seed contract — base key + `::u:dev-user`).
+  export/seed contract — base key + `::u:dev-user`). Persisted blobs over
+  16KB are lz-string compressed with an `__SYNLZ1__` prefix
+  (`src/store/persistCodec.ts`) — the driver injects lz-string into every
+  page and decodes through `window.__e2eDecodeBlob` in both settle polls;
+  parsing localStorage directly goes blind mid-generation.
 - Commit-to-build path: the top-bar `Review readiness` button
   (`ProjectWorkspace.tsx`), the `Finalize plan` / `Finalize with accepted
   risk` / `Finalize with N accepted blockers` buttons and the
