@@ -71,8 +71,9 @@ import type {
     PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
 import {
-    screenNotePlanningSourceKey,
-    type FlagPlanningConcernResult,
+    buildScreenNotePlanningReturnTarget,
+    flagScreenNotePlanningConcern,
+    screenNotePlanningSourceScopeKey,
 } from '../lib/planning/flagToPlan';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
@@ -746,35 +747,6 @@ export function ArtifactWorkspace({
         });
     };
 
-    const flagScreenNote = (
-        screenId: string,
-        request: ScreenNotePlanningRequest,
-    ): FlagPlanningConcernResult => {
-        if (!invArtifact || !invPreferred) {
-            return { status: 'rejected', reason: 'source_not_found' };
-        }
-        return useProjectStore.getState().flagPlanningConcern(projectId, {
-            sourceKey: screenNotePlanningSourceKey({
-                artifactId: invArtifact.id,
-                artifactVersionId: invPreferred.id,
-                screenId,
-                noteId: request.noteId,
-            }),
-            artifactId: invArtifact.id,
-            artifactVersionId: invPreferred.id,
-            artifactSubtype: 'screen_inventory',
-            artifactSlot: 'screen_inventory',
-            spineVersionId,
-            title: request.title,
-            statement: request.statement,
-            materiality: request.materiality,
-            locator: {
-                entityType: 'screen_review_note',
-                entityId: `${screenId}:${request.noteId}`,
-            },
-        });
-    };
-
     // --- Mockup coverage actions --------------------------------------------
     // Add inventory screens to the CURRENT mockup version's extraScreens
     // overlay. No AI call happens here — image generation stays an explicit
@@ -1340,28 +1312,36 @@ export function ArtifactWorkspace({
                         onSaveScreenEdit={capabilities.canEditArtifacts && invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                         onFlagToPlan={
                             capabilities.canPersistWorkflowState && invArtifact && invPreferred
-                                ? (request) => flagScreenNote(detailItem.id, request)
+                                ? (request: ScreenNotePlanningRequest) => flagScreenNotePlanningConcern({
+                                    projectId,
+                                    artifactId: invArtifact.id,
+                                    artifactVersionId: invPreferred.id,
+                                    spineVersionId,
+                                    screenId: detailItem.id,
+                                    request,
+                                }, useProjectStore.getState().flagPlanningConcern)
+                                : undefined
+                        }
+                        planningSourceScopeKey={
+                            invArtifact && invPreferred
+                                ? screenNotePlanningSourceScopeKey({
+                                    artifactId: invArtifact.id,
+                                    artifactVersionId: invPreferred.id,
+                                    screenId: detailItem.id,
+                                })
                                 : undefined
                         }
                         onReviewPlanningRecord={
                             onOpenPlanningRecord && invArtifact
-                                ? (recordId) => onOpenPlanningRecord(recordId, {
-                                    destination: {
-                                        kind: 'screen',
+                                ? (recordId) => onOpenPlanningRecord(
+                                    recordId,
+                                    buildScreenNotePlanningReturnTarget({
                                         artifactId: invArtifact.id,
-                                        nodeId: 'screen_inventory',
                                         screenId: detailItem.id,
+                                        screenName: detailItem.screen.name,
                                         tab: screenTab,
-                                        label: `${detailItem.screen.name} · ${
-                                            screenTab === 'flow'
-                                                ? 'Flow'
-                                                : screenTab === 'mockups'
-                                                    ? 'Mockups'
-                                                    : 'Overview'
-                                        }`,
-                                    },
-                                    label: `Back to ${detailItem.screen.name}`,
-                                })
+                                    }),
+                                )
                                 : undefined
                         }
                         onAddToMockups={

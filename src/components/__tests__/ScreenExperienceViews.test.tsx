@@ -411,16 +411,19 @@ const contractPayload: MockupPayload = {
     screens: [{ id: 'm-sub', name: 'Submission Wizard', purpose: 'p', sourceScreenId: 'scr-submission' }],
 };
 
-function renderContractDetail(
+type ContractDetailOptions = {
+    edits?: Parameters<typeof buildScreenIndex>[3];
+    onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
+    onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
+    onReviewPlanningRecord?: (recordId: string) => void;
+    planningSourceScopeKey?: string;
+    withMockupContext?: boolean;
+    trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
+};
+
+function contractDetailView(
     tab: 'overview' | 'flow' | 'mockups',
-    opts: {
-        edits?: Parameters<typeof buildScreenIndex>[3];
-        onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
-        onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
-        onReviewPlanningRecord?: (recordId: string) => void;
-        withMockupContext?: boolean;
-        trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
-    } = {},
+    opts: ContractDetailOptions = {},
 ) {
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
     const readiness = buildReadinessIndex(index, FEATURES);
@@ -428,7 +431,7 @@ function renderContractDetail(
     // The default mockup ('m-sub') is a genuinely generated image in these
     // tests — seed it so SYN-003 image-presence resolves to 'present'.
     if (opts.withMockupContext !== false) seedDefaultMockupImage('v1', 'm-sub');
-    return render(
+    return (
         <ScreenDetailView
             item={item}
             readiness={readiness.get('scr-submission')}
@@ -442,6 +445,7 @@ function renderContractDetail(
             onSaveScreenEdit={opts.onSaveScreenEdit}
             onFlagToPlan={opts.onFlagToPlan}
             onReviewPlanningRecord={opts.onReviewPlanningRecord}
+            planningSourceScopeKey={opts.planningSourceScopeKey}
             mockupContext={opts.withMockupContext === false ? undefined : {
                 projectId: 'p1',
                 artifactId: 'a1',
@@ -452,8 +456,15 @@ function renderContractDetail(
                 prdVersionLabel: 'Version 3',
                 trustContext: opts.trustContext,
             }}
-        />,
+        />
     );
+}
+
+function renderContractDetail(
+    tab: 'overview' | 'flow' | 'mockups',
+    opts: ContractDetailOptions = {},
+) {
+    return render(contractDetailView(tab, opts));
 }
 
 describe('Phase 2 contract rendering', () => {
@@ -649,6 +660,36 @@ describe('review notes', () => {
         }));
         fireEvent.click(getByRole('button', { name: 'Review now' }));
         expect(onReviewPlanningRecord).toHaveBeenCalledWith('planning-screen-note');
+    });
+
+    it('clears planning feedback when the screen-note source scope changes', () => {
+        const onFlagToPlan = vi.fn((): FlagPlanningConcernResult => ({
+            status: 'created',
+            planningRecordId: 'planning-old-source',
+        }));
+        const options: ContractDetailOptions = {
+            onSaveScreenEdit: vi.fn(),
+            onFlagToPlan,
+            onReviewPlanningRecord: vi.fn(),
+            planningSourceScopeKey: 'inventory-1:version-1:scr-submission',
+        };
+        const view = renderContractDetail('overview', options);
+
+        fireEvent.click(view.getByText('Review notes'));
+        fireEvent.click(view.getAllByRole('button', { name: 'Flag to plan' })[0]);
+        expect(view.getByText('Added to the plan')).toBeTruthy();
+        expect(view.getByRole('button', { name: 'Review now' })).toBeTruthy();
+
+        view.rerender(contractDetailView('overview', {
+            ...options,
+            planningSourceScopeKey: 'inventory-1:version-2:scr-submission',
+        }));
+
+        expect(view.queryByText('Added to the plan')).toBeNull();
+        expect(view.queryByRole('button', { name: 'Review now' })).toBeNull();
+        fireEvent.click(view.getByText('Review notes'));
+        expect(view.getAllByRole('button', { name: 'Flag to plan' })[0]).toBeEnabled();
+        expect(view.queryByRole('button', { name: 'Review now' })).toBeNull();
     });
 });
 

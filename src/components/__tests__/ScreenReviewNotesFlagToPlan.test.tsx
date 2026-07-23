@@ -104,7 +104,13 @@ describe('ScreenReviewNotes Flag to plan', () => {
                 ? { status: 'created', planningRecordId: 'planning-created' }
                 : { status: 'existing', planningRecordId: 'planning-existing' }
         );
-        render(<ScreenReviewNotes {...baseProps} onFlagToPlan={onFlagToPlan} />);
+        render(
+            <ScreenReviewNotes
+                {...baseProps}
+                onFlagToPlan={onFlagToPlan}
+                onReviewPlanningRecord={vi.fn()}
+            />,
+        );
 
         openReviewNotes();
         const createdNote = noteRow('Recovery path is missing');
@@ -115,8 +121,27 @@ describe('ScreenReviewNotes Flag to plan', () => {
 
         expect(within(createdNote).getByRole('status')).toHaveTextContent('Added to the plan');
         expect(within(existingNote).getByRole('status')).toHaveTextContent('Already in the plan');
+        expect(screen.getByRole('button', {
+            name: 'Keep reviewing',
+            description: 'Recovery path is missing',
+        })).toBeTruthy();
+        expect(screen.getByRole('button', {
+            name: 'Keep reviewing',
+            description: 'Loading behavior needs detail',
+        })).toBeTruthy();
+        expect(screen.getByRole('button', {
+            name: 'Review now',
+            description: 'Recovery path is missing',
+        })).toBeTruthy();
+        expect(screen.getByRole('button', {
+            name: 'Review now',
+            description: 'Loading behavior needs detail',
+        })).toBeTruthy();
 
-        fireEvent.click(within(createdNote).getByRole('button', { name: 'Keep reviewing' }));
+        fireEvent.click(screen.getByRole('button', {
+            name: 'Keep reviewing',
+            description: 'Recovery path is missing',
+        }));
         await waitFor(() => expect(createdTrigger).toHaveFocus());
         expect(within(createdNote).queryByRole('status')).toBeNull();
         expect(within(existingNote).getByRole('status')).toHaveTextContent('Already in the plan');

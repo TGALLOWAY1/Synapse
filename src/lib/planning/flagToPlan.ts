@@ -4,6 +4,10 @@ import type {
     PlanningRecord,
 } from '../../types';
 import { planningContentHash } from './planningHash';
+import type {
+    PlanningReturnTarget,
+    PlanningScreenTab,
+} from './planningNavigation';
 
 export type FlagPlanningConcernInput = {
     sourceKey: string;
@@ -28,6 +32,13 @@ export type FlagPlanningConcernResult =
         reason: 'source_not_found' | 'source_changed' | 'spine_not_found';
     };
 
+export type ScreenNotePlanningRequest = {
+    noteId: string;
+    title: string;
+    statement: string;
+    materiality: 'blocking' | 'high' | 'normal' | 'low';
+};
+
 export const screenNotePlanningSourceKey = (input: {
     artifactId: string;
     artifactVersionId: string;
@@ -40,6 +51,94 @@ export const screenNotePlanningSourceKey = (input: {
     input.screenId,
     input.noteId,
 ].join(':');
+
+export const screenNotePlanningSourceScopeKey = (input: {
+    artifactId: string;
+    artifactVersionId: string;
+    screenId: string;
+}): string => [
+    'screen-note-scope',
+    input.artifactId,
+    input.artifactVersionId,
+    input.screenId,
+].join(':');
+
+export const buildScreenNotePlanningConcernInput = (input: {
+    artifactId: string;
+    artifactVersionId: string;
+    spineVersionId: string;
+    screenId: string;
+    request: ScreenNotePlanningRequest;
+}): FlagPlanningConcernInput => ({
+    sourceKey: screenNotePlanningSourceKey({
+        artifactId: input.artifactId,
+        artifactVersionId: input.artifactVersionId,
+        screenId: input.screenId,
+        noteId: input.request.noteId,
+    }),
+    artifactId: input.artifactId,
+    artifactVersionId: input.artifactVersionId,
+    artifactSubtype: 'screen_inventory',
+    artifactSlot: 'screen_inventory',
+    spineVersionId: input.spineVersionId,
+    title: input.request.title,
+    statement: input.request.statement,
+    materiality: input.request.materiality,
+    locator: {
+        entityType: 'screen_review_note',
+        entityId: `${input.screenId}:${input.request.noteId}`,
+    },
+});
+
+export const flagScreenNotePlanningConcern = (
+    input: {
+        projectId: string;
+        artifactId?: string;
+        artifactVersionId?: string;
+        spineVersionId: string;
+        screenId: string;
+        request: ScreenNotePlanningRequest;
+    },
+    flagPlanningConcern: (
+        projectId: string,
+        concern: FlagPlanningConcernInput,
+    ) => FlagPlanningConcernResult,
+): FlagPlanningConcernResult => {
+    if (!input.artifactId || !input.artifactVersionId) {
+        return { status: 'rejected', reason: 'source_not_found' };
+    }
+    return flagPlanningConcern(input.projectId, buildScreenNotePlanningConcernInput({
+        artifactId: input.artifactId,
+        artifactVersionId: input.artifactVersionId,
+        spineVersionId: input.spineVersionId,
+        screenId: input.screenId,
+        request: input.request,
+    }));
+};
+
+export const buildScreenNotePlanningReturnTarget = (input: {
+    artifactId: string;
+    screenId: string;
+    screenName: string;
+    tab: PlanningScreenTab;
+}): PlanningReturnTarget => {
+    const tabLabel = input.tab === 'flow'
+        ? 'Flow'
+        : input.tab === 'mockups'
+            ? 'Mockups'
+            : 'Overview';
+    return {
+        destination: {
+            kind: 'screen',
+            artifactId: input.artifactId,
+            nodeId: 'screen_inventory',
+            screenId: input.screenId,
+            tab: input.tab,
+            label: `${input.screenName} · ${tabLabel}`,
+        },
+        label: `Back to ${input.screenName}`,
+    };
+};
 
 const canonicalizeArtifactConcernContent = (input: {
     title: string;

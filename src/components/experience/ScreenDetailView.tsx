@@ -127,6 +127,8 @@ interface Props {
     onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
     /** Opens the exact planning record returned by onFlagToPlan. */
     onReviewPlanningRecord?: (recordId: string) => void;
+    /** Exact artifact-version + screen identity for note-result state. */
+    planningSourceScopeKey?: string;
 }
 
 export function ScreenDetailView({
@@ -134,7 +136,7 @@ export function ScreenDetailView({
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
-    onOpenUserFlows, onFlagToPlan, onReviewPlanningRecord,
+    onOpenUserFlows, onFlagToPlan, onReviewPlanningRecord, planningSourceScopeKey,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -303,6 +305,7 @@ export function ScreenDetailView({
 
     const reviewNotes = (
         <ScreenReviewNotes
+            key={planningSourceScopeKey}
             issues={reviewModel.issues}
             risks={risks}
             dismissed={dismissed}
