@@ -257,7 +257,15 @@ export function DecisionCenter({
     onAddAssetItemToPlan,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
-    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsVerdict(initialRecord) ? 'needs_review' : 'log') : records.some(needsVerdict) ? 'needs_review' : 'log');
+    const [view, setView] = useState<'needs_review' | 'log'>(() => {
+        if (initialRecord) return needsVerdict(initialRecord) ? 'needs_review' : 'log';
+        if (records.some(needsVerdict)) return 'needs_review';
+        // Nothing needs an answer. Land on the log only when there is resolved
+        // history to show; with no records at all, "Needs attention" reads as
+        // "you're all caught up" rather than the dead-end empty "No resolved
+        // planning history yet".
+        return records.length > 0 ? 'log' : 'needs_review';
+    });
     // The attention queue holds only records that still need an answer. An
     // answered material assumption moves to "Resolved & history" (labeled
     // "Answered · not validated") — validation stays available there, but it
@@ -305,6 +313,27 @@ export function DecisionCenter({
             setCustomAnswer('');
             setRationale('');
             setAnswerChoice(undefined);
+        }
+    }
+    // The center can mount before its store-backed planning records hydrate, so
+    // `records` is briefly empty and the initializer above picks the true-empty
+    // default ('needs_review' = "all caught up"). The `useState` initializer
+    // never re-runs and the initialSelectedId sync only fires on an id *change*,
+    // so once real records arrive we re-derive the default ONCE here — otherwise
+    // an all-resolved history (or a resolved `initialSelectedId`) would be
+    // stranded behind the log tab. Guarded by `awaitingFirstRecords` so a user's
+    // own later tab choice is never overridden, and so a genuinely empty center
+    // keeps the true-empty default.
+    const [awaitingFirstRecords, setAwaitingFirstRecords] = useState(records.length === 0);
+    if (awaitingFirstRecords && records.length > 0) {
+        setAwaitingFirstRecords(false);
+        const hydratedInitial = initialSelectedId ? records.find(record => record.id === initialSelectedId) : undefined;
+        if (hydratedInitial) {
+            setView(needsVerdict(hydratedInitial) ? 'needs_review' : 'log');
+            setSelectedId(hydratedInitial.id);
+            setMobileDetailOpen(true);
+        } else if (!records.some(needsVerdict)) {
+            setView('log');
         }
     }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);

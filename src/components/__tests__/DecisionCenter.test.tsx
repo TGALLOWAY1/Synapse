@@ -348,6 +348,44 @@ describe('DecisionCenter', () => {
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 
+    it('defaults an empty Decision Center to Needs attention, not the empty log', () => {
+        // With no records at all, landing on "Needs attention" reads as
+        // "you're all caught up" rather than the dead-end empty log.
+        render(<DecisionCenter records={[]} {...callbacks()} />);
+        expect(screen.getByText('Nothing needs an answer')).toBeInTheDocument();
+        expect(screen.queryByText('No resolved planning history yet')).toBeNull();
+    });
+
+    it('re-derives to the log when records hydrate from empty to all-resolved', () => {
+        // Mount before store-backed records hydrate (empty → true-empty default),
+        // then hydrate to only resolved records: the history must not stay
+        // stranded behind the log tab.
+        const resolved = { ...openRecord, status: 'confirmed' as const, resolution: 'Confirmed' };
+        const { rerender } = render(<DecisionCenter records={[]} {...callbacks()} />);
+        expect(screen.getByText('Nothing needs an answer')).toBeInTheDocument();
+
+        rerender(<DecisionCenter records={[resolved]} {...callbacks()} />);
+        // The resolved record is now visible without the user clicking the log tab.
+        expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+        expect(screen.queryByText('No resolved planning history yet')).toBeNull();
+    });
+
+    it('stays on Needs attention when records hydrate from empty to a pending item', () => {
+        const { rerender } = render(<DecisionCenter records={[]} {...callbacks()} />);
+        rerender(<DecisionCenter records={[openRecord]} {...callbacks()} />);
+        // openRecord needs a verdict → the attention queue shows it, not the log.
+        expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+        expect(screen.queryByText('Nothing needs an answer')).toBeNull();
+    });
+
+    it('honors a resolved initialSelectedId that only exists after records hydrate', () => {
+        const resolved = { ...openRecord, id: 'resolved', title: 'Resolved audience', status: 'confirmed' as const, resolution: 'Independent creators' };
+        const props = callbacks();
+        const { rerender } = render(<DecisionCenter records={[]} initialSelectedId="resolved" {...props} />);
+        rerender(<DecisionCenter records={[resolved]} initialSelectedId="resolved" {...props} />);
+        expect(screen.getByRole('button', { name: /Resolved audience/ })).toHaveAttribute('aria-current', 'true');
+    });
+
     it('marks a deferred record with a chip in Resolved & history', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'deferred' }]} {...callbacks()} />);
         fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
