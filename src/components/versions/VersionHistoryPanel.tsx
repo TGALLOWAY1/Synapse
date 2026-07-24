@@ -26,7 +26,10 @@ interface VersionHistoryPanelProps {
     getCompareInput: (id: string) => CompareInput;
     // PRD only: downstream artifacts that would go stale on restore.
     getStaleArtifactTitles?: () => string[];
-    onRestore?: (id: string) => void;
+    onRestore?: (id: string, opts?: { restoreOverlays?: boolean }) => void;
+    // Artifact only: does the CURRENT version carry user overlay edits that a
+    // restore would otherwise discard? Drives the keep-or-restore choice.
+    hasCurrentOverlayEdits?: boolean;
     onClose: () => void;
 }
 
@@ -61,7 +64,8 @@ function formatTime(ts: number): string {
 }
 
 export function VersionHistoryPanel({
-    title, entries, restoreKind, getCompareInput, getStaleArtifactTitles, onRestore, onClose,
+    title, entries, restoreKind, getCompareInput, getStaleArtifactTitles,
+    hasCurrentOverlayEdits, onRestore, onClose,
 }: VersionHistoryPanelProps) {
     const [compareId, setCompareId] = useState<string | null>(null);
     const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -69,9 +73,9 @@ export function VersionHistoryPanel({
     const compareEntry = entries.find(e => e.id === compareId) ?? null;
     const confirmEntry = entries.find(e => e.id === confirmId) ?? null;
 
-    const doRestore = (id: string) => {
+    const doRestore = (id: string, opts?: { restoreOverlays?: boolean }) => {
         if (!onRestore) return;
-        onRestore(id);
+        onRestore(id, opts);
         setConfirmId(null);
         setCompareId(null);
         onClose();
@@ -175,8 +179,9 @@ export function VersionHistoryPanel({
                     kind={restoreKind}
                     sourceLabel={confirmEntry.label}
                     staleArtifactTitles={restoreKind === 'prd' ? getStaleArtifactTitles?.() ?? [] : []}
+                    hasCurrentOverlayEdits={hasCurrentOverlayEdits}
                     onCancel={() => setConfirmId(null)}
-                    onConfirm={() => doRestore(confirmEntry.id)}
+                    onConfirm={(opts) => doRestore(confirmEntry.id, opts)}
                 />
             )}
         </>

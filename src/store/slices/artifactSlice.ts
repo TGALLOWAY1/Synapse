@@ -19,6 +19,8 @@ import {
     readArtifactValidationDisposition,
     withoutArtifactValidationAcceptance,
 } from '../../lib/artifactValidationPolicy';
+import { inheritedImageMetadata } from '../../lib/artifactImageVersion';
+import { patchDestroysOverlayWork, pickOverlayKeys } from '../../lib/artifactOverlays';
 
 export type ArtifactSlice = {
     artifacts: Record<string, Artifact[]>;
@@ -37,6 +39,7 @@ export type ArtifactSlice = {
     getPreferredVersion: ProjectState['getPreferredVersion'];
     getLatestArtifactVersion: ProjectState['getLatestArtifactVersion'];
     updateArtifactVersionMetadata: ProjectState['updateArtifactVersionMetadata'];
+    updateArtifactOverlay: ProjectState['updateArtifactOverlay'];
 };
 
 export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSlice> = (set, get) => ({
@@ -203,7 +206,12 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     // only re-pointing isPreferred (setPreferredVersion), so versionNumber keeps
     // incrementing and the timeline shows the revert as its own honest event.
     // All reads happen inside set() against the fresh `state` (concurrency rule).
-    revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => {
+    revertArtifactToVersion: (
+        projectId: string,
+        artifactId: string,
+        sourceVersionId: string,
+        opts?: { restoreOverlays?: boolean },
+    ) => {
         assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         const allVersions = get().artifactVersions[projectId] || [];
         const source = allVersions.find(v => v.id === sourceVersionId && v.artifactId === artifactId);
@@ -224,6 +232,15 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             const currentPreferred = versions.find(v => v.artifactId === artifactId && v.isPreferred);
             const versionNumber = versions.filter(v => v.artifactId === artifactId).length + 1;
 
+            // Default "keep my edits": the restored content comes from `src`,
+            // but user overlays carry over from the version being replaced.
+            // Merge per key from the source so overlay keys the current version
+            // never touched still come back with the restored content.
+            const mergedRestoreMetadata: Record<string, unknown> = {
+                ...src.metadata,
+                ...pickOverlayKeys(currentPreferred?.metadata),
+            };
+
             const updatedVersions = versions.map(v =>
                 v.artifactId === artifactId ? { ...v, isPreferred: false } : v
             );
@@ -234,7 +251,18 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 versionNumber,
                 parentVersionId: currentPreferred?.id ?? null,
                 content: src.content,
-                metadata: withoutArtifactValidationAcceptance(src.metadata),
+                // Overlays: keep the user's CURRENT edits by default (screen
+                // edits, review/sign-off, dismissed issues, plan progress are
+                // newer work that has nothing to do with the content being
+                // restored). `restoreOverlays` opts into the old version's
+                // overlays instead. Either way the clone inherits the source
+                // version's images, or restoring would blank every render.
+                metadata: {
+                    ...withoutArtifactValidationAcceptance(
+                        opts?.restoreOverlays ? src.metadata : mergedRestoreMetadata,
+                    ),
+                    ...inheritedImageMetadata(src),
+                },
                 sourceRefs: src.sourceRefs,
                 generationPrompt: src.generationPrompt,
                 isPreferred: true,
@@ -346,7 +374,13 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 versionNumber,
                 parentVersionId: src.id,
                 content: src.content,
-                metadata: withoutArtifactValidationAcceptance(src.metadata),
+                // Same content, new id — so the clone must inherit the source's
+                // images or "mark as up to date" would silently blank every
+                // render this artifact already has.
+                metadata: {
+                    ...withoutArtifactValidationAcceptance(src.metadata),
+                    ...inheritedImageMetadata(src),
+                },
                 sourceRefs: rebasedRefs,
                 generationPrompt: src.generationPrompt,
                 isPreferred: true,
@@ -602,5 +636,153 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 ...historyEvents,
             };
         });
+    },
+
+    // Versioning: the single write path for USER-AUTHORED overlays (screen
+    // edits, review/sign-off, extra screens, relinks, dismissed issues, plan
+    // progress, mockup approval). Artifact `content` is never user-editable, so
+    // these overlays are the only record of manual work on an output — patching
+    // them in place made that work unrecoverable.
+    //
+    // Append-or-amend, mirroring `editSpineStructuredPRD`'s decision_edit
+    // branch:
+    //   - AMEND the preferred version in place when it is itself an overlay
+    //     edit and nothing downstream references it, so a burst of tweaks in
+    //     one session collapses into one version instead of one per keystroke;
+    //   - otherwise APPEND a clone carrying the merged overlay.
+    // A patch that overwrites or drops existing user work ALWAYS appends, so
+    // the prior state stays restorable. Every write emits an `Edited` event.
+    //
+    // All reads happen inside set() against the fresh `state` (concurrency
+    // rule); the clone inherits images so overlay edits never blank renders.
+    updateArtifactOverlay: (
+        projectId: string,
+        artifactId: string,
+        patch: Record<string, unknown>,
+        opts: { historyDescription: string; editSummary?: string },
+    ) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
+        // Validation authority is never writable through an overlay edit (same
+        // rule as updateArtifactVersionMetadata).
+        const {
+            validationAcceptance: ignoredAcceptance,
+            validationBlockers: ignoredBlockers,
+            ...safePatch
+        } = patch;
+        void ignoredAcceptance;
+        void ignoredBlockers;
+
+        const appendedVersionId = uuidv4();
+        const historyEventId = uuidv4();
+        const now = Date.now();
+        let resultVersionId: string | undefined;
+
+        set((state) => {
+            const versions = state.artifactVersions[projectId] || [];
+            const preferred = versions.find(v => v.artifactId === artifactId && v.isPreferred);
+            if (!preferred) return state;
+
+            const mergedMetadata = { ...preferred.metadata, ...safePatch };
+
+            // Amend only when this version is already a user overlay edit AND
+            // no other artifact version was generated from it — an amended
+            // version keeps its id, so rewriting one that something downstream
+            // cites would silently change that input.
+            const isOverlayEditVersion = preferred.provenance?.changeSource === 'user_edit'
+                && preferred.provenance?.overlayEdit === true;
+            const isReferencedDownstream = versions.some(v =>
+                v.artifactId !== artifactId
+                && v.sourceRefs.some(ref => ref.sourceArtifactVersionId === preferred.id),
+            );
+            const destructive = patchDestroysOverlayWork(preferred.metadata, safePatch);
+            const shouldAmend = isOverlayEditVersion && !isReferencedDownstream && !destructive;
+
+            const projectArtifacts = state.artifacts[projectId] || [];
+            const updatedArtifacts = (currentVersionId: string) => projectArtifacts.map(a =>
+                a.id === artifactId
+                    ? { ...a, currentVersionId, status: 'active' as const, updatedAt: now }
+                    : a,
+            );
+
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                artifactId,
+                artifactVersionId: shouldAmend ? preferred.id : appendedVersionId,
+                type: 'Edited',
+                description: opts.historyDescription,
+                createdAt: now,
+            };
+            const withHistory = {
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [...(state.historyEvents[projectId] || []), historyEvent],
+                },
+            };
+
+            if (shouldAmend) {
+                resultVersionId = preferred.id;
+                return {
+                    artifactVersions: {
+                        ...state.artifactVersions,
+                        [projectId]: versions.map(v =>
+                            v.id === preferred.id
+                                ? {
+                                    ...v,
+                                    metadata: mergedMetadata,
+                                    provenance: {
+                                        ...v.provenance,
+                                        changeSource: 'user_edit' as const,
+                                        overlayEdit: true,
+                                        editSummary: opts.editSummary ?? v.provenance?.editSummary,
+                                    },
+                                }
+                                : v,
+                        ),
+                    },
+                    artifacts: { ...state.artifacts, [projectId]: updatedArtifacts(preferred.id) },
+                    ...withHistory,
+                };
+            }
+
+            resultVersionId = appendedVersionId;
+            const versionNumber = versions.filter(v => v.artifactId === artifactId).length + 1;
+            const newVersion: ArtifactVersion = {
+                id: appendedVersionId,
+                artifactId,
+                versionNumber,
+                parentVersionId: preferred.id,
+                content: preferred.content,
+                metadata: {
+                    ...withoutArtifactValidationAcceptance(mergedMetadata),
+                    ...inheritedImageMetadata(preferred),
+                },
+                sourceRefs: preferred.sourceRefs,
+                generationPrompt: preferred.generationPrompt,
+                isPreferred: true,
+                createdAt: now,
+                provenance: {
+                    changeSource: 'user_edit',
+                    overlayEdit: true,
+                    editSummary: opts.editSummary ?? opts.historyDescription,
+                },
+            };
+
+            return {
+                artifactVersions: {
+                    ...state.artifactVersions,
+                    [projectId]: [
+                        ...versions.map(v =>
+                            v.artifactId === artifactId ? { ...v, isPreferred: false } : v,
+                        ),
+                        newVersion,
+                    ],
+                },
+                artifacts: { ...state.artifacts, [projectId]: updatedArtifacts(appendedVersionId) },
+                ...withHistory,
+            };
+        });
+
+        return { versionId: resultVersionId };
     },
 });

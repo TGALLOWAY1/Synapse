@@ -2538,6 +2538,12 @@ export type VersionProvenance = {
     // aggregate summary ("Confirmed 3 decisions · corrected 1") stays accurate
     // as consecutive decision edits amend in place.
     decisionCounts?: { confirmed: number; corrected: number; reopened: number };
+    // Marks a version created by a USER-AUTHORED OVERLAY edit (screen edits,
+    // review/sign-off, extra screens, plan progress, mockup approval) rather
+    // than by regenerating content. Consecutive overlay edits amend such a
+    // version in place instead of appending one per keystroke — see
+    // `updateArtifactOverlay`. Always paired with changeSource 'user_edit'.
+    overlayEdit?: boolean;
 };
 
 export type HistoryEvent = {

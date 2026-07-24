@@ -849,12 +849,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   "Mockups: X of N screens covered". Uncovered screens get an **Add to
   mockups** action (Mockups tab) and the list header offers a confirmed
   **Generate missing mockups** batch. Both write user-added `MockupScreen`s
-  into the *current* mockup ArtifactVersion's **`metadata.extraScreens`**
-  overlay (`readExtraMockupScreens`/`mergeExtraScreens`/
-  `mockupScreenFromInventoryScreen` in `mockupParsing.ts`) — **never a new
-  ArtifactVersion**, because per-screen images are keyed by
-  `versionId:screenId:quality`, so appending a version would orphan every
-  existing render. Adding coverage is free; **image generation is never
+  into the mockup ArtifactVersion's **`metadata.extraScreens`** overlay
+  (`readExtraMockupScreens`/`mergeExtraScreens`/
+  `mockupScreenFromInventoryScreen` in `mockupParsing.ts`), written through
+  `updateArtifactOverlay` so the coverage change is versioned and recoverable.
+  *(This rule previously said "never a new ArtifactVersion", because per-screen
+  images are keyed by `versionId:screenId:quality` and appending a version
+  orphaned every existing render. That constraint is gone: clones now carry
+  `metadata.imageSourceVersionId` and readers resolve it via
+  `effectiveImageVersionId` — see VERSIONING_AND_EXPORT.md. Do not re-add the
+  in-place write.)* Adding coverage is free; **image generation is never
   automatic** — it's the standard per-screen action, or the batch flow which
   fires low-quality drafts only after an explicit cost-labeled confirm and
   only when an OpenAI key exists (keyless → upload sheets). Every consumer of

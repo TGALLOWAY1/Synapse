@@ -10,6 +10,7 @@ import { buildScreenImageKey } from '../screenInventoryImageStore';
 // namespacing logic reads are populated; the rest is cast away.
 const SOURCE_PROJECT_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 const VERSION_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
+const CLONE_VERSION_ID = 'bbbbbbbb-0000-4000-8000-000000000003';
 const DEMO_PROJECT_ID = '00000000-0000-4000-8000-000000000d01';
 
 const makeImage = (quality: MockupImageRecord['quality']): MockupImageRecord => ({
@@ -43,6 +44,14 @@ const makeSnapshot = (): SnapshotPayload => ({
                 id: VERSION_ID,
                 sourceRefs: [{ sourceType: 'spine', sourceArtifactVersionId: VERSION_ID }],
             },
+            // A clone that inherits the first version's images. Its pointer has
+            // to be namespaced along with everything else or the restored demo
+            // renders image-less.
+            {
+                id: CLONE_VERSION_ID,
+                sourceRefs: [{ sourceType: 'spine', sourceArtifactVersionId: VERSION_ID }],
+                metadata: { imageSourceVersionId: VERSION_ID },
+            },
         ],
         feedbackItems: [],
     } as unknown as SnapshotPayload['project'],
@@ -59,6 +68,12 @@ describe('namespaceSnapshotForRestore', () => {
         expect(av.id).toBe(namespacedVersionId);
         // The same id referenced elsewhere in the bundle is remapped too.
         expect(av.sourceRefs[0].sourceArtifactVersionId).toBe(namespacedVersionId);
+
+        // A clone's inherited-image pointer must follow the remap, otherwise it
+        // points at the pre-restore id and the screens render image-less.
+        const clone = bundle.artifactVersions[1] as unknown as { id: string; metadata: { imageSourceVersionId: string } };
+        expect(clone.id).toBe(`${DEMO_PROJECT_ID}:${CLONE_VERSION_ID}`);
+        expect(clone.metadata.imageSourceVersionId).toBe(namespacedVersionId);
 
         for (const img of images) {
             expect(img.versionId).toBe(namespacedVersionId);

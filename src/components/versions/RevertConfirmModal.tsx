@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AlertTriangle, RotateCcw, X } from 'lucide-react';
 
 // Confirmation for restoring a historical version. Restore is non-destructive:
@@ -9,13 +10,20 @@ interface RevertConfirmModalProps {
     kind: 'prd' | 'artifact';
     sourceLabel: string;              // e.g. "Version 3" / "version 2"
     staleArtifactTitles?: string[];   // PRD only — artifacts that will go stale
+    // Artifact only — the artifact carries user edits (screen details,
+    // sign-offs, plan progress) that are newer than the version being restored.
+    // Enables the keep-or-restore choice below.
+    hasCurrentOverlayEdits?: boolean;
     onCancel: () => void;
-    onConfirm: () => void;
+    onConfirm: (opts?: { restoreOverlays?: boolean }) => void;
 }
 
 export function RevertConfirmModal({
-    kind, sourceLabel, staleArtifactTitles = [], onCancel, onConfirm,
+    kind, sourceLabel, staleArtifactTitles = [], hasCurrentOverlayEdits = false, onCancel, onConfirm,
 }: RevertConfirmModalProps) {
+    // Default keeps the user's current edits: restoring older CONTENT should
+    // not silently throw away unrelated newer work.
+    const [restoreOverlays, setRestoreOverlays] = useState(false);
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-end md:items-center justify-center p-0 md:p-4" onClick={onCancel}>
             <div
@@ -58,6 +66,42 @@ export function RevertConfirmModal({
                             </ul>
                         </div>
                     )}
+
+                    {kind === 'artifact' && hasCurrentOverlayEdits && (
+                        <fieldset className="border border-neutral-200 rounded-lg p-3">
+                            <legend className="px-1 text-xs font-medium text-neutral-500">Your edits</legend>
+                            <label className="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="restore-overlays"
+                                    className="mt-1"
+                                    checked={!restoreOverlays}
+                                    onChange={() => setRestoreOverlays(false)}
+                                />
+                                <span>
+                                    <span className="font-medium text-neutral-800">Keep my edits</span>
+                                    <span className="block text-xs text-neutral-500">
+                                        Screen details, reviews and progress you changed since stay as they are.
+                                    </span>
+                                </span>
+                            </label>
+                            <label className="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer mt-2">
+                                <input
+                                    type="radio"
+                                    name="restore-overlays"
+                                    className="mt-1"
+                                    checked={restoreOverlays}
+                                    onChange={() => setRestoreOverlays(true)}
+                                />
+                                <span>
+                                    <span className="font-medium text-neutral-800">Also restore that version&rsquo;s edits</span>
+                                    <span className="block text-xs text-neutral-500">
+                                        Replaces your current edits with the ones saved in {sourceLabel}.
+                                    </span>
+                                </span>
+                            </label>
+                        </fieldset>
+                    )}
                 </div>
 
                 <div className="flex items-center justify-end gap-2 p-4 border-t border-neutral-200">
@@ -70,7 +114,7 @@ export function RevertConfirmModal({
                     </button>
                     <button
                         type="button"
-                        onClick={onConfirm}
+                        onClick={() => onConfirm(kind === 'artifact' ? { restoreOverlays } : undefined)}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition min-h-[44px] md:min-h-0"
                     >
                         <RotateCcw size={14} /> Restore as New Version

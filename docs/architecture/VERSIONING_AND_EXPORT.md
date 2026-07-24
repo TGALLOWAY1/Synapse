@@ -93,16 +93,65 @@ in the graph detail panel ("What changed: …", removed-feature still-referenced
 warnings), the `FreshnessBadge` tooltip, and the artifact-header strip.
 Everything is computed at read time from stored snapshots — nothing persisted.
 
+**User overlay edits are versioned (`artifactSlice.updateArtifactOverlay`).**
+Artifact `content` is never user-editable, so `ArtifactVersion.metadata`
+overlays are the ONLY record of manual work on an output — `screenEdits`
+(field edits, review status, sign-off, variant status), `extraScreens`,
+`screenLinks`, `dismissedScreenIssues`, `planProgress`, `mockupApproval`. The
+key list lives in `src/lib/artifactOverlays.ts`; add new overlay keys there.
+`updateArtifactOverlay` is the single write path and is **append-or-amend**,
+mirroring `editSpineStructuredPRD`'s `decision_edit` branch: it AMENDS the
+preferred version in place when that version is itself an overlay edit
+(`provenance.overlayEdit`) and nothing downstream cites it, so a burst of
+tweaks collapses into one version; otherwise it APPENDS a clone. A patch that
+overwrites or removes existing user work (`patchDestroysOverlayWork` — "reset
+to generated", rewriting a screen's edits, emptying a populated overlay)
+**always appends**, so the prior state stays restorable. Every write emits an
+`Edited` history event — there are no silent overlay writes. Validation
+authority (`validationBlockers`/`validationAcceptance`) is stripped from
+overlay patches exactly as in `updateArtifactVersionMetadata`, which remains
+for genuine system metadata only.
+
+**Artifact restore keeps the user's current edits by default.**
+`revertArtifactToVersion(projectId, artifactId, sourceVersionId, opts)`
+restores the source version's `content`/`sourceRefs` but merges the CURRENT
+preferred version's overlay keys on top — restoring older content must not
+silently discard newer, unrelated hand-tuning. `opts.restoreOverlays: true`
+opts into taking the restored version's overlays instead; `RevertConfirmModal`
+surfaces the choice whenever the current version carries overlay work.
+
+**Image continuity: clones inherit, they do not copy
+(`src/lib/artifactImageVersion.ts`).** Rendered images live in IndexedDB keyed
+by artifact version id — `mockupImageStore` (AI renders),
+`screenInventoryImageStore` (user uploads) and `mockupVariantImageStore` — and
+several actions append a content-identical CLONE under a fresh uuid
+(`revertArtifactToVersion`, `markArtifactCurrentForSpine`,
+`updateArtifactOverlay`). Those clones stamp `metadata.imageSourceVersionId`,
+and **every reader and writer must resolve it through
+`effectiveImageVersionId(version)` before building a key or key prefix** —
+otherwise the clone reads as image-less while the bytes sit on disk under the
+old id. That was a live data-loss bug: "Mark up to date" on the mockup row of
+the Sync outputs plan destroyed every render, and because `mockupApproval`
+copies forward, the flow-approval gate stayed hidden afterwards. Two
+invariants: the pointer is **collapsed at write time** (a clone of a clone
+points at the original, so lookup is always one hop), and **only
+clone-appending actions set it** — `createArtifactVersion` produces genuinely
+new content and must start a fresh image set under its own id. Snapshot demo
+restore remaps the pointer automatically via `rewriteIds` (covered by a test);
+any future image GC must treat a version's records as live while another
+version's `imageSourceVersionId` references it.
+
 **Provenance is complete.** Every version-creating path stamps
 `provenance.changeSource`: `ai_generation` (initial settle in
 `updateSpineStructuredPRD` when none exists; `createArtifactVersion` default
 for v1), `ai_regeneration` (`regenerateSpine`; `createArtifactVersion` default
 for v2+), `branch_merge` (`mergeBranch`), plus the existing `user_edit` /
 `ai_section_retry` / `revert` and the new **`marked_current`**. User overlay
-edits (screenEdits/promptEdits) pass `opts.historyDescription` through
-`updateArtifactVersionMetadata` to record an `Edited` history event, and the
-graph treats a non-empty overlay as manually-edited. New version-creating code
-paths must stamp a changeSource.
+edits append or amend a `user_edit` version additionally flagged
+`provenance.overlayEdit` (the flag is what makes a version eligible for
+in-place amend), and always record an `Edited` history event; the graph treats
+a non-empty overlay as manually-edited. New version-creating code paths must
+stamp a changeSource.
 
 **"Mark as up to date" (`artifactSlice.markArtifactCurrentForSpine`).** The
 escape hatch for trivial PRD changes: appends a CLONED preferred version whose

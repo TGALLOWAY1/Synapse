@@ -55,6 +55,9 @@ describe('revertArtifactToVersion', () => {
         expect(reverted.metadata).toEqual({
             k: 1,
             validationBlockers: ['legacy blocker'],
+            // The clone records where its images live so restoring does not
+            // blank every render (the version id is new, the images are not).
+            imageSourceVersionId: v1Id,
         });
         expect(reverted.generationPrompt).toBe('prompt-1');
         expect(reverted.sourceRefs).toEqual(spineRef(spineId));
