@@ -308,10 +308,14 @@ async function openDemo(page) {
 }
 
 async function gotoAssetsStage(page) {
-    // The "Assets" pipeline-stage button carries aria-label "Assets: …".
+    // The read-only demo now opens directly on the Assets (workspace) stage as
+    // a view-only exploration — its journey navigation is intentionally hidden.
+    // If an "Assets" pipeline-stage button is present (non-demo/editable
+    // workspaces), click it; otherwise the demo is already there.
     const assetsTab = page.getByRole('button', { name: /^Assets:/ });
-    await assetsTab.waitFor({ state: 'visible', timeout: 20000 });
-    await assetsTab.click();
+    if (await assetsTab.isVisible().catch(() => false)) {
+        await assetsTab.click();
+    }
 
     // The artifact sidebar (rendered for both viewports; off-canvas on mobile)
     // confirms ArtifactWorkspace mounted — i.e. the demo spine is final.
@@ -320,7 +324,7 @@ async function gotoAssetsStage(page) {
         .waitFor({ state: 'attached', timeout: 20000 })
         .catch(() => {
             throw new Error(
-                'Artifact list never appeared after opening Assets — the demo spine ' +
+                'Artifact list never appeared on the Assets stage — the demo spine ' +
                 'may not be marked final, or the demo failed to load.',
             );
         });
