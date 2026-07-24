@@ -68,8 +68,8 @@ export function DemoReadOnlyNotice() {
             {expanded && (
                 <div className="flex flex-col gap-2 px-4 pb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                     <span className="text-indigo-200/90">
-                        This is a read-only example project. Explore its PRD, screens, mockups, data
-                        model, and implementation plan without changing the saved project.
+                        This is a read-only example project. Explore its generated assets — screens,
+                        mockups, data model, and implementation plan — without changing the saved project.
                     </span>
 
                     {phase === 'confirming' ? (
