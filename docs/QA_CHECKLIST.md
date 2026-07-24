@@ -180,8 +180,13 @@ tests** — problems here will only be caught by this section.
       advisory ones.
 - [ ] With blockers open, **Finalize with accepted risk** requires a rationale
       before **Finalize with N accepted blockers** is available.
-- [ ] Finalizing shows the success modal with **Generate build foundation**,
-      **Explore outputs**, and **Keep reviewing the plan**.
+- [ ] Finalizing shows the success modal: **one** primary button plus the
+      secondary **Keep reviewing the plan**. The primary button's label depends
+      on the state you finalized from — **Generate build foundation** when the
+      plan was ready to build, **Explore outputs** when you finalized with
+      accepted risk, **Review outputs** if outputs already exist or are
+      building. Only one of the three appears; that is correct, not a missing
+      control.
 - [ ] Finalization is a checkpoint, not a lock — you can still edit the plan
       afterwards.
 - [ ] It is clear what finalizing actually changed.
@@ -254,10 +259,24 @@ Interrupt a generation (reload the page mid-run):
 
 - [ ] Reopening the project does not lose confirmed decisions, manual edits or
       previous artifact versions.
+- [ ] An interrupted run is presented as interrupted rather than stuck
+      mid-progress, and can be retried.
 - [ ] Retrying does not produce duplicate artifacts.
+- [ ] Interrupt an **output** run the same way; it resumes or can be restarted
+      without duplicating slots.
 
-*Where this lives:* `src/components/versions/`, `src/lib/projectRecovery.ts`
-(**untested** — this section is its only coverage).
+Recovery bundle (a separate escape hatch — it never touches the network):
+
+- [ ] Download a recovery bundle for the project and confirm the JSON contains
+      the project's collections and is self-describing.
+
+*Where this lives:* `src/components/versions/`;
+`src/store/interruptedGeneration.ts` for interrupted plan generation and
+`artifactJobController.resumeIfNeeded` for output runs;
+`src/lib/projectRecovery.ts` for the bundle download only — it takes no part in
+interrupted generation. The interruption logic has unit coverage
+(`src/store/__tests__/interruptedGeneration.test.ts`); what this section adds is
+the real reload, which those tests simulate.
 
 ---
 
@@ -282,12 +301,24 @@ Interrupt a generation (reload the page mid-run):
 - [ ] The plan differs in substance, not just wording — navigation, screen
       structure, connectivity and device assumptions should reflect a web
       product rather than an app.
-- [ ] Check whether that difference **survives into Screens and User Flows**.
-      Platform is injected into the plan prompts but is *not* passed to the
-      artifact prompts (`src/lib/prompts/prdSectionPrompts.ts` vs
-      `src/lib/services/artifactPromptBuilder.ts`), so outputs inherit it only
-      indirectly through the plan text. If the outputs read platform-neutral,
-      record it — that is a known architectural gap, not a mystery.
+- [ ] The difference **survives into Screens and User Flows** — they should read
+      as a web product too, not just the plan.
+
+      Platform reaches both stages by design, so platform-neutral outputs are a
+      **defect to report**, not an expected limitation. It enters the plan
+      prompts via `PLATFORM_NOTE`
+      (`src/lib/prompts/prdSectionPrompts.ts`) and reaches artifact generation
+      through the canonical spine: `artifactJobController` passes
+      `project.platform` into `buildCanonicalPrdSpine`, which records it as
+      `identity.platform` (`"Mobile app"` / `"Web app"`), and
+      `buildCanonicalSpinePromptSection` serializes that into the artifact
+      prompt as the **authoritative** contract
+      (`src/lib/canonicalPrdSpine.ts`).
+
+      One real exception: that spine section is omitted entirely when the plan
+      has **no features**, so a featureless plan legitimately produces
+      platform-neutral outputs. Confirm the plan has features before recording a
+      failure.
 
 **Persistence:**
 
@@ -327,6 +358,7 @@ Do not spend manual time here:
 | Planning authority, decision impacts | `src/lib/planning/__tests__/` (33 files) |
 | Persistence, compression, cross-tab | `src/store/__tests__/persistCodec`, `crossTabPersistence` |
 | Safety classification | `src/lib/safety/__tests__/` |
+| Interrupted-generation bookkeeping | `src/store/__tests__/interruptedGeneration.test.ts` |
 | Prompt wording | `src/lib/__tests__/promptSurfaces.test.ts` (snapshot-locked) |
 | Screenshots of every view | `npm run e2e` — see [E2E_LIVE_TESTING.md](E2E_LIVE_TESTING.md) |
 
