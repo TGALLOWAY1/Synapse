@@ -72,9 +72,11 @@ nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
 generated artifact. Restores route
 to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
-new version and never deletes history.** See `docs/VERSIONING_AUDIT.md` for the
-Phase 1 design and `docs/VERSIONING_V2_PLAN.md` for the change-awareness layer
-(Phase A implemented).
+new version and never deletes history.** See
+`docs/VERSIONING_ASSESSMENT.md` for the current state of the feature and the
+priority-ordered list of what remains (it supersedes the retired
+`VERSIONING_AUDIT.md` / `VERSIONING_V2_PLAN.md` planning docs; everything they
+described as shipped is documented in this file).
 
 **Change-aware staleness (`src/lib/spineChangeAnalysis.ts`, pure).** The "what
 changed" layer behind every stale flag: `diffFeatures` (by stable `Feature.id`
