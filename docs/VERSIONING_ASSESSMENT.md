@@ -91,13 +91,31 @@ every `needs_update` node). The user is nudged into regenerating outputs that
 did not change — real LLM spend and churn — or into per-output "Mark up to
 date" busywork to undo a false positive the engine should not have produced.
 
-**Do:** teach `prd_changed` to consult the change summary it already has, so a
-comparable-and-unchanged spine transition is not hard evidence (keep it hard
-whenever the comparison is unavailable — legacy spines without
-`structuredPRD` must stay conservative). Then pick **one** projection for
-user-facing text and route every surface in the list above through it, leaving
-the engine's statuses as the substrate. Keep the existing rule that advisory
-notes never suppress a genuinely hard state, and keep its tests green.
+**Do:** suppress `prd_changed` only on **provable downstream-input equality**,
+then pick **one** projection for user-facing text and route every surface in
+the list above through it, leaving the engine's statuses as the substrate.
+Keep the existing rule that advisory notes never suppress a genuinely hard
+state, and keep its tests green.
+
+> **Do NOT key suppression on `summarizeSpineChange`.** The change summary is
+> presentation-oriented and deliberately lossy: `renderUxPages`
+> (`versionDiff.ts:93-96`) compares only page **name and purpose**, explicitly
+> excluding the per-page state fields. But `buildCanonicalPrdSpine`
+> (`canonicalPrdSpine.ts:180`) feeds `emptyState`/`loadingState`/`errorState`
+> into the canonical spine that drives generation. So a PRD edit touching only
+> those fields yields `comparable: true, hasChanges: false` while genuinely
+> changing what artifacts would be generated from — keying off it would mark
+> real drift as current, which is a worse failure than the false positive this
+> item fixes. *(Caught in review of this doc; the same trap applies to any
+> future "did anything change?" shortcut built on the diff layer.)*
+>
+> Compare the **actual generation inputs** instead — e.g. hash the canonical
+> spine / structured PRD with the existing `planningContentHash` +
+> `stablePlanningStringify` (`planning/planningHash.ts`, already used for
+> exactly this kind of version-bound equality check). Fail conservative: when
+> either side is unavailable or unhashable (legacy spines with no
+> `structuredPRD`), keep the hard `prd_changed`. `summarizeSpineChange` stays
+> what it is good at — explaining *what* changed once drift is established.
 
 #### 2. Make restore land somewhere, and disclose what it stranded
 **Effort: small–medium · Risk: low**
@@ -127,7 +145,8 @@ restore will strand. Surface only — **never** auto-revert decision events;
 user authority stays append-only.
 
 #### 3. Stop cross-tab merges from discarding appended versions
-**Effort: small · Risk: low**
+**Effort: small for the append case · medium once same-id divergence is
+handled · Risk: medium (silent-loss failure mode if done naively)**
 
 `crossTabMerge.ts:118-136` resolves each project **wholesale**: the side with
 the newer `latestProjectActivity` wins and every `ARRAY_COLLECTIONS` entry is
@@ -137,13 +156,29 @@ scan (`:64-84`), so a tab whose only newer work is an appended version loses
 to any tab with a fresher unrelated stamp.
 
 This is silent data loss — the same class the project treats as unacceptable
-elsewhere — and it is cheap to fix.
+elsewhere.
 
-**Do:** union `spineVersions` / `artifactVersions` by version id instead of
-replacing them (they are append-only and immutable, so a union is safe and
-order can be re-derived), keeping wholesale resolution for genuinely mutable
-collections. Preserve exactly one `isLatest` / `isPreferred` per entity after
-the union.
+**Do:** stop replacing `spineVersions` / `artifactVersions` wholesale. Rows
+present on only one side must survive the merge; that alone removes the common
+case, where each tab appended different versions.
+
+> **Version rows are append-only but NOT immutable, so a plain union by id is
+> not sufficient.** Two paths amend an existing version in place, keeping its
+> id: `updateArtifactOverlay`'s coalescing branch (overlay edits within a
+> session) and `editSpineStructuredPRD`'s `decision_edit` branch
+> (`spineSlice.ts:372-385`). Two tabs can therefore hold the *same version id*
+> with *different* metadata/content, and a union keyed on id would silently
+> drop one tab's edit — reproducing the very loss this item exists to fix.
+> *(Caught in review of this doc.)*
+>
+> So the merge needs an explicit rule for same-id divergent rows. Options,
+> cheapest first: prefer the row with the later mutation stamp (requires
+> stamping amends, which they do not do today); merge the metadata bags
+> key-wise for overlay-edit versions; or treat divergence as a real conflict
+> and surface it rather than guessing. Whichever is chosen, it must be
+> deliberate — "they're immutable" is not a safe assumption post-#326.
+
+Preserve exactly one `isLatest` / `isPreferred` per entity after the merge.
 
 ---
 
@@ -293,6 +328,8 @@ content-aware once P1.1 lands).
 
 P1.1 → P1.2 are one coherent slice and should ship together: fixing the false
 positive first means the restore continuation opens a plan that tells the
-truth. P1.3 is independent and small enough to ride along. P2.4 (restore
-points) is the largest remaining build and benefits from P1 landing first,
-because its post-restore Undo depends on the same continuation surface.
+truth. P1.3 is independent; its append-only half is small and worth taking
+early, while the same-id divergence rule deserves its own decision rather than
+being bundled in. P2.4 (restore points) is the largest remaining build and
+benefits from P1 landing first, because its post-restore Undo depends on the
+same continuation surface.
