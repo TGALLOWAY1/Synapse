@@ -85,12 +85,23 @@ in snapshots.
   task exports for `DEMO_PROJECT_ID`. Persisted Zustand slice actions, artifact
   generation controllers, and IndexedDB image writers assert the relevant
   capability before doing work. React surfaces consume
-  `useProjectCapabilities` to hide mutation-only controls; the demo's pipeline
-  stage is component state so PRD / Assets / History navigation remains
-  explorable without persisting `currentStage`. Do not add raw demo-id mutation
-  checks or a second demo store/workspace—extend the capability categories when
-  a new durable mutation domain is introduced. Local copy/download exports that
-  do not mutate project state remain available.
+  `useProjectCapabilities` to hide mutation-only controls. Do not add raw
+  demo-id mutation checks or a second demo store/workspace—extend the capability
+  categories when a new durable mutation domain is introduced. Local
+  copy/download exports that do not mutate project state remain available.
+
+- **The demo is presented as a view-only exploration of its assets.** Rather
+  than walking a visitor through a workflow they can't act on, `ProjectWorkspace`
+  gives the read-only demo (`capabilities.isReadOnly`) a stripped presentation:
+  it **lands directly on the Assets (`workspace`) stage** (`readOnlyDefaultStage`
+  — falling back to `prd` only when there is no safe structured PRD), **omits the
+  `JourneyRail`** (the Define→…→Build step navigation) and the
+  Finalize/"Review readiness" header action, and never auto-opens the history
+  panel from a legacy persisted `history` stage. Exploration happens inside the
+  assets workspace (`ArtifactWorkspace`), which is already capability-aware. The
+  presentation stage is component state (`readOnlyStage`), not a persisted
+  `currentStage` write. Keep this presentation demo-only via `isReadOnly` — do
+  not gate it on the demo id directly.
 
 - **Reset Demo (SYN-001) — a deterministic "restore to pinned snapshot",
   route/store-owned like `loadDemoProject` itself.** `projectSlice.resetDemoProject()`

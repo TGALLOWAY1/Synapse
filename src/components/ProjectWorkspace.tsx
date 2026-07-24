@@ -460,10 +460,14 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     }, [capabilities.canPersistWorkflowState, projectId, setProjectStage]);
 
     useEffect(() => {
+        // The read-only demo ignores any persisted stage and lands on its
+        // assets (see readOnlyDefaultStage); don't let a legacy 'history'
+        // snapshot stage yank it onto the plan or auto-open the history panel.
+        if (!capabilities.canPersistWorkflowState) return;
         if (persistedPipelineStage !== 'history') return;
         setHistoryPanelOpen(true);
         applyPresentationStage('prd');
-    }, [applyPresentationStage, persistedPipelineStage]);
+    }, [applyPresentationStage, capabilities.canPersistWorkflowState, persistedPipelineStage]);
 
     const writePlanningIntent = (intent?: PlanningNavigationIntent, replace = false) => {
         if (!intent) lastPlanningIntentRef.current = undefined;
@@ -706,9 +710,18 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const historyEvents = getHistoryEvents(projectId);
     const allSpines = getSpineVersions(projectId);
 
+    // The read-only demo is presented as a view-only exploration of its
+    // generated assets: it lands directly on the Assets (workspace) stage
+    // rather than the plan, and its journey navigation is hidden (see the
+    // JourneyRail below). Fall back to the plan only when there is no safe
+    // structured PRD to hang the assets workspace off of.
+    const readOnlyDefaultStage: PipelineStage =
+        latestSpine?.structuredPRD && latestSpine.safetyReview?.status !== 'blocked'
+            ? 'workspace'
+            : 'prd';
     const pipelineStage = capabilities.canPersistWorkflowState
         ? project?.currentStage || 'prd'
-        : readOnlyStage ?? project?.currentStage ?? 'prd';
+        : readOnlyStage ?? readOnlyDefaultStage;
     const setPipelineStage = applyPresentationStage;
 
     const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
@@ -1862,7 +1875,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         <Download size={14} />
                         <span className="hidden sm:inline">Export</span>
                     </button>
-                    {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
+                    {!capabilities.isReadOnly && !isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-600 hover:bg-amber-500 text-white' : displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
@@ -2133,13 +2146,18 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
             {/* Six-step journey presentation over the existing persisted stage
                 keys. Finalize and Build remain integrity-bound actions rather
-                than new persisted pipeline states. */}
-            <div className="shrink-0 z-10">
-                <JourneyRail
-                    presentation={journeyPresentation}
-                    onStepChange={handleJourneyStepChange}
-                />
-            </div>
+                than new persisted pipeline states. The read-only demo is a
+                view-only exploration of finished assets, not a workflow to walk
+                — so the journey navigation is omitted there to avoid presenting
+                Finalize/Generate/Build steps a visitor can't act on. */}
+            {!capabilities.isReadOnly && (
+                <div className="shrink-0 z-10">
+                    <JourneyRail
+                        presentation={journeyPresentation}
+                        onStepChange={handleJourneyStepChange}
+                    />
+                </div>
+            )}
 
             {showPreBuildCheck && preBuildAttentionItem && preBuildPlanningRecord && (
                 <PreBuildCheckpointCard
