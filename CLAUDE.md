@@ -98,6 +98,11 @@ AskUserQuestion) to scope the run, then follow the `/e2e` skill
 
 Skip the questions only when the user has already specified these choices.
 
+For a **manual pass over the product's core flows** — before a release, or
+after a change to the pipeline, the workspace, or the store — use
+[docs/QA_CHECKLIST.md](docs/QA_CHECKLIST.md). It covers what the unit suite and
+the screenshot run cannot, and says which areas not to re-verify by hand.
+
 ### Required pre-push gate (do not skip — this is what Vercel runs)
 
 **Before committing/pushing, you MUST run `npm run build` and `npm run lint`
@@ -255,8 +260,8 @@ Standalone design docs (referenced from the topic docs):
 `docs/DECISION_CENTER_DESIGN.md`, `docs/DECISION_CENTER_IMPLEMENTATION_PLAN.md`,
 `docs/ADVERSARIAL_PLANNING_REVIEW.md`, `docs/UNCERTAINTY_FIRST_PLANNING.md`,
 `docs/DECISION_CENTER_SIMPLIFICATION_PLAN.md`, `docs/VERSIONING_ASSESSMENT.md`,
-`docs/ORCHESTRATION_AND_METRICS.md`, `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`,
-`docs/audits/WORKFLOW_AUDIT.md`.
+`docs/ORCHESTRATION_AND_METRICS.md`, `docs/QA_CHECKLIST.md`,
+`docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`, `docs/audits/WORKFLOW_AUDIT.md`.
 
 ## Cross-cutting rules (always apply)
 
