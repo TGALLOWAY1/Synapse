@@ -17,6 +17,7 @@ import { ArtifactValidationBanner } from './artifacts/ArtifactValidationBanner';
 import { StructuredPRDView } from './StructuredPRDView';
 import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { MockupViewer } from './mockups/MockupViewer';
+import { MockupApprovalGate } from './mockups/MockupApprovalGate';
 import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
@@ -42,6 +43,7 @@ import {
 } from '../lib/mockupParsing';
 import { hasOpenAIKey } from '../lib/openaiClient';
 import { useMockupImageStore } from '../store/mockupImageStore';
+import { isMockupApproved } from '../lib/mockupApproval';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
 import {
     buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
@@ -1705,6 +1707,53 @@ export function ArtifactWorkspace({
             const settings = extractMockupSettings(preferred);
             const mockupEval = freshness.bySlot('mockup');
             const staleness = mockupEval?.status;
+            // Flow-approval gate: mockup images are not generated until the user
+            // reviews the flows and approves which screens to render. Show the
+            // gate only when this version has no approval overlay *and* no images
+            // yet — so demo/snapshot mockups (read-only, images already present)
+            // and pre-feature versions render straight through.
+            const mockupApproved = isMockupApproved(preferred.metadata);
+            // "Has images" spans both delivery paths: AI-generated (mockupImagesMap,
+            // keyed `${versionId}:…`) and user-uploaded (screenUploadImagesMap, keyed
+            // by the mockup version id). A version with either already-present set
+            // renders straight through instead of re-gating on flow approval.
+            const mockupHasImages =
+                Object.keys(mockupImagesMap).some(k => k.startsWith(`${preferred.id}:`)) ||
+                Object.values(screenUploadImagesMap).some(r => r.artifactVersionId === preferred.id);
+            const showApprovalGate = capabilities.canGenerateArtifacts && !mockupApproved && !mockupHasImages;
+            const handleApproveMockupFlows = (selectedScreenIds: string[]) => {
+                updateArtifactVersionMetadata(
+                    projectId,
+                    mockup.id,
+                    preferred.id,
+                    {
+                        mockupApproval: {
+                            approvedAt: Date.now(),
+                            approvedScreenIds: selectedScreenIds,
+                            flowsReviewed: true,
+                        },
+                    },
+                    {
+                        historyDescription: `Approved flows and ${selectedScreenIds.length} screen${
+                            selectedScreenIds.length === 1 ? '' : 's'
+                        } for mockups`,
+                    },
+                );
+                if (!hasOpenAIKey()) return; // approval recorded; images await a key
+                const imageStore = useMockupImageStore.getState();
+                for (const screen of payload.screens) {
+                    if (!selectedScreenIds.includes(screen.id)) continue;
+                    void imageStore.generate({
+                        projectId,
+                        artifactId: mockup.id,
+                        versionId: preferred.id,
+                        screen,
+                        payload,
+                        settings,
+                        quality: 'low',
+                    });
+                }
+            };
             // Did the design system's tokens change since these mockups were
             // generated? The canonical evaluator's design_tokens_changed reason
             // is the single source (tokensHash drift on the mockup's
@@ -1723,7 +1772,7 @@ export function ArtifactWorkspace({
                             <RefreshCcw size={12} /> Regenerate Mockup
                         </button>}
                     </div>
-                    {designSystemDrift && (
+                    {!showApprovalGate && designSystemDrift && (
                         <div className="flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
                             <div className="flex items-start gap-2 min-w-0">
                                 <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
@@ -1745,19 +1794,35 @@ export function ArtifactWorkspace({
                             </button>}
                         </div>
                     )}
-                    <MockupErrorBoundary resetKey={preferred.id}>
-                        <MockupViewer
-                            payload={payload}
-                            settings={settings}
-                            staleness={staleness}
-                            versionNumber={preferred.versionNumber}
-                            createdAt={preferred.createdAt}
-                            sourceSpineVersionId={preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
-                            versionId={preferred.id}
-                            projectId={projectId}
-                            artifactId={mockup.id}
-                        />
-                    </MockupErrorBoundary>
+                    {showApprovalGate ? (
+                        <MockupErrorBoundary resetKey={preferred.id}>
+                            {/* key by version: a version switch remounts the gate so
+                                its selected-screen state can't carry stale ids from a
+                                previous payload into approval. */}
+                            <MockupApprovalGate
+                                key={preferred.id}
+                                payload={payload}
+                                flows={parsedFlows}
+                                hasImageKey={hasOpenAIKey()}
+                                onOpenFlows={() => setSelected('user_flows')}
+                                onApprove={handleApproveMockupFlows}
+                            />
+                        </MockupErrorBoundary>
+                    ) : (
+                        <MockupErrorBoundary resetKey={preferred.id}>
+                            <MockupViewer
+                                payload={payload}
+                                settings={settings}
+                                staleness={staleness}
+                                versionNumber={preferred.versionNumber}
+                                createdAt={preferred.createdAt}
+                                sourceSpineVersionId={preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                                versionId={preferred.id}
+                                projectId={projectId}
+                                artifactId={mockup.id}
+                            />
+                        </MockupErrorBoundary>
+                    )}
                 </div>
             );
         }
