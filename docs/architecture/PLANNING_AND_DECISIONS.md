@@ -4,24 +4,28 @@
 
 ### Uncertainty-first planning, adversarial review, and Decision Center
 
-The workspace progression is **Plan → Challenge → Build → History**. The
-Challenge stage is reachable as soon as a safe structured working PRD exists and
-always exposes the Decision Center and review history. Its sub-tabs are ordered
-**Decision Center → Findings → History** — decisions first, critique second.
-The specialist critique (the Findings tab) is **optional and gated**: its start
-surface (`ReviewSetup`) is replaced by a "resolve your open decisions first"
-prompt (`CritiqueGate`) until every surfaced decision is addressed — answered
-**or** deferred/skipped. The gate keys off `PlanningReadiness.openDecisionCount`
-(open/proposed records of type decision/open_question/conflict/assumption; risks
-are advisory and excluded); deferring or answering clears it, and the gate's
-"defer the remaining decisions and continue" action is the escape hatch for an
-unsure user. Only *running/continuing* the critique is gated: starting a new run,
-resuming an interrupted/failed run, and retrying coverage are all suppressed
-while decisions are open (a live in-flight run keeps showing progress). The
-Decision Center, history, and any already-completed run stay visible even if a
-later decision reopens the gate — findings remain viewable and triageable.
+The user-facing workspace progression is **Define → Refine → Finalize →
+Generate → Review → Build**. This is a presentation projection over the
+existing persisted stage keys: Plan and Challenge both belong to Refine,
+Finalize is the readiness checkpoint, and project history opens as a panel.
+The **Decision Center is a universal slide-over** that preserves the originating
+surface and exact return context; it is also available from the workspace
+overflow menu. The Refine review surface opens on a **tab-free specialist
+critique setup page** — a two-column layout pairing the recommended specialist
+panel (colored per-challenger accents, Select all, per-row expandable focus
+areas) with a **What happens next** sidebar and the primary action. The
+**Findings → History** tabs are retained on the run surfaces (progress,
+results, and the history list) so any completed run stays reachable; only the
+fresh setup page omits them. The specialist critique is **optional and never
+decision-count gated**. Starting a new run, resuming an interrupted/failed run,
+retrying partial coverage, and reviewing again remain available while decisions
+are open. Those surfaces show one quiet advisory — “N open items; critiquing now
+may re-raise them” — rather than disabling the action or bulk-deferring records.
+The Decision Center layer, critique history, and completed runs stay visible
+throughout.
 A completed critique's findings still promote into new planning records. When
-open decisions remain, entering Challenge lands on the Decision Center tab.
+open decisions remain, the global attention action opens the exact Decision
+Center record without changing the underlying stage.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
@@ -41,8 +45,24 @@ impact previews / the write-barrier apply path in
   with a percentage or artifact-count score. Missing outputs do not reduce
   planning readiness.
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
-  current readiness category, supporting criteria, and one highest-value next
-  action with direct entry to decisions or Challenge.
+  current readiness category, supporting criteria, and the three planning tools
+  as an always-visible, ordered set — Decision Center (settle open choices /
+  confirm scope) → Challenge this plan (stress-test once coherent) → Review
+  readiness (final check before build) — each carrying a plain-language
+  "when to use" cue so the order of operations is legible rather than three
+  equal buried links. The unconfirmed `scope` criterion links directly to the
+  Features view (`onOpenFeatures` → `?prdView=features`); the 7-criterion
+  breakdown stays behind a collapsed "Readiness checks" disclosure.
+- The Plan-stage `PlanningStateBar` owns next-action guidance; there is no
+  separate workspace-wide strip. (A `GlobalNextActionStrip` previously echoed
+  the top ranked attention item below the stage rail, but it duplicated what
+  `PlanningStateBar` already surfaces through its ordered tool cards and
+  readiness checks, so it was removed.) `derivePlanningAttention` still ranks
+  one primary and a small secondary set — every item carries an exact
+  destination plus return target — but it now feeds only the internal
+  `PreBuildCheckpointCard` gate (`preBuildAttentionItem`) and
+  `dispatchPlanningAttentionItem`, not a persistent banner. Do not re-add a
+  standalone aggregate open-item counter surface.
   - **Presentation is invitation-first, never default-alarm**
     (`planningOverviewPresentation.ts`, pure). Every fresh PRD lands in
     `needs_decisions` (imported assumptions open + scope unconfirmed), so that
@@ -68,7 +88,11 @@ impact previews / the write-barrier apply path in
     Decision Center, where the attention item's action label is now "Answer
     this question".
 - PRD assumptions are imported idempotently as soon as the latest structured
-  PRD exists; visiting Challenge is not a prerequisite for planning state.
+  PRD exists; visiting Challenge is not a prerequisite for planning state. The
+  exact ids imported for a new spine drive a session-only arrival card on the
+  Plan surface: **Accept defaults / Review each / Later**. Accept/Later expands
+  to one guarded, append-only user `DecisionEvent` per record; there is no
+  aggregate authority event and no persisted card state.
 - Generated assumptions distinguish **confidence** (plausibility) from
   **materiality** (consequence if wrong) and may identify affected PRD
   sections. Ranking is materiality-first.
@@ -122,6 +146,19 @@ impact previews / the write-barrier apply path in
   failed attempts are not auto-retried; `useDecisionOptionSuggestions.ts`
   dedupes in-flight and stored options). The prompt is snapshot-locked in
   `promptSurfaces.test.ts`.
+- **Batch recommendation acceptance is presentation orchestration over
+  individual authority events.** `batchVerdicts.ts` snapshots each eligible
+  record's open status, semantic target, recommendation identity, and source
+  spine. `useBatchVerdictCoordinator` submits records one at a time; the store
+  revalidates every guard inside the write transaction and reports
+  succeeded/skipped/failed ids. A stale or changed recommendation writes
+  nothing. The Decision Center exposes **Accept N recommendations** only when
+  at least two visible records are eligible.
+- **Related planning records group visually, not semantically.**
+  `planningRecordGrouping.ts` builds conservative critique-cluster and exact
+  PRD-section groups with stable order and singleton fallback. Group children
+  remain separately selectable, answerable, auditable records; grouping never
+  creates a combined verdict or changes hashes.
 - **Answering is terminal for the Decision Center queue.** The "Needs
   attention" tab lists only records that still need an answer
   (`needsVerdict`: status open/proposed); the header count chip and the
@@ -138,17 +175,53 @@ impact previews / the write-barrier apply path in
   count — recording a verdict must never unload proposal cards onto the
   user. Do not re-add `requiresValidation` to the queue's attention
   predicate or re-expand these sections by default.
-- **Open decisions never block Explore/Build.** Only the specialist critique
-  is gated (`CritiqueGate`). The Decision Center header and the critique gate
-  both surface a "Continue to Explore" action (`onContinueToExplore`, threaded
-  from `ProjectWorkspace`), and the advisory `PreBuildCheckModal`
-  (`src/components/planning/PreBuildCheckModal.tsx`) moves the remaining
-  open-question prompt to the start of output generation — offered once per
-  workspace session by `handleGenerateAssets`, listing open
-  decision/question/conflict/assumption records with "Review decisions first"
-  vs "Generate anyway"; generating always proceeds. Do not re-introduce a
-  decision-count or readiness gate on the `workspace` stage or on artifact
-  generation (`artifactGenerationGate.ts` stays safety/PRD-only).
+- **Open items live in the Decision Center, not inside the assets.** Generated
+  outputs are read surfaces: they render their content plainly and must not
+  flag their own unresolved items. (The User Flows asset previously derived a
+  per-flow risk level and an "N unresolved" count from an issue-wording
+  heuristic; both were removed — the heuristic mostly fired on designed
+  fallbacks such as "… is missing from the index → return a canned reply".)
+  `assetOpenItems.ts` is the derived, advisory replacement: it scans each
+  artifact's current version for explicitly labelled `**Open Questions:**` /
+  `**Assumptions:**` blocks and for unambiguous markers (TBD/TODO/"to be
+  determined"/"needs a decision" — deliberately NOT "missing"/"unresolved",
+  which are ordinary words in designed behavior). Every item carries a locator
+  back to its source region, and for user-flow assets that means a `flowId`
+  (slugged identically to `UserFlowsRenderer`'s `flowId()`) plus an optional
+  `flowStepIndex`. `AssetOpenItemsPanel` renders the list at the foot of the
+  Decision Center queue. These items are **recomputed on every read, never
+  persisted, and never counted toward the unresolved total**; the only durable
+  effect is the user promoting one into a real `PlanningRecord` through the
+  existing `flagPlanningConcern` path (`assetOpenItemPlanningSourceKey`, which
+  omits the version so a promoted item stays marked after a regeneration). Do
+  not re-add an in-asset open-item indicator, and do not auto-create planning
+  records from this projection.
+- **`PlanningArtifactRegionTarget.planId`/`itemId` are optional.** They are
+  present only when a region came from a downstream update plan; a plan-less
+  locator (an asset open item pointing at a flow) supplies just the label and
+  the region keys. They travel together or not at all, and
+  `ArtifactWorkspace`'s region banner hides its "Return to update plan" action
+  when there is no plan.
+- **Ordinary open decisions never block Refine, Generate, or Review.** The Decision
+  Center keeps its "Continue to Explore" action (`onContinueToExplore`, threaded
+  from `ProjectWorkspace`). At output generation, one inline
+  `PreBuildCheckpointCard` appears below the stage rail at most once per
+  workspace session, naming the highest-ranked exact planning record and
+  offering Review first / Generate outputs / Not now. It is advisory and never
+  replaces the safety, structured-PRD, incomplete-PRD, or design-preset gates.
+  Do not re-introduce a decision-count or readiness gate on Challenge,
+  `workspace`, or artifact generation (`artifactGenerationGate.ts` stays
+  safety/PRD-only).
+- **Only explicit `materiality: 'blocking'` records are decision-driven hard
+  stops.** `deriveMaterialityGateSnapshot` follows authoritative verdicts and
+  supersession, binds the exact sorted blocker fingerprints to the current
+  spine, and ignores high/normal/low or missing materiality. Finalize may record
+  a v2 append-only acceptance for that exact snapshot with a meaningful
+  rationale. Build bundle export and external task export require the same
+  current acceptance; resolving or changing a blocker invalidates the old
+  snapshot. Advisory concerns remain visible but never acquire hard-stop
+  authority. Valid current v1 commitments remain readable under the stricter
+  policy that originally authorized them.
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
   which tracks the last-applied serialized intent **plus its validated
@@ -158,9 +231,9 @@ impact previews / the write-barrier apply path in
   (initially validated down to the PRD fallback) still re-applies once the
   target exists. Do not remove that guard. Every jump that starts from the Plan stage
   (state bar, attention items, PRD decision surfaces) carries a
-  `returnTo: { kind: 'prd' }` target so a persistent "Back to Plan" banner is
-  available in Challenge, and the Decision Center offers the next unresolved
-  item immediately after an answer is recorded.
+  `returnTo: { kind: 'prd' }` target so the Decision Center can close back to
+  the exact originating surface, and it offers the next unresolved item
+  immediately after an answer is recorded.
 - Decision impact previews are bound to a PRD version and deterministic content
   hash (`decisionImpact.ts`). The first implementation safely patches imported
   PRD assumptions. Source-less or ambiguous records require a later

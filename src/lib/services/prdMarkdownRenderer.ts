@@ -481,7 +481,7 @@ const appendixLines = (prd: StructuredPRD): string[] => {
             renderUxPages(prd.uxPages).forEach(l => lines.push(l));
         }
         if (prd.userLoops?.length) {
-            lines.push('### Core User Loops');
+            lines.push('### Core User Flows');
             renderUserLoops(prd.userLoops).forEach(l => lines.push(l));
             lines.push('');
         }

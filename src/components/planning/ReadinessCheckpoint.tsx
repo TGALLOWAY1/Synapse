@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     AlertTriangle,
     ArrowRight,
@@ -33,6 +33,9 @@ export type ReadinessCheckpointConcernView = {
     detail: string;
     consequence?: string;
     severity: 'attention' | 'blocker';
+    /** Only explicit materiality='blocking' planning records may stop
+     * Finalize. Broader readiness blockers remain checkpoint warnings. */
+    hardBlocking?: boolean;
     actionLabel?: string;
 };
 
@@ -56,6 +59,7 @@ export type ReadinessCheckpointView = {
     concerns: ReadinessCheckpointConcernView[];
     criteria: ReadinessCheckpointCriterionView[];
     caveats: string[];
+    hardBlockerCount?: number;
     commitment?: ReadinessCheckpointCommitmentView;
     priorCommitment?: ReadinessCheckpointCommitmentView;
     comparisonSummary?: string[];
@@ -101,7 +105,6 @@ export function ReadinessCheckpoint({
 }: ReadinessCheckpointProps) {
     const [showOverride, setShowOverride] = useState(false);
     const [rationale, setRationale] = useState('');
-    const [containment, setContainment] = useState('');
     const [attemptedSubmit, setAttemptedSubmit] = useState(false);
     const overrideSectionRef = useRef<HTMLElement>(null);
     const rationaleRef = useRef<HTMLTextAreaElement>(null);
@@ -151,15 +154,13 @@ export function ReadinessCheckpoint({
         });
     }, [initialConcernId, review.concerns]);
 
-    const requiresContainment = useMemo(
-        () => review.concerns.some(concern => concern.severity === 'blocker'),
-        [review.concerns],
-    );
     const rationaleValid = rationale.trim().length >= MIN_RATIONALE_LENGTH;
-    const containmentValid = !requiresContainment || containment.trim().length >= MIN_RATIONALE_LENGTH;
-    const nextConcern = review.concerns[0];
+    const hardBlockerCount = review.hardBlockerCount
+        ?? review.concerns.filter(concern => concern.hardBlocking).length;
+    const nextConcern = review.concerns.find(concern => concern.hardBlocking)
+        ?? review.concerns[0];
     const historical = readOnly || !review.isCurrent || !review.integrityValid;
-    const ready = review.conclusion === 'ready_to_build';
+    const ready = hardBlockerCount === 0;
 
     useEffect(() => {
         if (!showOverride) return;
@@ -173,11 +174,8 @@ export function ReadinessCheckpoint({
 
     const submitOverride = () => {
         setAttemptedSubmit(true);
-        if (!rationaleValid || !containmentValid || !onCommitWithOpenQuestions) return;
-        onCommitWithOpenQuestions({
-            rationale: rationale.trim(),
-            ...(requiresContainment && { containment: containment.trim() }),
-        });
+        if (!rationaleValid || !onCommitWithOpenQuestions) return;
+        onCommitWithOpenQuestions({ rationale: rationale.trim() });
     };
 
     const outcomeLabel = !review.integrityValid
@@ -195,8 +193,8 @@ export function ReadinessCheckpoint({
         : review.commitment?.kind === 'ready'
             ? 'Plan committed'
             : ready
-                ? 'Ready to build'
-                : 'Not ready';
+                ? 'Ready to finalize'
+                : 'Blocking decisions need attention';
 
     return (
         <div
@@ -311,19 +309,19 @@ export function ReadinessCheckpoint({
                                 </div>
                             </div>
                             <div className="mt-3 space-y-3">
-                                {review.concerns.map((concern, index) => (
+                                {review.concerns.map(concern => (
                                     <article id={`readiness-concern-${concern.id}`} key={concern.id} className="scroll-mt-20 rounded-xl border border-neutral-200 p-4">
                                         <div className="flex items-start gap-3">
-                                            {concern.severity === 'blocker'
+                                            {concern.hardBlocking
                                                 ? <ShieldAlert size={18} className="mt-0.5 shrink-0 text-red-600" />
                                                 : <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />}
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <h4 className="font-semibold text-neutral-900">{concern.title}</h4>
-                                                    {concern.severity === 'blocker' && (
-                                                        <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-red-700">Build blocker</span>
+                                                    {concern.hardBlocking && (
+                                                        <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-red-700">Finalize blocker</span>
                                                     )}
-                                                    {index === 0 && (
+                                                    {concern.id === nextConcern?.id && (
                                                         <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-indigo-700">Recommended next</span>
                                                     )}
                                                 </div>
@@ -429,9 +427,10 @@ export function ReadinessCheckpoint({
 
                     {!historical && !ready && showOverride && (
                         <section ref={overrideSectionRef} className="scroll-mt-4 mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4" aria-labelledby="override-heading">
-                            <h3 id="override-heading" className="font-semibold text-amber-950">Proceed with accepted risk</h3>
+                            <h3 id="override-heading" className="font-semibold text-amber-950">Finalize with accepted risk</h3>
                             <p className="mt-1 text-sm leading-6 text-amber-800">
-                                This records your decision to proceed. It does not resolve the {review.concerns.length} open item{review.concerns.length === 1 ? '' : 's'} above.
+                                This records your decision to proceed past {hardBlockerCount} explicit blocking item{hardBlockerCount === 1 ? '' : 's'}.
+                                It does not resolve the planning records above.
                             </p>
                             <label className="mt-4 block text-sm font-semibold text-amber-950" htmlFor="readiness-rationale">Why proceed now?</label>
                             <textarea
@@ -446,22 +445,6 @@ export function ReadinessCheckpoint({
                             {attemptedSubmit && !rationaleValid && (
                                 <p className="mt-1 text-xs font-medium text-red-700">Provide a meaningful rationale of at least {MIN_RATIONALE_LENGTH} characters.</p>
                             )}
-                            {requiresContainment && (
-                                <>
-                                    <label className="mt-4 block text-sm font-semibold text-amber-950" htmlFor="readiness-containment">How will the implementation risk be contained?</label>
-                                    <textarea
-                                        id="readiness-containment"
-                                        value={containment}
-                                        onChange={event => setContainment(event.target.value)}
-                                        rows={3}
-                                        placeholder="Describe the boundary, validation, or follow-up that keeps this risk controlled."
-                                        className="mt-2 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
-                                    />
-                                    {attemptedSubmit && !containmentValid && (
-                                        <p className="mt-1 text-xs font-medium text-red-700">A build blocker requires a concrete containment plan of at least {MIN_RATIONALE_LENGTH} characters.</p>
-                                    )}
-                                </>
-                            )}
                         </section>
                     )}
                 </div>
@@ -475,7 +458,7 @@ export function ReadinessCheckpoint({
                                 disabled={submitting || !onCommitReady}
                                 className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                                {submitting ? 'Recording commitment…' : 'Commit plan'}
+                                {submitting ? 'Finalizing plan…' : 'Finalize plan'}
                             </button>
                         ) : showOverride ? (
                             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -493,7 +476,7 @@ export function ReadinessCheckpoint({
                                     disabled={submitting}
                                     className="min-h-11 w-full rounded-xl bg-amber-700 px-4 text-sm font-semibold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                                 >
-                                    {submitting ? 'Recording commitment…' : `Proceed with ${review.concerns.length} open item${review.concerns.length === 1 ? '' : 's'}`}
+                                    {submitting ? 'Finalizing plan…' : `Finalize with ${hardBlockerCount} accepted blocker${hardBlockerCount === 1 ? '' : 's'}`}
                                 </button>
                             </div>
                         ) : (
@@ -503,7 +486,7 @@ export function ReadinessCheckpoint({
                                     onClick={() => setShowOverride(true)}
                                     className="min-h-11 w-full px-2 text-sm font-semibold text-neutral-600 underline decoration-neutral-300 underline-offset-4 hover:text-neutral-900 sm:w-auto"
                                 >
-                                    Proceed with accepted risk
+                                    Finalize with accepted risk
                                 </button>
                                 <button
                                     type="button"

@@ -72,11 +72,54 @@ confirmation ("Generate assets from an incomplete PRD?") whenever a non-final
 spine has `generationMeta.failedSections` — `startAssetGeneration`'s
 `acknowledgeIncomplete` flag may only ever carry a real user acknowledgement.
 When output generation starts while planning items are still open,
-`handleGenerateAssets` then offers the advisory `PreBuildCheckModal` once per
-workspace session ("Review decisions first" / "Generate anyway") — validation
-surfaces at the start of implementation, and generating always proceeds; the
-hard generation gate stays safety/PRD-only plus the incomplete-PRD
-acknowledgement (`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+`handleGenerateAssets` then offers the inline advisory
+`PreBuildCheckpointCard` once per workspace session below the journey rail. It
+names one exact, ranked planning item and offers Review first / Generate
+outputs / Not now. Generating always proceeds; the hard generation gate stays
+safety/PRD-only plus the incomplete-PRD acknowledgement
+(`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+
+After a job observed active in the current session settles,
+`WorkflowCheckpointSummaryCard` presents one non-persisted completion summary:
+ready-output count plus current generation failures, validation dispositions
+(including accepted issues and advisory warnings), critique findings, and
+alignment notes. It is keyed by the transient job's spine/`startedAt`, is
+dismissible, and does not reappear from stale persisted state after reload.
+
+### Mockup flow-approval gate (approve flows before images)
+
+Mockup generation is two-phase: a **spec phase** (`generateMockup`, no LLM —
+derives the per-screen list from `screen_inventory` + `component_inventory` +
+`design_system`) and a **visual phase** (OpenAI `gpt-image-2` per screen).
+`runMockupSlot` produces the spec as part of the normal asset run but **no
+longer fires image generation** — the costly visual step waits behind an
+explicit flow-approval gate so the user reviews the user flows and approves
+which screens are worth rendering before any image is generated.
+
+- **`src/lib/mockupApproval.ts`** (pure, unit-tested) is the read/derive layer:
+  `readMockupApproval` / `isMockupApproved` read the per-version overlay;
+  `buildMockupScreenRecommendations` / `recommendedScreenIds` seed the checklist
+  (P0/P1 and unlabelled screens pre-checked; P2/P3 offered unchecked — mirroring
+  the spec's existing priority-first selection so the user sees *why* each screen
+  is pre-checked).
+- **Approval is a per-version overlay**, stored under
+  `ArtifactVersion.metadata.mockupApproval`
+  (`{ approvedAt, approvedScreenIds, flowsReviewed }`) via
+  `updateArtifactVersionMetadata` — the same overlay pattern as `screenEdits` /
+  `extraScreens`, so it travels through sync + snapshots with **no new persisted
+  collection** (cross-cutting rules 6 & 12).
+- **`MockupApprovalGate`** (`src/components/mockups/MockupApprovalGate.tsx`) is the
+  UI: a compact flows review (parsed `user_flows` + an "Open Flows" jump + an
+  "I've reviewed the flows" acknowledgement) and the recommendation-seeded screen
+  checklist. On approve, `ArtifactWorkspace` writes the overlay (with a history
+  description) and fires `mockupImageStore.generate` for the selected screens.
+- **When the gate shows.** `ArtifactWorkspace`'s mockup branch renders the gate
+  instead of `MockupViewer` only when the version has **no approval overlay and
+  no images yet** *and* the project can generate. So demo/snapshot mockups (read
+  only, images already present) and pre-feature versions render straight through,
+  and a fresh regenerate re-gates the new version. Approval stays advisory in
+  spirit — nothing else is blocked, and users can still add/regenerate screens
+  from the mockup view afterwards.
 
 ### Consolidated Implementation Plan (Development section)
 
@@ -116,9 +159,10 @@ Convert-to-Tasks all keep working). See
 - **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
   `renderers/implementationPlan/ConsolidatedPlanView.tsx` — a guided build
   launcher, not a report. Tab **ids** keep the internal vocabulary
-  (`overview`/`milestones`/`prompt_packs`/`quality_gates`/`traceability`) but
-  the **labels** are Build Brief / Roadmap / Prompts / Validation / Coverage.
-  An executive `PlanHeader` sits above the tabs: readiness pill, scope
+  (`overview`/`milestones`/`prompt_packs`/`traceability`) and the **labels**
+  are Build Brief / Roadmap / Prompts / Coverage. **Synapse ends at the
+  plan + prompts handoff** — see the "Removed: validation surface" note
+  below. An executive `PlanHeader` sits above the tabs: readiness pill, scope
   counts, generated-from PRD version + staleness (threaded like data_model's
   `prdVersionLabel`/`staleness` props), a primary **Copy next prompt** CTA,
   and the **Convert to tasks** entry point (moved out of `ArtifactWorkspace`'s
@@ -127,19 +171,17 @@ Convert-to-Tasks all keep working). See
   outer white prose card is skipped for `implementation_plan` since the view
   brings its own cards). Decision-surface data is derived by the pure,
   unit-tested **`src/lib/services/implementationPlanInsights.ts`**:
-  prompt-pack build order + next-pack resolution, gate rows with
-  milestone/prompt linkage and verify commands, the coverage matrix (cells
+  prompt-pack build order + next-pack resolution, the coverage matrix (cells
   are explicitly `covered`/`missing`/`not_tracked` — `missing` only when the
   plan links that artifact kind somewhere, so absence is never
-  over-reported), change-impact scoping per upstream artifact, critical-path
-  resolution (ids/names → clickable milestone chips), and structured prompt
-  previews. **Honest gate statuses:** every quality gate defaults to **Not
-  run** — green/passed styling only ever reflects a user-recorded outcome;
-  never re-add implied-pass icons. User progress (gate outcomes + copied
-  packs) persists as the **`planProgress` metadata overlay** on the
-  implementation_plan ArtifactVersion (`readPlanProgress`; same per-version
-  pattern as screenEdits/promptEdits — regeneration starts clean; written
-  silently via `updateArtifactVersionMetadata`, no history event). Saved
+  over-reported), change-impact scoping per upstream artifact, and structured
+  prompt previews. The **Build Brief** tab's Build Timeline is the single
+  milestone-sequencing view (the redundant Critical Path chip row was
+  removed). User progress (copied packs only) persists as the
+  **`planProgress` metadata overlay** on the implementation_plan
+  ArtifactVersion (`readPlanProgress`; same per-version pattern as
+  screenEdits/promptEdits — regeneration starts clean; written silently via
+  `updateArtifactVersionMetadata`, no history event). Saved
   `ProjectTask`s are threaded in as `savedTasks` so structured-plan task ids
   (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs merely
   planned. Fence-less, milestone-less content falls back to the old timeline
@@ -157,7 +199,29 @@ Convert-to-Tasks all keep working). See
   `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
   layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
   over the **active** pipeline). New runs never generate `prompt_pack` (see
-  the retired-subtype rules above).
+  the retired-subtype rules above). Generated plans still carry
+  `qualityGates`/`globalQualityGates` and `validationCommands` in the data
+  model (the schema/prompt are unchanged), but only the validation commands
+  are surfaced (as a per-milestone code block for the coding agent) — see the
+  next note.
+- **Removed: validation surface (kept as a note, intentionally not built).**
+  Synapse's product boundary ends at the **implementation plan + prompts
+  handoff**: the user copies the plan and prompt packs into their coding
+  agent, and verification happens there. An earlier build tried to own
+  post-handoff verification with a **Validation tab** — a quality-gate
+  tracker where each generated gate had a user-set run status (Not run /
+  Passed / Failed / Needs review / Blocked), a per-milestone Quality Gates
+  card, a "Validated by" line on each prompt pack, a Quality Gates column in
+  the Coverage matrix, and a copyable validation checklist, all persisted in
+  the `planProgress.gateStatuses` overlay. This was removed as unnecessary
+  complexity (confusing, and outside the handoff boundary). The gate **data**
+  still generates so the concept can be revived, but there is **no gate UI or
+  status tracking** — `planProgress` now tracks copied packs only, and
+  `readPlanProgress` ignores any legacy `gateStatuses`. If reviving: restore
+  `ValidationTab`, the `quality_gates` tab/nav target, the gate-row/summary/
+  checklist derivations in `implementationPlanInsights.ts`, and the overlay
+  field; do not resurrect model-authored "passed" styling (gates were always
+  Not run until a user recorded an outcome).
 - The demo project is a **cloud snapshot** and carries the legacy
   two-artifact shape until the owner re-pins a regenerated snapshot; the
   adapter is what keeps it rendering consolidated in the meantime. Do not add
@@ -198,22 +262,39 @@ stale and why, and the safe update order. See
   React entry (used by DependencyGraphView, ArtifactWorkspace, ExportModal).
   **`DEPENDENCY_STATUS_LABELS`** is the ONLY status-label map; `isStaleStatus`
   (needs_update | update_recommended) and `hasDesignTokenDrift` are the shared
-  predicates; `FreshnessBadge` is the inline badge (renders only for stale
-  statuses). Staleness itself is deterministic: spine-ref drift and recorded
+  staleness predicates; `needs_review` is handled explicitly as a separate
+  validation-blocked status. `FreshnessBadge` is the inline badge for stale
+  statuses. Staleness itself is deterministic: spine-ref drift and recorded
   dependency-ref drift → `needs_update`; the mockup design-tokensHash rule (a
   `design_tokens_changed` reason) uses hash comparison over version-id
   comparison — a token-identical regen keeps mockups current; missing/error/
-  generating come from artifact presence + live job slots. Upstream trouble
-  propagates downstream as `impactedBy` (blue "Impacted" pill).
+  generating come from artifact presence + live job slots. A live or durable
+  blocking validation disposition is `needs_review`; it remains separate from
+  planning alignment, propagates downstream as trouble, and cannot be cleared
+  with Mark current. Upstream trouble propagates downstream as `impactedBy`
+  (blue "Impacted" pill).
   **System freshness (`DependencyNodeStatus`) is a SEPARATE vocabulary from the
   user review/readiness statuses** (`screenReadiness` / `screenReviewWorkflow`)
   — never merge them.
-- **Actions reuse existing flows.** Single update → `retrySlot`; batch →
-  `artifactJobController.regenerateSlots(slots, args)`, a thin wrapper over
-  the existing `executeJob` (dependency-layer order, mockup last — no second
-  pipeline). It no-ops while a run is active; the UI disables update buttons
-  off live job state. `computeUpdateOrder`/`computeRecommendedUpdates` supply
-  the topological order. **Hidden closure rule:** graph batches only name
+- **One two-speed `Sync outputs` entry reuses existing flows.** Quick sync
+  presents every affected visible output together with Regenerate / Mark
+  current / Later choices, revalidates the exact spine and preferred versions,
+  and submits one dependency-safe
+  `artifactJobController.regenerateSlots(slots, args)` batch. Careful sync is
+  advanced disclosure over the existing immutable per-region downstream update
+  plans; those plans are prepared idempotently in the background when inputs
+  drift, and their exact-region proposals are projected into the Review-stage
+  output-sync queue. Preparation returns partial results and never records a
+  review decision, applies content, promotes a version, or manufactures user
+  authority. A dependent cannot
+  be marked current while a troubled upstream is skipped or regenerated.
+  Manual edits are called out because regeneration appends a version rather
+  than overwriting the preferred one. Active jobs, project capabilities,
+  generation gates, the design preset, and the key requirement are rechecked
+  before writes. The batch wrapper still delegates to `executeJob`
+  (dependency-layer order, mockup last — no second pipeline). It no-ops while a
+  run is active. `computeUpdateOrder`/`computeRecommendedUpdates` supply the
+  topological order. **Hidden closure rule:** graph batches only name
   visible nodes, so `regenerateSlots` expands them via
   `expandWithHiddenDependencyClosure` (`coreArtifactPipeline.ts`) — a hidden
   subtype is pulled in when a requested slot consumes it and its inputs are
@@ -226,7 +307,8 @@ stale and why, and the safe update order. See
   `planSlotRetry(slot, isHealthy)` (`coreArtifactPipeline.ts`), which walks the
   slot's dependency closure (including hidden deps like `component_inventory`)
   and, when a dependency is unhealthy (`isDependencyHealthy`: not done for the
-  spine, or its preferred version carries `validationBlockers`), routes to
+  spine, or its preferred version has a non-accepted validation disposition),
+  routes to
   `regenerateSlots([…unhealthy deps, slot])` so the upstreams regenerate first —
   reusing the same graph-driven `executeJob` path — instead of saving a
   downstream result built from invalid dependency state. Routes only when no run
@@ -258,4 +340,3 @@ criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
 button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
 `sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
 up in `deleteProject`.
-

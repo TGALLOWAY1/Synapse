@@ -1,13 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { IntentHelperInline } from '../lib/intentHelper';
 import { useIsMobile } from '../lib/useIsMobile';
+import { PRD_EDIT_ACTIONS, intentPrefixFor } from '../lib/prdEditActions';
 import {
     computePopoverPosition,
     type SelectionInfo,
 } from '../lib/selectionPopover';
 
-/** Action chips shown in the dialog. Desktop prefills; mobile one-taps. */
-export const SELECTION_ACTIONS = ['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace'] as const;
+/**
+ * Action chip labels shown in the dialog, derived from the PRD edit-action
+ * registry (the single source of truth). Desktop prefills the intent; mobile
+ * one-taps to create a branch.
+ */
+export const SELECTION_ACTIONS = PRD_EDIT_ACTIONS.map(a => a.label);
 
 const POPOVER_SIZE = { width: 480, height: 280 };
 
@@ -98,7 +103,7 @@ export function SelectionActionDialog({
 
     // Which action chip prefilled the current intent (if any). Derived from the
     // intent string so no extra state is needed — the chips set `"<tag>: "`.
-    const activeTag = SELECTION_ACTIONS.find(t => intent.startsWith(t + ': '));
+    const activeTag = PRD_EDIT_ACTIONS.find(a => intent.startsWith(intentPrefixFor(a)))?.label;
 
     if (isMobile) {
         return (
@@ -122,17 +127,21 @@ export function SelectionActionDialog({
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                        {SELECTION_ACTIONS.map(tag => (
-                            <button
-                                key={tag}
-                                type="button"
-                                disabled={isSubmitting}
-                                onClick={() => onQuickAction(tag)}
-                                className="min-h-[44px] flex-1 basis-[28%] rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 active:bg-neutral-200 disabled:opacity-50"
-                            >
-                                {tag}
-                            </button>
-                        ))}
+                        {PRD_EDIT_ACTIONS.map(action => {
+                            const Icon = action.icon;
+                            return (
+                                <button
+                                    key={action.id}
+                                    type="button"
+                                    disabled={isSubmitting}
+                                    onClick={() => onQuickAction(action.label)}
+                                    className="flex min-h-[44px] flex-1 basis-[28%] items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 active:bg-neutral-200 disabled:opacity-50"
+                                >
+                                    <Icon size={15} className="text-indigo-500" aria-hidden="true" />
+                                    {action.label}
+                                </button>
+                            );
+                        })}
                     </div>
 
                     <IntentHelperInline text={intent} />
@@ -180,22 +189,25 @@ export function SelectionActionDialog({
                 <span className="font-semibold text-neutral-700">Anchor:</span> "{anchorPreview}"
             </div>
 
-            <div className="mb-2 mt-1 flex flex-nowrap gap-1.5">
-                {SELECTION_ACTIONS.map(tag => {
-                    const isActive = tag === activeTag;
+            <div className="mb-2 mt-1 flex flex-wrap gap-1.5">
+                {PRD_EDIT_ACTIONS.map(action => {
+                    const isActive = action.label === activeTag;
+                    const Icon = action.icon;
                     return (
                         <button
-                            key={tag}
+                            key={action.id}
                             type="button"
                             aria-pressed={isActive}
-                            onClick={() => setIntent(tag + ': ')}
+                            title={action.helper}
+                            onClick={() => setIntent(intentPrefixFor(action))}
                             className={
                                 isActive
-                                    ? 'flex-1 rounded-full border border-indigo-600 bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition'
-                                    : 'flex-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-100'
+                                    ? 'flex flex-1 basis-[30%] items-center justify-center gap-1 rounded-full border border-indigo-600 bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition'
+                                    : 'flex flex-1 basis-[30%] items-center justify-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-100'
                             }
                         >
-                            {tag}
+                            <Icon size={13} aria-hidden="true" className={isActive ? 'text-white' : 'text-indigo-500'} />
+                            {action.label}
                         </button>
                     );
                 })}

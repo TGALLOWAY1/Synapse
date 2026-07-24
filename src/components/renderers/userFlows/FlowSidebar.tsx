@@ -2,14 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import {
     Clock, GitBranch, Menu, PanelLeftClose, PanelLeftOpen, Sparkles, X,
 } from 'lucide-react';
-import type { FlowCategory, FlowIssueKind, FlowRiskLevel, ParsedFlow } from './types';
+import type { FlowCategory, FlowIssueKind, ParsedFlow } from './types';
 import { CATEGORY_ORDER, displayNumbers } from './categorize';
-
-const RISK_DOT: Record<FlowRiskLevel, { color: string; label: string }> = {
-    low: { color: 'bg-emerald-400', label: 'Low risk' },
-    medium: { color: 'bg-amber-400', label: 'Medium risk' },
-    high: { color: 'bg-red-500', label: 'High risk' },
-};
 
 interface Props {
     flows: ParsedFlow[];
@@ -35,38 +29,17 @@ function groupFlows(flows: ParsedFlow[]): Grouped[] {
         .map(category => ({ category, items: map.get(category)! }));
 }
 
-/** Compact, one-line dot + label legend for the risk indicator — only worth
- * showing when at least one visible flow actually renders a risk dot. */
-function RiskLegend() {
-    return (
-        <p className="flex items-center gap-2.5 text-[10px] text-neutral-400">
-            {(Object.entries(RISK_DOT) as Array<[FlowRiskLevel, { color: string; label: string }]>).map(([level, risk]) => (
-                <span key={level} className="inline-flex items-center gap-1">
-                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${risk.color}`} aria-hidden="true" />
-                    {risk.label}
-                </span>
-            ))}
-        </p>
-    );
-}
-
 const ALT_PATH_KINDS: FlowIssueKind[] = ['alternate_path', 'failure_mode'];
 
-function summarizeIssues(flow: ParsedFlow): {
-    altPaths: number;
-    edgeCases: number;
-    unresolved: number;
-} {
+function summarizeIssues(flow: ParsedFlow): { altPaths: number; edgeCases: number } {
     let altPaths = 0;
     let edgeCases = 0;
-    let unresolved = 0;
     for (const issue of flow.issues) {
         if (ALT_PATH_KINDS.includes(issue.kind)) altPaths++;
         else if (issue.kind === 'edge_case') edgeCases++;
-        else if (issue.kind === 'unresolved_reference') unresolved++;
         else if (issue.kind === 'validation_warning') edgeCases++;
     }
-    return { altPaths, edgeCases, unresolved };
+    return { altPaths, edgeCases };
 }
 
 export function FlowSidebar({
@@ -75,9 +48,6 @@ export function FlowSidebar({
     const grouped = groupFlows(flows);
     const numbers = useMemo(() => displayNumbers(flows), [flows]);
     const selected = flows[selectedIndex];
-    // Legend only earns its place when at least one visible flow actually
-    // renders a risk dot — otherwise it's an explanation for nothing on screen.
-    const anyRiskDotVisible = flows.some(flow => flow.risk !== 'low' || flow.issues.length > 0);
     // Desktop rail defaults to the NAMED flow list — the collapsed numbered
     // strip read as decoration and hid flows 2..N (audit L4). Users can still
     // collapse it to reclaim width. A single-flow artifact never needs a
@@ -105,14 +75,9 @@ export function FlowSidebar({
                         {group.items.map(({ flow, originalIndex }) => {
                             const active = originalIndex === selectedIndex;
                             const stepCount = flow.steps.length;
-                            const { altPaths, edgeCases, unresolved } = summarizeIssues(flow);
+                            const { altPaths, edgeCases } = summarizeIssues(flow);
                             const featureCount = flow.featureRefs.length;
                             const ttv = ttvByFlow?.[originalIndex] ?? null;
-                            const risk = RISK_DOT[flow.risk];
-                            // Only surface the risk dot when there's something to
-                            // warn about — a green "low risk" dot on every flow
-                            // teaches the eye to ignore the indicator.
-                            const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
                             return (
                                 <li key={originalIndex}>
                                     <button
@@ -136,21 +101,12 @@ export function FlowSidebar({
                                                 {numbers[originalIndex]}
                                             </span>
                                             <div className="min-w-0 flex-1">
-                                                <div className="flex items-start gap-1.5">
-                                                    <p
-                                                        className="text-sm font-medium leading-snug break-words min-w-0 flex-1"
-                                                        title={flow.title}
-                                                    >
-                                                        {flow.title}
-                                                    </p>
-                                                    {showRisk && (
-                                                        <span
-                                                            className={`mt-1.5 shrink-0 inline-block w-2 h-2 rounded-full ${risk.color}`}
-                                                            title={risk.label}
-                                                            aria-label={risk.label}
-                                                        />
-                                                    )}
-                                                </div>
+                                                <p
+                                                    className="text-sm font-medium leading-snug break-words"
+                                                    title={flow.title}
+                                                >
+                                                    {flow.title}
+                                                </p>
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-neutral-500">
                                                     <span className="inline-flex items-center gap-0.5">
                                                         <GitBranch size={10} />
@@ -172,12 +128,7 @@ export function FlowSidebar({
                                                             {edgeCases} edge {edgeCases === 1 ? 'case' : 'cases'}
                                                         </span>
                                                     )}
-                                                    {unresolved > 0 && (
-                                                        <span className="text-amber-700">
-                                                            {unresolved} unresolved
-                                                        </span>
-                                                    )}
-                                                    {ttv && (
+                                                                    {ttv && (
                                                         <span className="inline-flex items-center gap-0.5">
                                                             <Clock size={10} /> {ttv} to value
                                                         </span>
@@ -200,8 +151,6 @@ export function FlowSidebar({
         <ul className="space-y-1.5" aria-label="Flows">
             {flows.map((flow, i) => {
                 const active = i === selectedIndex;
-                const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
-                const risk = RISK_DOT[flow.risk];
                 return (
                     <li key={i} className="relative flex justify-center">
                         <button
@@ -218,13 +167,6 @@ export function FlowSidebar({
                         >
                             {numbers[i]}
                         </button>
-                        {showRisk && (
-                            <span
-                                className={`absolute top-0 right-1 w-2 h-2 rounded-full ring-2 ring-white ${risk.color}`}
-                                title={risk.label}
-                                aria-label={risk.label}
-                            />
-                        )}
                     </li>
                 );
             })}
@@ -258,11 +200,6 @@ export function FlowSidebar({
                             {railExpanded ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
                         </button>
                     </div>
-                    {railExpanded && anyRiskDotVisible && (
-                        <div className="mb-3 px-2">
-                            <RiskLegend />
-                        </div>
-                    )}
                     {railExpanded ? renderList(onSelect) : renderCollapsedRail()}
                 </aside>
             )}
@@ -326,11 +263,6 @@ export function FlowSidebar({
                             <X size={16} />
                         </button>
                     </div>
-                    {anyRiskDotVisible && (
-                        <div className="px-3 pb-2">
-                            <RiskLegend />
-                        </div>
-                    )}
                 </div>
                 <div className="overflow-y-auto h-[calc(100%-2.75rem)] p-2">
                     {renderList(i => {

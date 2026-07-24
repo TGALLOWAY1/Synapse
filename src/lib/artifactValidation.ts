@@ -76,12 +76,20 @@ export function validateArtifactContent(
 
     // Check for markdown structure
     const hasHeaders = /^#{1,4}\s/m.test(content);
-    const hasList = /^[-*]\s/m.test(content) || /^\d+\.\s/m.test(content);
+    // Detail can be carried by bullet/numbered lists, GFM tables, OR admonition
+    // callouts — not bullets alone. The data_model artifact, for instance,
+    // expresses every entity as `| … |` tables plus `> [!…]` callouts and
+    // legitimately contains no bullet list; a bullets-only check falsely flags
+    // that richly structured output as "may lack detail".
+    const hasBulletList = /^[-*]\s/m.test(content) || /^\d+\.\s/m.test(content);
+    const hasTable = /^\s*\|.*\|\s*$/m.test(content);
+    const hasCallout = /^\s*>\s*\[!/m.test(content);
+    const hasDetail = hasBulletList || hasTable || hasCallout;
     if (!hasHeaders) {
         warnings.push('No markdown headers found — output may lack structure');
         score -= 15;
     }
-    if (!hasList) {
+    if (!hasDetail) {
         warnings.push('No lists found — output may lack detail');
         score -= 10;
     }

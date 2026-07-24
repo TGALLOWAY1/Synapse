@@ -88,33 +88,39 @@ Set up the repository foundation and initialize the project.
 describe('ImplementationPlanRenderer (consolidated view)', () => {
     it('renders the header and tabbed consolidated view for a native plan', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        // Tabs
+        // Tabs (no Validation tab — Synapse ends at plan + prompts handoff).
         expect(screen.getByRole('button', { name: /^Build Brief$/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Roadmap/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Prompts/ })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /Validation/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Coverage/ })).toBeInTheDocument();
-        // Header: readiness, scope counts, primary CTA.
+        expect(screen.queryByRole('button', { name: /Validation/ })).not.toBeInTheDocument();
+        // Header: readiness, scope counts (no gate count), primary CTA.
         expect(screen.getByText('Plan complete')).toBeInTheDocument();
-        expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack · 2 quality gates/)).toBeInTheDocument();
+        expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack/)).toBeInTheDocument();
+        expect(screen.queryByText(/quality gate/)).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
         // Overview content: strategy, stack, risks with handling.
         expect(screen.getByText('Walking skeleton first.')).toBeInTheDocument();
         expect(screen.getByText('React + Vite')).toBeInTheDocument();
         expect(screen.getByText('API rate limits')).toBeInTheDocument();
         expect(screen.getByText(/Cache responses/)).toBeInTheDocument();
-        // Critical path resolves milestone names into clickable steps.
+        // Build Timeline lists the milestones (the single sequencing view — the
+        // redundant Critical Path card was removed).
+        expect(screen.getByText('Build Timeline')).toBeInTheDocument();
+        expect(screen.queryByText('Critical Path')).not.toBeInTheDocument();
         expect(screen.getAllByText('Project Setup').length).toBeGreaterThan(0);
     });
 
-    it('shows milestone detail with tasks, gates, validation commands, and Done when', () => {
+    it('shows milestone detail with tasks, validation commands, and Done when', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
         fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }));
         // First milestone is expanded by default.
         expect(screen.getByText('Initialize Vite app')).toBeInTheDocument();
-        // Appears on the gate card and in the prompt pack's "Validated by" line.
-        expect(screen.getAllByText('Lint passes clean').length).toBeGreaterThan(0);
+        // Validation commands still travel with the plan for the coding agent.
         expect(screen.getAllByText(/npm run lint/).length).toBeGreaterThan(0);
+        // No quality-gate cards are rendered anywhere.
+        expect(screen.queryByText('Quality Gates')).not.toBeInTheDocument();
+        expect(screen.queryByText('Lint passes clean')).not.toBeInTheDocument();
         expect(screen.getByText('Done when')).toBeInTheDocument();
         expect(screen.getByText('CI green on main')).toBeInTheDocument();
         expect(screen.getByText(/Landing Page/)).toBeInTheDocument();
@@ -132,13 +138,11 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         const cases: Array<{ target: ImplementationPlanNavigationTarget; anchorId: string }> = [
             { target: { tab: 'overview', anchorId: implementationPlanAnchor.architecture(0) }, anchorId: implementationPlanAnchor.architecture(0) },
             { target: { tab: 'overview', anchorId: implementationPlanAnchor.risk(0) }, anchorId: implementationPlanAnchor.risk(0) },
-            { target: { tab: 'overview', anchorId: implementationPlanAnchor.criticalPath(1) }, anchorId: implementationPlanAnchor.criticalPath(1) },
             { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.task('m_setup', 't1') }, anchorId: implementationPlanAnchor.task('m_setup', 't1') },
             { target: { tab: 'milestones', milestoneId: 'm_core', anchorId: implementationPlanAnchor.dependency('m_core', 0) }, anchorId: implementationPlanAnchor.dependency('m_core', 0) },
             { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.definitionOfDone('m_setup', 0) }, anchorId: implementationPlanAnchor.definitionOfDone('m_setup', 0) },
             { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.promptCriterion('m_setup', 'pp_setup', 0) }, anchorId: implementationPlanAnchor.promptCriterion('m_setup', 'pp_setup', 0) },
             { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.validationCommand('m_setup', 0) }, anchorId: implementationPlanAnchor.validationCommand('m_setup', 0) },
-            { target: { tab: 'quality_gates', anchorId: implementationPlanAnchor.qualityGate(undefined, 'g1', 0) }, anchorId: implementationPlanAnchor.qualityGate(undefined, 'g1', 0) },
         ];
 
         for (const { target, anchorId } of cases) {
@@ -185,29 +189,6 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
             expect(screen.getByText(/All prompt packs copied/)).toBeInTheDocument();
         });
         expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
-    });
-
-    it('shows gates as Not run by default — no assumed passes', () => {
-        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        fireEvent.click(screen.getByRole('button', { name: /Validation/ }));
-        expect(screen.getByText('All P0 screens implemented')).toBeInTheDocument();
-        expect(screen.getByText('Plan-wide gate')).toBeInTheDocument();
-        // Milestone attribution + "Blocks" chip both carry the milestone label.
-        expect(screen.getAllByText(/M1 · Project Setup/).length).toBeGreaterThan(0);
-        // Every gate defaults to Not run (status selects, one per gate).
-        const statusSelects = screen.getAllByRole('combobox');
-        expect(statusSelects).toHaveLength(2);
-        statusSelects.forEach(s => expect(s).toHaveValue('not_run'));
-        // Summary reflects honest counts.
-        expect(screen.getByText('2 Not run')).toBeInTheDocument();
-    });
-
-    it('records a gate outcome via the status select (session fallback)', () => {
-        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        fireEvent.click(screen.getByRole('button', { name: /Validation/ }));
-        const select = screen.getAllByRole('combobox')[0];
-        fireEvent.change(select, { target: { value: 'passed' } });
-        expect(screen.getByText('1 Passed')).toBeInTheDocument();
     });
 
     it('renders the coverage matrix with explicit cell states', () => {

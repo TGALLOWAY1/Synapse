@@ -1,12 +1,29 @@
 # Synapse Versioning V3 — Restore & Rollback: Audit and Proposal
 
-> Status: **Proposal for approval — nothing implemented.** Audited against the
-> live codebase on 2026-07-23. Builds on `docs/VERSIONING_AUDIT.md` (Phase 1,
-> shipped) and `docs/VERSIONING_V2_PLAN.md` (Phase A, **partially** shipped —
-> see the status correction in §2.4: the Update Assets plan dialog described as
-> live in prior docs is currently unwired). Scope: whether users can reliably
-> understand, compare, and restore earlier project states — full-project
-> rollback, artifact-level restoration, and conflict handling.
+> Status: **Proposal — re-verified against `origin/main` @ `2f457f4` on
+> 2026-07-24.** Builds on `docs/VERSIONING_AUDIT.md` (Phase 1, shipped) and
+> `docs/VERSIONING_V2_PLAN.md` (Phase A, partially shipped). Scope: whether
+> users can reliably understand, compare, and restore earlier project states —
+> full-project rollback, artifact-level restoration, and conflict handling.
+>
+> **Re-verification note (2026-07-24).** This document was first written against
+> a tree 55 commits older. Everything below has been re-checked against current
+> `main`; two findings changed materially and are corrected in place:
+>
+> - **D4 (regeneration funnel) is now PARTIALLY FIXED.** Main shipped the
+>   manual two-speed **Sync outputs** flow (`src/lib/outputSyncPlan.ts` +
+>   `UpdateAssetsPlanModal`, three entry points, per-output `regenerateSlots`),
+>   and the assets surface is no longer gated on `isFinal`. The blind
+>   `startAll` path survives but is no longer the default. See §2.4.
+> - **D9 (image continuity) is now the top-severity defect**, because the new
+>   Sync flow's "Mark up to date" button reaches the orphaning code path. See
+>   §2.2 D9.
+>
+> One claim in the original draft was **wrong and is retracted**: there is no
+> "delete a screen" action anywhere in the product (§3 S1).
+>
+> **Implementation status:** Phase R1 (§9) is approved and in progress on a
+> separate branch. Phases R2–R5 remain proposals.
 
 ---
 
@@ -23,11 +40,11 @@ But measured against the question "can a user *reliably* get back to a
 previous good state?", the audit found six load-bearing defects:
 
 1. **Overlay edits are destructive and invisible to versioning.** Screen
-   edits/deletions, extra screens, prompt edits, and plan progress mutate the
-   preferred `ArtifactVersion.metadata` in place — no version, several paths
-   emit no history event, and the previous state is unrecoverable. Deleting a
-   screen by accident is exactly the scenario this task targets, and today it
-   cannot be undone.
+   edits, extra screens, screen links, dismissed issues, mockup approval, and
+   plan progress mutate the preferred `ArtifactVersion.metadata` in place — no
+   version, and 5 of the 7 call sites emit no history event, so the previous
+   state is unrecoverable. "Reset to generated" and any screen-detail save
+   overwrite hand-authored edits with no undo.
 2. **Artifact restore silently discards newer overlay work.**
    `revertArtifactToVersion` clones the *old* version's metadata, so restoring
    content also reverts every screen edit, dismissed issue, and plan-progress
@@ -36,23 +53,27 @@ previous good state?", the audit found six load-bearing defects:
    per-entity. Restoring "the project as it was before the architecture
    change" means manually reverting the PRD and up to eight artifacts one by
    one, in the right order, with no grouping and no undo.
-4. **Restoring a PRD dead-ends in the full-regeneration funnel.** A revert
-   lands `isFinal: false`; re-committing runs `startAll`, whose done-check is
-   an exact spine-id match — so restoring the very version everything was
-   generated from still queues a full rebuild of every artifact. The
-   per-asset Update Assets plan built to fix this exists, is tested, and is
-   **rendered nowhere**.
+4. **~~Restoring a PRD dead-ends in the full-regeneration funnel.~~
+   PARTIALLY FIXED — see §2.4.** Main shipped the manual Sync outputs flow and
+   ungated the assets surface, so the common path is now per-output
+   regeneration. `startAll`'s exact-spine-id done-check is unchanged and still
+   reachable whenever any slot lacks a version — a bypass, not a fix.
 5. **The system contradicts itself about staleness after a revert.** The
    badge layer (id-based) marks everything `needs_update`; the alignment layer
-   (content-aware) says `aligned`. The revert confirmation warns that a
-   content-identical restore "may invalidate" every artifact. Users cannot
-   trust warnings that are sometimes false.
-6. **Restoring a mockup loses its images.** Rendered images are keyed by
-   artifact version id in IndexedDB with no fallback chain, and every
-   restore/mark-current appends a clone under a fresh id — so the restored
-   version's screens come up image-less. Any new clone-appending mechanism
-   (including overlay versioning) inherits this unless image continuity is
-   solved first (§4.8).
+   (content-aware) says `aligned`. On one screen the artifact header can read
+   green **Aligned** while the Screens banner reads **"Outputs need review"**
+   and Quick sync shows every row amber with **Regenerate pre-selected**.
+   Users cannot trust warnings that are sometimes false — and on today's main
+   *both* exits from this false positive cause harm (needless regeneration, or
+   the image destruction in D9).
+6. **Restoring or confirming an output destroys its images — now the
+   top-severity defect.** All three image stores key records strictly by
+   artifact version id with no fallback, and every restore/mark-current
+   appends a clone under a fresh id copying no images. The newly shipped
+   "Mark up to date" button reaches this path, so a routine confirmation
+   silently destroys every mockup image, upload, and variant. Any new
+   clone-appending mechanism (including overlay versioning) inherits this
+   unless image continuity is solved first (§4.8).
 
 The proposal keeps the shipped model — append-only snapshots, opaque ids,
 positional labels, `sourceRefs` lineage — and adds four capabilities on top:
@@ -153,21 +174,48 @@ resolution discards the local device's entire version history. No per-version
 merge exists (and building one is out of scope) — but conflict resolution
 currently offers no restore point to fall back on.
 
-**D9 (P1) — Append-clones orphan per-version images today.** Mockup,
-screen-inventory, and mockup-variant images live in IndexedDB keyed
-`versionId:screenId:quality` (mockupImageStore.ts:31-39), and viewers resolve
-strictly by the displayed version's id with no fallback chain
-(`MockupScreenImage.tsx:56`). `revertArtifactToVersion` and
-`markArtifactCurrentForSpine` mint new version ids without copying or
-aliasing image records — so restoring (or confirming-current) a mockup
-version yields a preferred version whose screens render **image-less**,
-degrading to the per-screen generate/upload state. The Screens architecture
-already works around exactly this for coverage: `extraScreens` was made an
-overlay *because* "appending a version would orphan every existing render"
-(SCREENS_EXPERIENCE.md, mockup-coverage rule). Any mechanism in this
-proposal that appends clones of image-bearing versions — overlay versioning,
+**D9 (P0 — top severity, re-verified 2026-07-24) — Append-clones orphan
+per-version images, and the new Sync flow reaches the code path.** All three
+IndexedDB image stores key records strictly by artifact version id, with no
+fallback:
+
+- `mockupImageStore.ts:31-39` — `${versionId}:${screenId}:${quality}` (AI renders)
+- `screenInventoryImageStore.ts:37-41` — `${artifactVersionId}:${screenSlug}:${versionNumber}` (**user uploads**)
+- `mockupVariantImageStore.ts:32-37` — `${versionId}:${screenId}:${variantId}:${quality}`
+
+Viewers resolve strictly by the displayed version's id
+(`MockupScreenImage.tsx:56`; the only fallback in that file is *quality*, never
+version). `revertArtifactToVersion` (artifactSlice.ts:206-271) and
+`markArtifactCurrentForSpine` (artifactSlice.ts:282-382) each mint a fresh
+`uuidv4()` and copy nothing — `artifactSlice.ts` contains zero occurrences of
+"image".
+
+Three consequences, in severity order:
+
+1. **"Mark up to date" destroys every mockup image.** The mockup slot is a
+   dependency-graph node (artifactDependencyGraph.ts:82), so it appears as a
+   Quick sync row with `canMarkCurrent` (outputSyncPlan.ts:226-230), and
+   confirming calls `markArtifactCurrentForSpine`
+   (ArtifactWorkspace.tsx:1160-1165). AI renders, uploads, and variants orphan
+   at once — from a routine "this is still fine" affordance, not a deliberate
+   rollback.
+2. **The regeneration gate is then suppressed.** `mockupApproval` is copied
+   forward with the clone's metadata while `mockupHasImages` tests
+   `startsWith(\`${preferred.id}:\`)` against the *new* id, so
+   `showApprovalGate = canGenerateArtifacts && !mockupApproved && !mockupHasImages`
+   is false (ArtifactWorkspace.tsx:1713-1723) — the user is left on an
+   image-less mockup with no gate and no prompt to rebuild.
+3. **Artifact restore fails identically**, and additionally discards current
+   overlays (D2).
+
+The Screens architecture already works around exactly this for coverage:
+`extraScreens` was made an overlay *because* "appending a version would orphan
+every existing render" (SCREENS_EXPERIENCE.md, mockup-coverage rule). Any
+mechanism that appends clones of image-bearing versions — overlay versioning,
 artifact restore, mark-current, checkpoint restore — must solve image
-continuity first (§4.8), and the fix also repairs today's restore behavior.
+continuity first (§4.8); the fix also repairs today's shipped behavior. The
+only path that preserves images today is snapshot restore, which deliberately
+reuses the snapshot's version ids (snapshotClient.ts:671-684).
 
 ### 2.3 Usability gaps
 
@@ -198,41 +246,84 @@ continuity first (§4.8), and the fix also repairs today's restore behavior.
   before the *first* decision application would preserve a "before decisions"
   restore target (see §4.5).
 
-### 2.4 Status correction — dormant machinery and doc drift
+### 2.4 The Sync outputs flow — what shipped, and what it did not fix
 
-`docs/VERSIONING_V2_PLAN.md` and `docs/architecture/VERSIONING_AND_EXPORT.md`
-describe the re-finalize **Update Assets plan** as shipped
-(`finalizeAndGenerate` → `UpdateAssetsPlanModal`). In the current tree that
-wiring does not exist: `finalizeAndGenerate` is gone (finalize became the
-readiness-commitment flow: `commitReadinessReview` →
-`FinalizationSuccessModal` → `startAssetGeneration` → `startAll`,
-ProjectWorkspace.tsx:917-1014), and `UpdateAssetsPlanModal`,
-`evaluateProjectFreshness`'s `asOfSpineId` option, and
-`expandSelectionWithTroubledUpstreams` are referenced **only by tests and the
-barrel export** — zero live render/call sites. The component and its logic
-are healthy dormant machinery; the docs are drifted. This proposal treats
-re-wiring them (at both the re-commit edge and the new restore edge) as part
-of the plan (§9 R2), and the drifted docs should be corrected in the same
-change that lands it.
+*(Supersedes this section's original "dormant machinery" finding. The
+`UpdateAssetsPlanModal` that was unwired at first writing is now live.)*
+
+`50d293c` ("simplify planning and output sync workflows") added
+**`src/lib/outputSyncPlan.ts`** — a pure planner over the existing dependency
+graph — and wired the rewritten `UpdateAssetsPlanModal` for the first time.
+`d3f3503` added the separate `OutputSyncReviewQueue` (careful/region
+proposals). What exists now:
+
+- `buildOutputSyncRows` (outputSyncPlan.ts:186-244) turns graph evaluations
+  into one row per visible slot, carrying `changeHeadline`, `likelyUnaffected`,
+  `manuallyEdited`, and `canMarkCurrent`.
+- `planOutputSyncExecution` (:239-293) validates mark-current requests **in
+  dependency order** and force-adds troubled upstreams to the regeneration
+  batch via `expandSelectionWithTroubledUpstreams` — a genuine safety property.
+- A session fingerprint (:107-179) invalidates an open plan if the project
+  changed underneath it.
+- Three **manual** entry points: artifact header (ArtifactWorkspace.tsx:1306),
+  Screens banner (:1574), dependency-graph detail (DependencyGraphView.tsx:693).
+  Choices are Regenerate / Mark up to date / Decide later, executing through
+  `regenerateSlots` — not `startAll`.
+
+**What it did not fix:**
+
+- **The blind path survives.** `isSlotDoneForSpine`
+  (artifactJobController.ts:157-175) is still exact spine-id equality, and
+  re-commit still calls `startAll` (ProjectWorkspace.tsx:1537). It is merely
+  hard to reach now, because `assetsReady` is spine-independent
+  (ProjectWorkspace.tsx:1408-1423) and the assets surface is no longer gated on
+  `isFinal` (:1433-1437) — so users are routed to review instead. Any project
+  where a slot never generated still shows "Build outputs" after a restore and
+  regenerates everything.
+- **Restore is not connected to it.** `handleRestoreSpine`
+  (ProjectWorkspace.tsx:1243-1250) closes modals and returns; there is no
+  continuation into the sync plan (§3 S6).
+- **It consumes the raw graph, not the alignment layer**
+  (ArtifactWorkspace.tsx:1076-1082), so it inherits D5's false positives and
+  pre-selects Regenerate for them (`defaultChoice`, outputSyncPlan.ts:225).
+- **Its "Mark up to date" choice is now the easiest way to destroy images**
+  (D9).
 
 ---
 
 ## 3. Scenario walkthroughs (today's behavior)
 
-**S1 — "I accidentally deleted a screen / feature / requirement."**
-- *Feature or requirement (PRD)*: recoverable. The deletion appended a spine
-  version; Version History → Compare → Restore works. The diff, however,
-  shows word-churn rather than "Feature 'X' removed", and restore drops into
-  the D4 funnel.
-- *Screen (screen-inventory overlay) / extra screen / prompt edit*:
-  **unrecoverable** (D1). No version, sometimes no event, no undo.
+**S1 — "I accidentally lost a screen / feature / requirement."**
+
+> **Retraction (2026-07-24).** The original draft said an accidentally deleted
+> screen "cannot be undone". That was wrong: **there is no delete-a-screen
+> action anywhere in the product** — no such affordance exists in
+> `src/components/experience`, `mockups`, or `renderers`. Artifact `content` is
+> never user-editable at all (`createArtifactVersion` has no component call
+> site). The scenario below is corrected to the destructive paths that do
+> exist.
+
+- *Feature or requirement (PRD)*: **recoverable.** The edit appended a spine
+  version; Version History → Compare → Restore works. The diff shows
+  word-churn rather than "Feature 'X' removed" (§2.3), and restore leaves the
+  user to find Sync outputs themselves (§2.4).
+- *Hand-authored screen detail*: **unrecoverable** (D1). "Reset to generated"
+  (ScreenDetailView.tsx:391) and any subsequent field save overwrite the
+  `screenEdits` entry in place — no version, no undo. Review status, sign-off,
+  and dismissed issues share the same fate.
+- *Extra screen added to mockups*: **unrecoverable and silent** (D1).
+  `extraScreens` is appended in place at exactly one line
+  (ArtifactWorkspace.tsx:798-800) with no history event and **no removal path
+  at all**.
 
 **S2 — "I changed the architecture; restore the previous approach."**
-The PRD side works (S1a). But "the previous approach" is PRD + data model +
+The PRD side works (S1). But "the previous approach" is PRD + data model +
 implementation plan + screens *together*: the user must revert each entity
-manually (D3), the restored PRD hard-flags everything stale (D5), and
-re-committing regenerates all assets — including ones the user wanted to keep
-from the restored era (D4). High-friction, low-confidence.
+manually (D3), and the restored PRD hard-flags everything stale (D5). The
+Sync outputs flow (§2.4) now makes the *correction* per-output rather than
+all-or-nothing — a real improvement — but it must be found manually, and
+choosing "Mark up to date" on mockups destroys their images (D9).
+High-friction, low-confidence.
 
 **S3 — "I revised the PRD; downstream UX/screens/plans were better before."**
 Artifact-level restore exists and doesn't touch the PRD — good. But it
@@ -650,23 +741,31 @@ Each phase is independently shippable, `npm run build`/`lint`/`test` gated,
 and updates the affected `docs/architecture/*` topic docs + README (rule:
 restore points and the planner are README-worthy) in the same change.
 
-### R1 — Stop the silent data loss (P0, small–medium)
+### R1 — Stop the silent data loss (P0, small–medium) — **APPROVED, IN PROGRESS**
 **Image continuity first** (`imageSourceVersionId` + shared effective-id
-resolver, §4.8 — also fixes today's image-less mockup restores, D9); then
-overlay versioning (`updateArtifactOverlay`, append-or-amend, destructive ops
-always append), history events for all overlay writes, overlay-preserving
-artifact restore (default "Keep my edits" + opt-in old-overlays), artifact
-restore confirm gains the overlay choice. Store + types + focused tests; no
-new collections. *This alone fixes S1 (screens), S5, and D9.*
+resolver, §4.8 — fixes the image destruction reachable today from "Mark up to
+date" and from artifact restore, D9, and re-arms the suppressed mockup
+approval gate); then overlay versioning (`updateArtifactOverlay`,
+append-or-amend, destructive ops always append), history events for all seven
+overlay writes, overlay-preserving artifact restore (default "Keep my edits" +
+opt-in old-overlays), artifact restore confirm gains the overlay choice. Store
++ types + focused tests; no new collections. *This alone fixes S1, S5, and
+D9.* Landing on a separate implementation branch; `SCREENS_EXPERIENCE.md`'s
+mockup-coverage rule (which forbids appending a version for `extraScreens`
+precisely because it would orphan renders) is rewritten in the same change.
 
-### R2 — Truthful restore + the planner (P1, medium)
-Wire the dormant planner at the PRD-restore and plan-re-commit edges
-(`asOfSpineId`, `computeRecommendedUpdates`,
-`expandSelectionWithTroubledUpstreams` go live); auto-re-baseline
-provably-unchanged artifacts inside the restore transaction; alignment-driven
-presentation for badges/revert warnings/export; advisory planning/branch
-sections in the planner; correct the drifted docs (§2.4). *Fixes D4, D5, S6,
-F5; ends the full-regeneration funnel.*
+### R2 — Truthful restore (P1, medium)
+Make `prd_changed` content-aware so a content-identical restore stops
+hard-flagging every artifact; reconcile which layer each surface consumes
+(header badge, Screens banner, `FreshnessBadge`, the Sync modal's own rows,
+`getStaleArtifactTitles`, export) onto one vocabulary so they stop
+contradicting each other; give `handleRestoreSpine` a continuation into the
+existing Sync outputs flow instead of dead-ending; auto-re-baseline
+provably-unchanged artifacts inside the restore transaction; surface the
+planning records and branches a restore strands (advisory only — never
+auto-revert decision events). *Fixes D5, D6, S6.* Note the planner itself no
+longer needs building — §2.4 shipped it; R2 is about feeding it truthful
+inputs and reaching it from restore.
 
 ### R3 — Project restore points (P1, medium)
 `projectCheckpoints` collection + full travel-chain wiring (rule 6); auto
@@ -685,12 +784,20 @@ the comprehension gaps.*
 
 ### R5 — Durability & cross-device hardening (P3, small–medium)
 Version-storage meter + earlier quota warning (D7); pre-conflict-resolution
-auto-checkpoint (D8); mockup visual side-by-side compare; branch
-stranded-state surfacing/archive; evaluate content-pointer dedup for clones.
+auto-checkpoint (D8); **cross-tab version-array union** — `crossTabMerge.ts`
+resolves each project wholesale by last-activity, so `spineVersions` /
+`artifactVersions` appended in the losing tab are discarded with no conflict
+surface (new, found 2026-07-24); retire `startAll`'s exact-id done-check in
+favour of the Sync plan (§2.4); mockup visual side-by-side compare; branch
+stranded-state surfacing/archive; remove the dead `promptEdits` overlay key,
+which has a live manual-edit read in `artifactDependencyGraph.ts:398-404` and
+no producer; evaluate content-pointer dedup for clones.
 
 **Recommended approval scope:** R1 immediately (data loss), then R2 → R3 as
 the core deliverable of this proposal. R4/R5 can trail. If a single cut is
 needed, defer R4's structured diffs before anything in R1–R3.
+**Decision (2026-07-24): R1 approved and under implementation; R2–R5 await
+approval.**
 
 ---
 
@@ -722,6 +829,28 @@ needed, defer R4's structured diffs before anything in R1–R3.
   `src/store/projectServerSync.ts:186-207,611-645`,
   `projectBundle.ts:174-202`.
 - Image keying/orphaning (D9): `src/lib/mockupImageStore.ts:31-39`,
+  `src/lib/screenInventoryImageStore.ts:37-41` (uploads),
+  `src/lib/mockupVariantImageStore.ts:32-37`,
   `src/components/mockups/MockupScreenImage.tsx:56` (no fallback chain),
+  reachable via `outputSyncPlan.ts:226-230` →
+  `ArtifactWorkspace.tsx:1160-1165`; suppressed gate at
+  `ArtifactWorkspace.tsx:1713-1723`;
   `docs/architecture/SCREENS_EXPERIENCE.md` mockup-coverage rule
   ("appending a version would orphan every existing render").
+
+**Re-verification additions (2026-07-24):**
+
+- Sync outputs flow: `src/lib/outputSyncPlan.ts` (planner),
+  `ArtifactWorkspace.tsx:1076-1082, 1138-1178, 2189-2213` (wiring),
+  entry points `:1306, :1574` + `DependencyGraphView.tsx:693`.
+- Blind path survives: `artifactJobController.ts:157-175`
+  (`isSlotDoneForSpine`), `ProjectWorkspace.tsx:1537` (`startAll`);
+  assets no longer gated on `isFinal` at `ProjectWorkspace.tsx:1408-1437`.
+- Restore dead-ends: `ProjectWorkspace.tsx:1243-1250`.
+- No screen-delete action exists (S1 retraction); artifact content is never
+  user-editable — `createArtifactVersion` has no component call site.
+- New unversioned overlay key `mockupApproval`: `src/lib/mockupApproval.ts:18-26`,
+  written at `ArtifactWorkspace.tsx:1725-1741`.
+- Cross-tab version loss: `src/lib/crossTabMerge.ts:122-138` (wholesale
+  per-project replacement; `spineVersions`/`artifactVersions` are in
+  `projectBundle.ts:85,89`).

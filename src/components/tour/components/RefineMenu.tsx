@@ -2,9 +2,10 @@ import { Sparkles, Maximize2, SlidersHorizontal, Shuffle, RefreshCw } from 'luci
 import { REFINE_ACTIONS, type RefineAction } from '../tourData';
 
 /**
- * The five refinement actions, mirroring `SELECTION_ACTIONS` from
- * SelectionActionDialog (the real PRD highlight pipeline). Kept as local demo
- * data so the tour stays self-contained.
+ * Refinement-action icons for the tour. The real pipeline's actions (and their
+ * icons/helpers/prompts) live in `src/lib/prdEditActions.ts` — the single
+ * source of truth; the tour demos a representative subset (the `Critique`
+ * action is real but not scripted here) with its own self-contained demo data.
  */
 const ACTION_ICON: Record<RefineAction, typeof Sparkles> = {
     Clarify: Sparkles,

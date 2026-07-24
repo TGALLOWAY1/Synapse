@@ -17,17 +17,15 @@ import {
     orderPromptPacks,
     EMPTY_PLAN_PROGRESS,
     type ImplementationPlanProgress,
-    type QualityGateRunStatus,
 } from '../../../lib/services/implementationPlanInsights';
 import { CopyTextButton } from './CopyTextButton';
 import { MilestoneCard } from './MilestoneCard';
 import { PromptPackCard } from './PromptPackCard';
 import { PlanHeader } from './PlanHeader';
 import { OverviewTab } from './OverviewTab';
-import { ValidationTab } from './ValidationTab';
 import { CoverageTab } from './CoverageTab';
 
-type TabId = 'overview' | 'milestones' | 'prompt_packs' | 'quality_gates' | 'traceability';
+type TabId = 'overview' | 'milestones' | 'prompt_packs' | 'traceability';
 
 interface Props {
     plan: ConsolidatedImplementationPlan;
@@ -50,9 +48,9 @@ interface Props {
 /**
  * The consolidated Implementation Plan view — a guided build launcher, not a
  * generated report: executive header (status, scope, copy-next-prompt),
- * Build Brief / Roadmap / Prompts / Validation / Coverage tabs, honest gate
- * statuses, and coverage/impact analysis. Tab ids keep the internal
- * milestone/prompt-pack/quality-gate vocabulary; only labels changed.
+ * Build Brief / Roadmap / Prompts / Coverage tabs, and coverage/impact
+ * analysis. Synapse ends at the plan + prompts handoff, so there is no
+ * validation/quality-gate tracking surface.
  *
  * Tabs scroll horizontally on mobile; the coverage matrix renders as a table
  * on desktop and stacked cards on small screens.
@@ -77,8 +75,8 @@ export function ConsolidatedPlanView({
     const initialTarget = initialNavigationTarget ?? legacyMilestoneTarget;
     const initialMilestoneExists = Boolean(initialTarget?.milestoneId
         && plan.milestones.some(milestone => milestone.id === initialTarget.milestoneId));
-    const initialTab = initialTarget?.tab === 'quality_gates' ? 'quality_gates'
-        : initialTarget?.tab === 'milestones' && initialMilestoneExists ? 'milestones' : 'overview';
+    const initialTab: TabId = initialTarget?.tab === 'milestones' && initialMilestoneExists
+        ? 'milestones' : 'overview';
     const [tab, setTab] = useState<TabId>(initialTab);
     const [focusMilestoneId, setFocusMilestoneId] = useState<string | null>(initialMilestoneExists ? initialTarget!.milestoneId! : null);
     const [focusAnchorId, setFocusAnchorId] = useState<string | null>(initialTarget?.anchorId ?? null);
@@ -99,9 +97,6 @@ export function ConsolidatedPlanView({
         updateProgress({ ...progress, copiedPacks: [...progress.copiedPacks, ...missing] });
     };
     const markPackCopied = (packId: string) => markPacksCopied([packId]);
-    const setGateStatus = (gateId: string, status: QualityGateRunStatus) => {
-        updateProgress({ ...progress, gateStatuses: { ...progress.gateStatuses, [gateId]: status } });
-    };
 
     const milestoneNameById = useMemo(() => {
         const map = new Map<string, string>();
@@ -121,7 +116,6 @@ export function ConsolidatedPlanView({
     const nextPack = useMemo(() => findNextPromptPack(ordered, copiedPackIds), [ordered, copiedPackIds]);
     const allPacks = useMemo(() => collectAllPromptPacks(plan), [plan]);
     const planMarkdown = useMemo(() => consolidatedPlanToMarkdown(plan), [plan]);
-    const gateCount = scope.qualityGates;
 
     const openMilestone = (milestoneId: string) => {
         setTab('milestones');
@@ -141,7 +135,6 @@ export function ConsolidatedPlanView({
         { id: 'overview', label: 'Build Brief' },
         { id: 'milestones', label: 'Roadmap', count: plan.milestones.length },
         { id: 'prompt_packs', label: 'Prompts', count: allPacks.length },
-        { id: 'quality_gates', label: 'Validation', count: gateCount },
         { id: 'traceability', label: 'Coverage' },
     ];
 
@@ -213,8 +206,6 @@ export function ConsolidatedPlanView({
                                 milestoneNameById={milestoneNameById}
                                 defaultExpanded={i === 0 || focusMilestoneId === m.id}
                                 savedTaskById={savedTaskById}
-                                gateStatuses={progress.gateStatuses}
-                                onSetGateStatus={setGateStatus}
                                 copiedPackIds={copiedPackIds}
                                 onPackCopied={markPackCopied}
                                 onPacksCopied={markPacksCopied}
@@ -300,7 +291,6 @@ export function ConsolidatedPlanView({
                                                         defaultCollapsed
                                                         orderLabel={o ? `Prompt ${o.order} of ${ordered.length}` : undefined}
                                                         prerequisites={o?.prerequisiteNames ?? []}
-                                                        relatedGateTitles={o?.relatedGateTitles ?? []}
                                                         copied={copiedPackIds.has(pack.id)}
                                                         onCopied={() => markPackCopied(pack.id)}
                                                         highlight={nextPack?.pack.id === pack.id}
@@ -343,14 +333,6 @@ export function ConsolidatedPlanView({
                 </div>
             )}
 
-            {tab === 'quality_gates' && (
-                <ValidationTab
-                    plan={plan}
-                    gateStatuses={progress.gateStatuses}
-                    onSetGateStatus={setGateStatus}
-                />
-            )}
-
             {tab === 'traceability' && (
                 <CoverageTab
                     plan={plan}
@@ -362,18 +344,12 @@ export function ConsolidatedPlanView({
             )}
 
             {/* --- Export / copy actions ------------------------------------- */}
+            {/* "Copy all prompt packs" lives only on the Prompts tab now — the
+                single home for prompts — so it isn't duplicated on every tab. */}
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
                 <ClipboardList size={15} className="text-neutral-400 shrink-0" aria-hidden="true" />
                 <p className="text-xs text-neutral-500 mr-auto">Take this plan to your coding agent:</p>
                 <CopyTextButton text={planMarkdown} label="Copy plan as markdown" variant="secondary" />
-                {allPacks.length > 0 && (
-                    <CopyTextButton
-                        text={allPacks.map(promptPackToClipboardText).join('\n\n---\n\n')}
-                        label="Copy all prompt packs"
-                        variant="secondary"
-                        onCopied={() => markPacksCopied(ordered.map(o => o.pack.id))}
-                    />
-                )}
             </div>
         </div>
     );

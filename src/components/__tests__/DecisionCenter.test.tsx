@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { BatchVerdictCandidate } from '../../lib/planning';
 import { DecisionCenter, type DecisionCenterRecordView } from '../review/DecisionCenter';
+import type { AssetOpenItem } from '../../lib/planning/assetOpenItems';
 
 const openRecord: DecisionCenterRecordView = {
     id: 'd1', type: 'assumption', title: 'Should guests start without an account?',
@@ -22,6 +24,25 @@ const callbacks = () => ({
     onReviewAlignmentProposal: vi.fn(),
     onRequestAlignmentProposal: vi.fn(),
 });
+
+const eligibleRecommendation = (id: string): DecisionCenterRecordView => {
+    const batchRecommendation: BatchVerdictCandidate = {
+        recordId: id,
+        action: 'accept_recommendation',
+        expectedStatus: 'open',
+        expectedTargetHash: `target-${id}`,
+        expectedRecommendationIdentity: `recommendation-${id}`,
+        optionId: 'guest',
+        answer: 'Allow a limited guest session',
+    };
+    return {
+        ...openRecord,
+        id,
+        type: 'decision',
+        title: `${id} decision`,
+        batchRecommendation,
+    };
+};
 
 describe('DecisionCenter', () => {
     it('leads with one condition and next action before recommendation and alternatives', () => {
@@ -327,6 +348,44 @@ describe('DecisionCenter', () => {
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 
+    it('defaults an empty Decision Center to Needs attention, not the empty log', () => {
+        // With no records at all, landing on "Needs attention" reads as
+        // "you're all caught up" rather than the dead-end empty log.
+        render(<DecisionCenter records={[]} {...callbacks()} />);
+        expect(screen.getByText('Nothing needs an answer')).toBeInTheDocument();
+        expect(screen.queryByText('No resolved planning history yet')).toBeNull();
+    });
+
+    it('re-derives to the log when records hydrate from empty to all-resolved', () => {
+        // Mount before store-backed records hydrate (empty → true-empty default),
+        // then hydrate to only resolved records: the history must not stay
+        // stranded behind the log tab.
+        const resolved = { ...openRecord, status: 'confirmed' as const, resolution: 'Confirmed' };
+        const { rerender } = render(<DecisionCenter records={[]} {...callbacks()} />);
+        expect(screen.getByText('Nothing needs an answer')).toBeInTheDocument();
+
+        rerender(<DecisionCenter records={[resolved]} {...callbacks()} />);
+        // The resolved record is now visible without the user clicking the log tab.
+        expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+        expect(screen.queryByText('No resolved planning history yet')).toBeNull();
+    });
+
+    it('stays on Needs attention when records hydrate from empty to a pending item', () => {
+        const { rerender } = render(<DecisionCenter records={[]} {...callbacks()} />);
+        rerender(<DecisionCenter records={[openRecord]} {...callbacks()} />);
+        // openRecord needs a verdict → the attention queue shows it, not the log.
+        expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+        expect(screen.queryByText('Nothing needs an answer')).toBeNull();
+    });
+
+    it('honors a resolved initialSelectedId that only exists after records hydrate', () => {
+        const resolved = { ...openRecord, id: 'resolved', title: 'Resolved audience', status: 'confirmed' as const, resolution: 'Independent creators' };
+        const props = callbacks();
+        const { rerender } = render(<DecisionCenter records={[]} initialSelectedId="resolved" {...props} />);
+        rerender(<DecisionCenter records={[resolved]} initialSelectedId="resolved" {...props} />);
+        expect(screen.getByRole('button', { name: /Resolved audience/ })).toHaveAttribute('aria-current', 'true');
+    });
+
     it('marks a deferred record with a chip in Resolved & history', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'deferred' }]} {...callbacks()} />);
         fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
@@ -605,6 +664,186 @@ describe('DecisionCenter', () => {
         expect(screen.queryByRole('button', { name: 'Continue to Explore' })).toBeNull();
     });
 
+    it('shows Accept N only for two valid visible candidates', () => {
+        const onAccept = vi.fn();
+        const { rerender } = render(
+            <DecisionCenter
+                records={[eligibleRecommendation('one')]}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+            />,
+        );
+        expect(screen.queryByRole('button', {
+            name: 'Accept 1 recommendation',
+        })).toBeNull();
+
+        const records = [
+            eligibleRecommendation('one'),
+            eligibleRecommendation('two'),
+        ];
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+            />,
+        );
+        const button = screen.getByRole('button', {
+            name: 'Accept 2 recommendations',
+        });
+        expect(button).toHaveClass('min-h-11');
+        fireEvent.click(button);
+        expect(onAccept).toHaveBeenCalledWith([
+            records[0].batchRecommendation,
+            records[1].batchRecommendation,
+        ]);
+    });
+
+    it('disables busy, announces partial results, links skipped records, and hides read-only mutation', () => {
+        const records = [
+            eligibleRecommendation('one'),
+            eligibleRecommendation('two'),
+        ];
+        const onAccept = vi.fn();
+        const { rerender } = render(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                recommendationBatchBusy
+            />,
+        );
+        expect(screen.getByRole('button', {
+            name: 'Accepting 2 recommendations',
+        })).toBeDisabled();
+
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                recommendationBatchResult={{
+                    succeeded: ['one'],
+                    skipped: [{ recordId: 'two', reason: 'The recommendation changed.' }],
+                    failed: [],
+                }}
+            />,
+        );
+        const status = screen.getByRole('status', {
+            name: 'Batch decision result',
+        });
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveTextContent('1 accepted · 1 skipped · 0 failed');
+        const skipped = within(status).getByRole('button', {
+            name: 'Review skipped decision two decision: The recommendation changed.',
+        });
+        fireEvent.click(skipped);
+        expect(screen.getByRole('heading', { name: 'two decision' })).toBeInTheDocument();
+
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                readOnly
+            />,
+        );
+        expect(screen.queryByRole('button', {
+            name: 'Accept 2 recommendations',
+        })).toBeNull();
+    });
+
+    it('nests related records within their existing condition and keeps each sub-item actionable', () => {
+        const group = {
+            key: 'prd-section:target%20users',
+            kind: 'prd_section' as const,
+            label: 'Target Users',
+        };
+        const first: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'audience-one',
+            title: 'Who owns the workspace?',
+            options: undefined,
+            recommendation: undefined,
+            presentationGroup: group,
+        };
+        const second: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'audience-two',
+            title: 'Who can invite collaborators?',
+            options: undefined,
+            recommendation: undefined,
+            presentationGroup: group,
+        };
+        const props = callbacks();
+        render(
+            <DecisionCenter
+                records={[first, second]}
+                initialSelectedId="audience-two"
+                {...props}
+            />,
+        );
+
+        const related = screen.getByRole('region', {
+            name: 'Target Users related planning items',
+        });
+        expect(related).toHaveTextContent('2 related sub-items');
+        expect(within(related).getByText('PRD section')).toBeInTheDocument();
+        expect(within(related).getAllByRole('button')).toHaveLength(2);
+        expect(related.querySelector('button button')).toBeNull();
+        expect(within(related).getByRole('button', {
+            name: /Who can invite collaborators/,
+        })).toHaveAttribute('aria-current', 'true');
+        expect(screen.getByRole('heading', {
+            name: 'Who can invite collaborators?',
+        })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: /Yes, that's right/ }));
+        expect(props.onDecide).toHaveBeenCalledWith(
+            'audience-two',
+            'confirm',
+            openRecord.statement,
+            undefined,
+        );
+    });
+
+    it('renders a relationship as ordinary rows when only one member is visible in a queue section', () => {
+        const presentationGroup = {
+            key: 'critique:issue-1',
+            kind: 'critique_cluster' as const,
+            label: 'Account boundary',
+        };
+        const resolved: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'resolved-related',
+            title: 'Resolved account boundary',
+            status: 'confirmed',
+            resolution: 'Require an account',
+            presentationGroup,
+        };
+        render(
+            <DecisionCenter
+                records={[{ ...openRecord, presentationGroup }, resolved]}
+                {...callbacks()}
+            />,
+        );
+
+        expect(screen.queryByRole('region', {
+            name: 'Account boundary related planning items',
+        })).toBeNull();
+        expect(screen.getByRole('button', {
+            name: /Should guests start without an account/,
+        })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
+        expect(screen.queryByRole('region', {
+            name: 'Account boundary related planning items',
+        })).toBeNull();
+        expect(screen.getByRole('button', {
+            name: /Resolved account boundary/,
+        })).toBeInTheDocument();
+    });
+
     it('lets a user explicitly revise or invalidate a recorded decision', () => {
         const props = callbacks();
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...props} />);
@@ -616,5 +855,69 @@ describe('DecisionCenter', () => {
         fireEvent.change(revision, { target: { value: 'The onboarding flow was removed' } });
         fireEvent.click(screen.getByRole('button', { name: 'Mark no longer valid' }));
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'invalidate', 'The onboarding flow was removed', undefined);
+    });
+});
+
+describe('DecisionCenter — advisory open items from outputs', () => {
+    const assetItem: AssetOpenItem = {
+        id: 'asset-open-abc',
+        artifactId: 'artifact-flows',
+        artifactVersionId: 'v3',
+        slot: 'user_flows',
+        artifactTitle: 'User Flows',
+        kind: 'open_question',
+        text: 'Should partial-coverage answers show a confidence score?',
+        locationLabel: 'Grounded Knowledge Retrieval',
+        flowId: 'grounded-knowledge-retrieval',
+        flowStepIndex: 1,
+    };
+
+    it('lists the item with a link back to its flow and step', () => {
+        const onOpenAssetItem = vi.fn();
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem]}
+                onOpenAssetItem={onOpenAssetItem}
+                onAddAssetItemToPlan={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByText(/partial-coverage answers/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', {
+            name: /Open Grounded Knowledge Retrieval in User Flows/i,
+        }));
+        expect(onOpenAssetItem).toHaveBeenCalledWith(assetItem);
+        expect(screen.getByText(/Grounded Knowledge Retrieval · Step 2/)).toBeInTheDocument();
+    });
+
+    it('never counts an advisory item toward the items needing an answer', () => {
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem, { ...assetItem, id: 'asset-open-def' }]}
+            />,
+        );
+
+        // One real record needs an answer; the two advisory items must not
+        // inflate the header count.
+        expect(screen.getByLabelText('1 planning item needs an answer')).toBeInTheDocument();
+    });
+
+    it('shows a promoted item as added instead of offering to add it again', () => {
+        render(
+            <DecisionCenter
+                records={[openRecord]}
+                {...callbacks()}
+                assetOpenItems={[assetItem]}
+                assetOpenItemsPromotedIds={new Set([assetItem.id])}
+                onAddAssetItemToPlan={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByText('Added to plan')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Add ".*" to the plan/ })).toBeNull();
     });
 });

@@ -14,7 +14,6 @@ function stubFlow(category: ParsedFlow['category']): ParsedFlow {
         inferredEntryPoints: [],
         inferredSystems: [],
         featureRefs: [],
-        risk: 'low',
     };
 }
 

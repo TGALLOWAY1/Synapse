@@ -1,16 +1,28 @@
-# UI Patterns: Selection, Progress, Tour & Metrics
+# UI Patterns: Selection, Progress, Checkpoints, Tour & Metrics
 
-> Extracted from CLAUDE.md. The PRD highlight→branch selection pipeline, PRD progress timeline, GenerationProgress modes, the interactive product tour, and orchestration metrics.
+> Extracted from CLAUDE.md. The PRD highlight→branch selection pipeline, PRD progress timeline, GenerationProgress modes, workflow checkpoints, the interactive product tour, and orchestration metrics.
 
 ### PRD highlight → branch selection pipeline
 
 The core PRD-refinement gesture — highlight PRD text, get a contextual
-action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
-a history-tracked branch — is detection-source-agnostic and works on
+action dialog (Clarify / Expand / Specify / Alternative / Replace / Critique),
+spawn a history-tracked branch — is detection-source-agnostic and works on
 both desktop and touch. The selection pipeline now has a single consumer,
 `StructuredPRDView.tsx` (the structured PRD renderer); legacy spines with no
 `structuredPRD` render as read-only markdown with no selection/branch UI. Do
 not reintroduce per-component `onMouseUp` selection logic.
+
+- **`src/lib/prdEditActions.ts`** — the edit-action **registry**, the single
+  source of truth for the actions. Each `PrdEditAction` carries an `id`,
+  `label`, `icon`, inline `helper`, a **specialized `systemPrompt`**, and a
+  `mode` (`'chat' | 'draft'`). The actions are no longer cosmetic prefixes:
+  `branchService.replyInBranch` selects the system prompt by action id (derived
+  from the intent's `"<Label>: "` prefix when not passed explicitly), so
+  Specify returns acceptance criteria, Alternative returns tradeoff-structured
+  options, Critique stress-tests the passage, etc. `SelectionActionDialog.tsx`
+  and `intentHelper.tsx` derive their chips/hints from this registry; the tour
+  (`src/components/tour/`) keeps its own demo scripts and demos a subset. The
+  per-action prompts are snapshot-locked in `promptSurfaces.test.ts`.
 
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
@@ -54,9 +66,10 @@ not reintroduce per-component `onMouseUp` selection logic.
   - **Desktop popover sizing/layout.** The popover is `480×280`
     (`POPOVER_SIZE` + the `w-[480px]` class; `computePopoverPosition` is
     unchanged — same above-preferred / viewport-clamp math, just fed the
-    larger size). The five action chips (`SELECTION_ACTIONS` —
-    Clarify / Expand / Specify / Alternative / Replace) render in a single
-    `flex flex-nowrap` row (each `flex-1`), still prefilling the intent as
+    larger size). The action chips (derived from `PRD_EDIT_ACTIONS` —
+    Clarify / Expand / Specify / Alternative / Replace / Critique, each with an
+    icon) render in a `flex flex-wrap` row (each `flex-1 basis-[30%]`, so six
+    chips wrap to two rows), still prefilling the intent as
     `"<tag>: "` and reflecting the active tag via `aria-pressed`. The intent
     field is a `rows={3}` **`<textarea autoFocus>`** inside a `flex flex-col`
     form with a footer row (keyboard hint left, Branch button right):
@@ -125,7 +138,7 @@ component). It is driven directly by the live `prdSectionStatus` store slice
   padding, branch connector width, child gaps) to reclaim mobile width. Do not
   move the description/model chip back beside the timing block.**
   Mobile collapses per-step detail behind chevrons and shows a `View full
-  history >` link (navigates to the History stage); desktop shows
+  history >` link (opens the project History panel); desktop shows
   description/model/status/est/actual/retry and concurrent groups without
   expansion, plus inline `[Current Run] [History]` tabs (History renders the
   `prdProgress` message log inline). Failed steps stay expanded with a red
@@ -213,6 +226,30 @@ When supplying `history`, the stage label strings in
 emitted via `onProgress` for the indicator to track. Don't include
 mutable detail (char counts, timestamps) in progress messages — that
 defeats the store's consecutive-dedupe and floods the history list.
+
+### Advisory checkpoint cards
+
+Workflow checkpoints are inline, non-blocking cards rather than modal
+interruptions:
+
+- `PreBuildCheckpointCard` appears below the journey rail at most once per
+  workspace session when generation starts with open planning attention. It
+  names the exact highest-ranked record and offers **Review first**,
+  **Generate outputs**, and **Not now**. Review uses the record's exact
+  `planningNavigation` destination/return context; neither dismissal nor
+  proceeding changes planning authority.
+- `WorkflowCheckpointSummaryCard` aggregates the current output, critique,
+  validation, and alignment signals after a generation job observed in the
+  current session settles, and again in the export dialog. Each row navigates
+  to the exact artifact or finding. The card displays the current committed
+  Finalize verdict and accepted risks; absent a current commitment it says
+  **Working plan** once.
+
+These cards are projections, not new persisted workflow state. Aggregate
+attention gets one global home in the next-action strip and one checkpoint
+echo; local surfaces use exact action labels instead of repeating counts.
+Cards and modal disclosures must retain keyboard reachability, visible focus,
+dialog labelling, Escape handling, focus restoration, and 44px mobile targets.
 
 ### Interactive product tour (`src/components/tour/`)
 
@@ -311,4 +348,3 @@ see the LLM layer) before this; the metrics layer makes that concurrency
   `EMPTY_RUNS` selector fallback per the Selector-stability rule),
   `MetricsOverviewCards`, `WorkflowRunsTable`, `WorkflowRunDetail` (Gantt bars +
   node table). **No synthetic/demo data** — a fresh user sees an empty state.
-

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { useProjectStore } from '../../store/projectStore';
 import { DependencyGraphView } from '../dependency/DependencyGraphView';
 import type {
@@ -95,7 +95,7 @@ function seedStore(opts: { spines: SpineVersion[]; generated: boolean; artifactS
     });
 }
 
-const renderView = () =>
+const renderView = (onOpenSyncOutputs = vi.fn()) =>
     render(
         <DependencyGraphView
             projectId={PROJECT_ID}
@@ -103,6 +103,7 @@ const renderView = () =>
             prdContent="prd text"
             structuredPRD={structuredPRD}
             onOpenNode={() => {}}
+            onOpenSyncOutputs={onOpenSyncOutputs}
         />,
     );
 
@@ -136,12 +137,13 @@ describe('DependencyGraphView', () => {
     });
 
     it('legacy PRD drift stays advisory and explains the uncertainty in the detail panel', () => {
+        const onOpenSyncOutputs = vi.fn();
         seedStore({
             spines: [spine(SPINE_V1, false), spine(SPINE_V2, true)],
             generated: true,
             artifactSpineId: SPINE_V1,
         });
-        renderView();
+        renderView(onOpenSyncOutputs);
         expect(screen.getAllByText('Review recommended').length).toBeGreaterThan(0);
         expect(screen.getByText(/6 advisory/)).toBeTruthy();
         expect(screen.queryByRole('button', { name: /Review 6 affected/i })).toBeNull();
@@ -156,6 +158,73 @@ describe('DependencyGraphView', () => {
         // "Generated from PRD Version 1" metadata row.
         expect(screen.getByText('PRD Version 1')).toBeTruthy();
         expect(screen.queryByRole('button', { name: /Update this \+ downstream artifacts/i })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Confirm aligned/i })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Update plan/i })).toBeNull();
+        const syncButton = screen.getByRole('button', { name: /Sync outputs/i });
+        fireEvent.click(syncButton);
+        expect(onOpenSyncOutputs).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not render an alignment-only Sync outputs trigger without an eligible surface', () => {
+        seedStore({
+            spines: [spine(SPINE_V1, false), spine(SPINE_V2, true)],
+            generated: true,
+            artifactSpineId: SPINE_V1,
+        });
+        render(
+            <DependencyGraphView
+                projectId={PROJECT_ID}
+                spineVersionId={SPINE_V1}
+                prdContent="prd text"
+                structuredPRD={structuredPRD}
+                onOpenNode={() => {}}
+            />,
+        );
+        fireEvent.click(screen.getAllByText('Data Model')[0]);
+        expect(screen.queryByRole('button', { name: /Sync outputs/i })).not.toBeInTheDocument();
+    });
+
+    it('offers Sync outputs for an aligned output that needs validation review', () => {
+        const onOpenSyncOutputs = vi.fn();
+        seedStore({ spines: [spine(SPINE_V1, true)], generated: true });
+        useProjectStore.setState(state => ({
+            artifactVersions: {
+                ...state.artifactVersions,
+                [PROJECT_ID]: state.artifactVersions[PROJECT_ID].map(version => {
+                    const artifact = state.artifacts[PROJECT_ID].find(
+                        candidate => candidate.id === version.artifactId,
+                    );
+                    return artifact?.subtype === 'data_model'
+                        ? {
+                            ...version,
+                            metadata: {
+                                ...version.metadata,
+                                validationBlockers: [{
+                                    code: 'prd_traceability_unverified',
+                                    message: 'Traceability was not verified.',
+                                }],
+                            },
+                        }
+                        : version;
+                }),
+            },
+        }));
+
+        renderView(onOpenSyncOutputs);
+        const nodeButton = screen.getAllByText('Data Model')[0].closest('button');
+        expect(nodeButton).not.toBeNull();
+        expect(within(nodeButton!).getByText('Needs validation review')).toBeInTheDocument();
+        expect(within(nodeButton!).queryByText('Aligned')).not.toBeInTheDocument();
+        fireEvent.click(nodeButton!);
+        expect(screen.getAllByText('Needs validation review').length).toBeGreaterThan(0);
+        const detailHeading = screen.getByRole('heading', { name: 'Data Model' });
+        expect(within(detailHeading.parentElement!).getByText('Needs validation review'))
+            .toBeInTheDocument();
+        expect(within(detailHeading.parentElement!).queryByText('Aligned'))
+            .not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /Sync outputs/i }));
+        expect(onOpenSyncOutputs).toHaveBeenCalledTimes(1);
     });
 
     it('impact view lists dependencies and downstream impacts for a selected artifact', () => {

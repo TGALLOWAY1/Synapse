@@ -27,6 +27,7 @@ import {
     readinessReviewSnapshotHash,
     sealReadinessCommitmentEvent,
 } from '../../lib/planning/readinessCommitment';
+import { deriveMaterialityGateSnapshot } from '../../lib/planning/materialityGate';
 import { pruneReadinessReviews } from '../../lib/collectionRetention';
 
 export type ReadinessSlice = Pick<ProjectState,
@@ -258,23 +259,52 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'accepted_concerns_mismatch' };
                 return state;
             }
-            if (review.conclusion === 'not_ready' && !meaningful(input.rationale)) {
-                result = { status: 'rejected', reason: 'rationale_required' };
+            const materialitySnapshot = deriveMaterialityGateSnapshot({
+                currentSpineVersionId: review.spineVersionId,
+                planningRecords: state.planningRecords[projectId] ?? [],
+            });
+            const acceptedBlockingRecordIds = [
+                ...new Set(input.acceptedBlockingRecordIds ?? []),
+            ].sort();
+            if (
+                acceptedBlockingRecordIds.length !== materialitySnapshot.blockingRecordIds.length
+                || acceptedBlockingRecordIds.some((
+                    id,
+                    index,
+                ) => id !== materialitySnapshot.blockingRecordIds[index])
+            ) {
+                result = { status: 'rejected', reason: 'accepted_blockers_mismatch' };
                 return state;
             }
-            if (review.concerns.some(item => item.blocking) && !meaningful(input.containmentPlan)) {
-                result = { status: 'rejected', reason: 'containment_required' };
+            if (
+                input.blockingSnapshotHash !== undefined
+                && input.blockingSnapshotHash !== materialitySnapshot.blockingSnapshotHash
+            ) {
+                result = { status: 'rejected', reason: 'blocking_snapshot_mismatch' };
+                return state;
+            }
+            if (
+                materialitySnapshot.blockingRecordIds.length > 0
+                && input.blockingSnapshotHash !== materialitySnapshot.blockingSnapshotHash
+            ) {
+                result = { status: 'rejected', reason: 'blocking_snapshot_mismatch' };
+                return state;
+            }
+            if (acceptedBlockingRecordIds.length > 0 && !meaningful(input.rationale)) {
+                result = { status: 'rejected', reason: 'rationale_required' };
                 return state;
             }
             const events = state.readinessCommitmentEvents[projectId] ?? [];
             const event = sealReadinessCommitmentEvent({
-                eventSchemaVersion: 1,
+                eventSchemaVersion: 2,
                 id: uuidv4(), projectId, reviewId, actor: 'user', type: 'commit_authorized',
                 at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: review.spineVersionId,
                 snapshotHash: readinessReviewSnapshotHash(review), integrityHash: review.integrityHash,
                 aggregateHash: review.snapshotHashes.aggregate,
                 acceptedConcernIds,
+                acceptedBlockingRecordIds,
+                blockingSnapshotHash: materialitySnapshot.blockingSnapshotHash,
                 rationale: input.rationale?.trim() ?? '',
                 ...(input.containmentPlan?.trim() && { containmentPlan: input.containmentPlan.trim() }),
             }) as Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }>;
@@ -333,7 +363,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 return state;
             }
             const event = sealReadinessCommitmentEvent({
-                eventSchemaVersion: 1,
+                eventSchemaVersion: 2,
                 id: uuidv4(), projectId, reviewId, actor: 'user', type: 'plan_committed',
                 at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: review.spineVersionId,
@@ -393,7 +423,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 return state;
             }
             const event = sealReadinessCommitmentEvent({
-                eventSchemaVersion: 1,
+                eventSchemaVersion: 2,
                 id: uuidv4(), projectId, reviewId: commitment.reviewId, actor: 'user', type: 'plan_reopened',
                 at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: commitment.spineVersionId,

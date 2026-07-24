@@ -15,7 +15,7 @@ import type { ImplementationPlanNavigationTarget } from '../../lib/planning/impl
 // Render an `implementation_plan` artifact.
 //
 // The primary path is the consolidated Implementation Plan view
-// (Overview / Milestones / Prompt Packs / Quality Gates / Traceability),
+// (Overview / Milestones / Prompt Packs / Traceability),
 // built by `implementationPlanAdapter` from the artifact content plus — for
 // legacy projects — the old standalone `prompt_pack` artifact's content
 // (threaded through `promptPackContent`). New artifacts carry milestone

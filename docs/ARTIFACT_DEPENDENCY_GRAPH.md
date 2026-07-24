@@ -74,10 +74,16 @@ Evaluated per node by `evaluateDependencyGraph()`:
 4. **Legacy fallback** — no recorded dependency ref (pre-feature versions)
    but the dependency's preferred version is newer than this artifact →
    advisory `update_recommended` (`dependency_newer`).
-5. **Missing / error / generating** — from artifact presence + the live job
+5. **Validation review** — a live or persisted blocking validation
+   disposition → `needs_review`. This is deliberately distinct from
+   planning alignment: the evaluator still records any PRD or dependency
+   drift reasons, but the output cannot be marked current until validation is
+   resolved or explicitly accepted under policy.
+6. **Missing / error / generating** — from artifact presence + the live job
    slot state.
 
-Upstream trouble additionally propagates downstream as `impactedBy`
+Upstream trouble (including `needs_review`) additionally propagates
+downstream as `impactedBy`
 (transitive over hard edges), so an artifact whose own refs match still
 warns when an ancestor is stale — surfaced as the blue **Impacted** pill.
 Manual edits (`provenance.changeSource === 'user_edit'`) surface as a
@@ -88,7 +94,7 @@ caution flag, never a hard status.
 - `computeUpdateOrder()` — topological order over the induced subgraph, so a
   batch never regenerates an artifact before an upstream input in the same
   batch. `computeRecommendedUpdates()` = stale ∪ missing ∪ errored ∪
-  impacted nodes, in that order.
+  validation-review ∪ impacted nodes, in that order.
 - **Update selected** → existing `artifactJobController.retrySlot`.
 - **Update all impacted** → `artifactJobController.regenerateSlots(slots,
   args)` — a thin wrapper over the existing `executeJob`, which already runs
@@ -104,6 +110,8 @@ caution flag, never a hard status.
   inventory built from the old screens.
 - **Open artifact** → the hosting workspace view (`screen_inventory` and
   `mockup` route into the Screens experience view).
+- **Mark current** is unavailable for `needs_review`; synchronization cannot
+  convert a failed validation gate into a trusted output.
 
 ## UI
 

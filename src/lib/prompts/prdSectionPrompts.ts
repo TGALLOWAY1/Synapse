@@ -160,7 +160,7 @@ ${hasFeatures ? `Features: ${features}` : ''}
 ${thesis !== UNAVAILABLE ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
-- userLoops: array of 2–4 retention loops, each: { name, trigger, action, systemResponse, reward, retentionMechanic }
+- userLoops: array of 2–4 core user flows — the recurring journeys that bring users back — each: { name, trigger, action, systemResponse, reward, retentionMechanic }. Name each flow for what the user is doing ("Capture and verify", "Daily review"); never append "Loop" to the name.
 - uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (3–6 short items — the key content and primary actions the user sees on this screen) }. Stay at the decision level: do NOT write component-by-component UI specs, interaction lists, or empty/loading/error state definitions — the dedicated Screen Inventory artifact owns that detail.
 - roles: array of 3–6 user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }.
   Permissions & Roles describe **business capabilities a user has inside the product** — the things they can do — NOT how the software is built or secured. Write them the way a product manager would.
@@ -211,7 +211,7 @@ ${hasArch ? `Architecture: ${arch}` : ''}
 Return JSON with:
 - risks: array of 4–8 risk strings (summary level)
 - risksDetailed: array of { risk, likelihood (low/med/high), impact, mitigation, owner? }
-- assumptions: array of { id (a1…), statement, confidence (low/med/high), materiality (blocking/high/normal/low), whyItMatters, affectedPrdSections (array) } — 4–8 product assumptions. Record every consequential fact you inferred rather than were told. Confidence means plausibility; materiality means how much the product would change if the assumption is wrong. Never use confidence as a proxy for importance. Use blocking sparingly for an inference that prevents credible scope, high for one that could materially change the primary user/outcome/core behavior, normal for meaningful design choices, and low for reversible detail. affectedPrdSections must use recognizable PRD section names.`,
+- assumptions: array of { id (a1…), statement, confidence (low/med/high), materiality (blocking/high/normal/low), whyItMatters, affectedPrdSections (array) } — 4–8 product assumptions. Record every consequential fact you inferred rather than were told. Confidence means plausibility; materiality means how much the product would change if the assumption is wrong. Never use confidence as a proxy for importance. Normally emit zero blocking assumptions and never more than one. Use blocking only when no coherent first-release scope can be chosen until that inference is answered — not merely because it is costly, risky, irreversible, or affects many outputs. Use high for an inference that could materially change the primary user/outcome/core behavior, normal for meaningful design choices, and low for reversible detail. affectedPrdSections must use recognizable PRD section names.`,
         };
     },
 

@@ -197,6 +197,19 @@ describe('readiness checkpoint authority projection', () => {
         expect(buildReadinessCheckpointView(review, { current: true, historical: false, integrityValid: true, reasons: [] }, [], 'Version 2').commitment).toBeUndefined();
     });
 
+    it('uses the exact materiality snapshot for hard-blocker count and marking', () => {
+        const view = buildReadinessCheckpointView(
+            review,
+            { current: true, historical: false, integrityValid: true, reasons: [] },
+            [],
+            'Version 2',
+            undefined,
+            ['decision-1', 'decision-not-projected-as-concern'],
+        );
+        expect(view.hardBlockerCount).toBe(2);
+        expect(view.concerns[0].hardBlocking).toBe(true);
+    });
+
     it('does not let invalid Phase 3 authority fall back to legacy finality', () => {
         const forged = [{
             ...eventBase, eventSchemaVersion: 1, eventIntegrityHash: 'invalid',

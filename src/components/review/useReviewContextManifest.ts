@@ -115,6 +115,10 @@ export function useReviewContextManifest(params: {
                 name: specialist.label,
                 responsibility: specialist.responsibility,
                 selectionReason: item.reasons.join(' '),
+                // Reused for the setup row's progressive-disclosure panel — the
+                // exact goals this specialist scrutinizes. Optional on the type,
+                // so legacy/test callers that omit it simply render no expander.
+                focusAreas: specialist.goals,
                 recommended: true,
             };
         });

@@ -15,13 +15,13 @@ describe('traceRedaction', () => {
         const redacted = redactValue({
             'x-goog-api-key': 'AIzaSyABCDEFGHIJKLMNOPQRST',
             authorization: 'Bearer sometoken12345',
-            model: 'gemini-3.5-flash',
+            model: 'gemini-3.6-flash',
             prompt: 'hello world',
             nested: { password: 'hunter2', keep: 'visible' },
         }) as Record<string, unknown>;
         expect(redacted['x-goog-api-key']).toBe(REDACTION_MASK);
         expect(redacted.authorization).toBe(REDACTION_MASK);
-        expect(redacted.model).toBe('gemini-3.5-flash');
+        expect(redacted.model).toBe('gemini-3.6-flash');
         expect(redacted.prompt).toBe('hello world');
         const nested = redacted.nested as Record<string, unknown>;
         expect(nested.password).toBe(REDACTION_MASK);

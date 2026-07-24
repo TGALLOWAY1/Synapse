@@ -136,9 +136,11 @@
       `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
       **Decision feedback (assumptions, decision log, deferred scope, risks) is
       NOT a PRD sub-tab** — it lives in the **Decision Center** (Challenge
-      stage); the PRD view routes to it via the `onOpenDecisions` callback (the
-      "N planning items need review" section badges and the Overview deferred
-      link). Keeping the interactive PRD to prose-only views means "Select text
+      stage); the PRD view routes to it via the `onOpenDecisions` callback (an
+      exact **Review planning item** section action and the Overview deferred
+      link). Aggregate attention lives in the workspace's global next-action
+      strip rather than being echoed inside every PRD section. Keeping the
+      interactive PRD to prose-only views means "Select text
       to edit" applies only to the PRD, and decision feedback happens in one
       place. **Overview** = product brief (executive summary, problem/thesis,
       vision, principles, JTBD/users, success metrics, a **compact Scope** block —
@@ -749,7 +751,19 @@
     neither the legacy prompt_pack prompt nor the implementation_plan
     prompt-pack instructions (`coreArtifactService.ts`) may name or recommend a
     specific coding agent (Cursor, Claude Code, ChatGPT, Copilot).
-  - `branchService.ts` — branch consolidation back into the spine.
+  - `branchService.ts` — the highlight → refine branch conversation
+    (`replyInBranch`) and consolidation back into the spine
+    (`consolidateBranch`). `replyInBranch` selects a **specialized system
+    prompt per edit action** from the `src/lib/prdEditActions.ts` registry
+    (Clarify / Expand / Specify / Alternative / Replace / Critique), derived
+    from the intent's `"<Label>: "` prefix when not passed explicitly; a
+    free-text intent with no recognized action falls back to the generic
+    prompt. The per-action prompts are snapshot-locked in
+    `promptSurfaces.test.ts`.
+  - `prdEditReview.ts` — advisory, fail-open pre-commit critique for staged
+    edits (`reviewStagedEdits`): one fast-model pass checks the combined change
+    against the rest of the plan and returns findings; any failure yields an
+    empty (degraded) result and never blocks the commit.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
     `generatePreflightSummary()`; both inject transports for tests and degrade
@@ -818,4 +832,3 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   unknowns. `prdService` appends `buildClarificationPromptBlock()` (the
   authoritative-intent instruction; skipped → open unknowns) to the prompt
   **after** the safety gate, so every section receives it via `ctx.idea`.
-

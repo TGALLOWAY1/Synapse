@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DEMO_PROJECT_ID } from '../../data/demoProject';
 import { artifactJobController } from '../../lib/services/artifactJobController';
+import { artifactValidationBlockerSetFingerprint } from '../../lib/artifactValidationPolicy';
 import type { StructuredPRD } from '../../types';
 import { useProjectStore } from '../projectStore';
 
@@ -63,6 +64,21 @@ beforeEach(() => {
         jobs: {},
         prdProgress: {},
         prdSectionStatus: {},
+        planningRecords: {
+            [projectId]: [{
+                id: 'demo-decision',
+                projectId,
+                type: 'assumption',
+                status: 'open',
+                title: 'Demo assumption',
+                statement: 'Demo assumption',
+                evidence: [],
+                sourceFindingIds: [],
+                createdBy: 'user',
+                createdAt: 1,
+                updatedAt: 1,
+            }],
+        },
     });
 });
 
@@ -98,6 +114,33 @@ describe('public demo mutation boundary', () => {
         });
     });
 
+    it('rejects validation acceptance without changing metadata', () => {
+        const blocker = {
+            code: 'prd_traceability_unverified' as const,
+            message: 'Traceability was not verified.',
+        };
+        useProjectStore.setState((state) => ({
+            artifactVersions: {
+                ...state.artifactVersions,
+                [projectId]: state.artifactVersions[projectId].map(version => ({
+                    ...version,
+                    metadata: { ...version.metadata, validationBlockers: [blocker] },
+                })),
+            },
+        }));
+
+        expect(() => useProjectStore.getState().acceptArtifactValidationIssue(projectId, {
+            artifactId,
+            versionId,
+            expectedBlockerFingerprint: artifactValidationBlockerSetFingerprint([blocker]),
+            rationale: 'Reviewed against the canonical PRD.',
+        })).toThrow('read-only');
+        expect(useProjectStore.getState().getPreferredVersion(
+            projectId,
+            artifactId,
+        )?.metadata.validationAcceptance).toBeUndefined();
+    });
+
     it('rejects generation and regeneration before any job starts', () => {
         const args = {
             projectId,
@@ -116,6 +159,25 @@ describe('public demo mutation boundary', () => {
 
         expect(() => store.setProjectDesignSystemPreset(projectId, 'creative_studio')).toThrow('read-only');
         expect(() => store.saveTasks(projectId, artifactId, [])).toThrow('read-only');
+        expect(() => store.appendPlanningDecisionEvent(
+            projectId,
+            'demo-decision',
+            {
+                id: 'unsafe',
+                planningRecordId: 'demo-decision',
+                type: 'custom_answered',
+                actor: 'user',
+                answer: 'Unsafe',
+                at: 1,
+            },
+            {
+                recordId: 'demo-decision',
+                action: 'accept_default',
+                answer: 'Unsafe',
+                expectedStatus: 'open',
+                expectedTargetHash: 'x',
+            },
+        )).toThrow('read-only');
         expect(useProjectStore.getState().projects[projectId].designSystemPreset).toBe('minimal');
     });
 

@@ -62,10 +62,10 @@ export interface ScreenMetadataEdit {
      */
     mockupVariantStatus?: Record<string, 'accepted' | 'not_needed'>;
     /**
-     * Phase 4A: supporting review record (checklist, note, override reason,
-     * sign-off signature, transition timestamps). The review *status* stays in
-     * `reviewStatus` above — this is the metadata around it. Optional &
-     * back-compat; see ScreenReviewMeta in src/types.
+     * Supporting review record (legacy read-only checklist data, note,
+     * override reason, sign-off signature, transition timestamps). The review
+     * *status* stays in `reviewStatus` above. Optional and backward-compatible;
+     * see ScreenReviewMeta in src/types.
      */
     review?: ScreenReviewMeta;
 }

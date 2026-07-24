@@ -171,7 +171,11 @@ function projectAlignment(
 
     const onlyNonStructuralPrdDrift = noStructuralChange
         && evaluation.reasons.every(reason => reason.kind === 'prd_changed');
-    if (evaluation.status === 'up_to_date' || onlyNonStructuralPrdDrift) {
+    if (
+        evaluation.status === 'up_to_date'
+        || (evaluation.status === 'needs_review' && evaluation.reasons.length === 0)
+        || onlyNonStructuralPrdDrift
+    ) {
         return {
             artifactId,
             nodeId,

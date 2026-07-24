@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, ListChecks, ArrowRight } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
@@ -21,6 +21,7 @@ import {
 import { PrdViewTabs } from './prd/PrdViewTabs';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
 import { isDisplayableFeatureId } from '../lib/derive/prdDecisions';
+import { groupConstraintItems } from '../lib/prdConstraintCategories';
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
 import type { ConsequentialPrdEditRecognition } from '../lib/planning';
@@ -30,6 +31,7 @@ import {
     deriveImplementationSummary,
     featureDetailAnchorId,
     isImplementationSummaryEmpty,
+    type SummaryFeature,
 } from '../lib/derive/implementationSummary';
 import {
     coercePrdView,
@@ -54,6 +56,8 @@ import {
     RolesSection,
     ArchFlowsSection,
     MetricsSection,
+    DetailCard,
+    DetailField,
 } from './prd/PremiumSections';
 
 interface StructuredPRDViewProps {
@@ -517,8 +521,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const renderSectionUncertainty = (section: string) => {
         const assumptions = assumptionsAffecting(section);
         const durableRecords = planningRecordsAffecting(section);
-        const affectedCount = assumptions.length + durableRecords.length;
-        if (affectedCount === 0) return null;
+        if (assumptions.length + durableRecords.length === 0) return null;
         const preciseLabels = [...assumptions.flatMap(assumption =>
             (assumption.affectedPlanLocations ?? [])
                 .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
@@ -551,13 +554,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                         label: `Return to ${section}`,
                     });
                 }}
+                aria-label={exactRecord
+                    ? `Review planning item: ${exactRecord.title}`
+                    : 'Review planning item'}
                 className="mb-3 flex w-full scroll-mt-24 items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
             >
                 <span className="text-xs leading-5">
-                    <strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.
+                    <strong>Planning item needs review</strong> in this section.
                     {preciseLabels.length > 0 && <span className="mt-0.5 block text-amber-800">Affected: {preciseLabels.slice(0, 2).join(', ')}{preciseLabels.length > 2 ? ` +${preciseLabels.length - 2} more` : ''}</span>}
                 </span>
-                <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review</span>
+                <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review planning item</span>
             </button>
         );
     };
@@ -888,81 +894,119 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         const constraints = structuredPRD.constraints ?? [];
         const nfrs = structuredPRD.nonFunctionalRequirements ?? [];
         if (constraints.length === 0 && nfrs.length === 0) return null;
+
+        // Same card + indented-subsection layout as JTBD and Core User Flows:
+        // the generator writes these lines with a leading category label
+        // ("Performance: …"), so that label becomes the subsection heading and
+        // the requirement text gets the full content width. Cards stack — a
+        // half-width column is what made long numeric requirements wrap after
+        // two or three words.
+        const renderGroup = (label: string, items: string[]) => {
+            const groups = groupConstraintItems(items);
+            if (groups.length === 0) return null;
+            return (
+                <DetailCard title={label}>
+                    {groups.map((group, i) => {
+                        const body = group.items.length === 1
+                            ? <p>{group.items[0]}</p>
+                            : (
+                                <ul className="list-disc pl-4 space-y-1">
+                                    {group.items.map((text, k) => <li key={k}>{text}</li>)}
+                                </ul>
+                            );
+                        return group.category
+                            ? <DetailField key={group.category} label={group.category}>{body}</DetailField>
+                            // Unlabelled lines get no invented heading.
+                            : <div key={`uncategorized-${i}`} className="text-sm text-neutral-700 leading-relaxed">{body}</div>;
+                    })}
+                </DetailCard>
+            );
+        };
+
         return (
             <div className="mb-8">
                 <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
                     <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Constraints</h3>
                 </div>
-                <div className="grid sm:grid-cols-2 gap-3">
-                    {constraints.length > 0 && (
-                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Boundaries</p>
-                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
-                                {constraints.map((c, i) => <li key={i}>{c}</li>)}
-                            </ul>
-                        </div>
-                    )}
-                    {nfrs.length > 0 && (
-                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Quality & Performance Requirements</p>
-                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
-                                {nfrs.map((c, i) => <li key={i}>{c}</li>)}
-                            </ul>
-                        </div>
-                    )}
+                <div className="space-y-3">
+                    {constraints.length > 0 && renderGroup('Boundaries', constraints)}
+                    {nfrs.length > 0 && renderGroup('Quality & Performance Requirements', nfrs)}
                 </div>
             </div>
         );
     };
 
     // Compact scope surface for the Overview. Deliberately NOT the full feature
-    // list (that lives in the Features view) — it states the scope DECISION
-    // (rationale), which features are in MVP / next as small reference chips,
-    // and how many are deferred. Chips link into the Features/Decisions views.
-    const renderScopeGroup = (label: string, items: Array<{ id?: string; name: string }>) => {
-        if (items.length === 0) return null;
+    // list (that lives in the Features view) — it states the scope proposal
+    // (rationale), which features are in MVP / next as reference cards, and how
+    // many are deferred. Cards link into the Features/Decisions views.
+    const renderScopeBucket = (
+        label: string,
+        icon: typeof ListChecks,
+        accent: 'green' | 'blue',
+        items: SummaryFeature[],
+        emptyHint: string,
+    ) => {
+        const Icon = icon;
+        const headerClasses = accent === 'green' ? 'text-green-700' : 'text-blue-700';
+        const cardClasses = accent === 'green'
+            ? 'bg-green-50/60 border-green-200'
+            : 'bg-blue-50/60 border-blue-200';
         return (
-            <div className="mb-3 last:mb-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">{label}</p>
-                <div className="flex flex-wrap gap-1.5">
-                    {items.map((f, i) => {
-                        const clickable = !!f.id && isDisplayableFeatureId(f.id);
-                        const content = (
-                            <>
-                                {clickable && <FeatureIdBadge id={f.id} />}
-                                <span className="min-w-0 break-words">{f.name}</span>
-                            </>
-                        );
-                        return clickable ? (
-                            <button
-                                key={f.id}
-                                type="button"
-                                onClick={() => handleNavigateToFeature(f.id!)}
-                                title={`Go to ${f.name} in Features`}
-                                className="inline-flex items-center gap-1.5 max-w-full text-left rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:border-indigo-300 hover:text-indigo-700 transition"
-                            >
-                                {content}
-                            </button>
-                        ) : (
-                            <span
-                                key={`${f.name}-${i}`}
-                                // A scope entry with no id resolved to no PRD feature —
-                                // downstream assets generate from features only, so this
-                                // entry won't reach them. Advisory label only: never
-                                // gate rendering/generation or rewrite the PRD here.
-                                title={!f.id ? 'This scope entry does not reference a PRD feature, so downstream assets are generated without it.' : undefined}
-                                className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
-                            >
-                                <span className="min-w-0 break-words">{f.name}</span>
-                                {!f.id && (
-                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">
-                                        not traced to a feature
-                                    </span>
-                                )}
-                            </span>
-                        );
-                    })}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <Icon size={14} className={headerClasses} />
+                    <h4 className={`text-[11px] font-bold uppercase tracking-wider ${headerClasses}`}>{label}</h4>
+                    <span className="text-[11px] text-neutral-400">{items.length}</span>
                 </div>
+                {items.length === 0 ? (
+                    <p className="text-[11px] text-neutral-400 italic">{emptyHint}</p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {items.map((f, i) => {
+                            const clickable = !!f.id && isDisplayableFeatureId(f.id);
+                            const body = (
+                                <>
+                                    <div className="flex items-baseline gap-2">
+                                        {clickable && <FeatureIdBadge id={f.id} />}
+                                        <span className="min-w-0 break-words text-sm font-semibold text-neutral-900">{f.name}</span>
+                                        {!f.id && (
+                                            <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">
+                                                not traced to a feature
+                                            </span>
+                                        )}
+                                    </div>
+                                    {f.reason && (
+                                        <p className="text-[11px] text-neutral-600 mt-0.5 line-clamp-2">{f.reason}</p>
+                                    )}
+                                </>
+                            );
+                            return clickable ? (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => handleNavigateToFeature(f.id!)}
+                                    title={`Go to ${f.name} in Features`}
+                                    className={`block w-full text-left rounded-md border ${cardClasses} px-3 py-2 hover:border-indigo-300 hover:shadow-sm transition`}
+                                >
+                                    {body}
+                                </button>
+                            ) : (
+                                <div
+                                    key={`${f.name}-${i}`}
+                                    // A scope entry with no id resolved to no PRD feature —
+                                    // downstream assets generate from features only, so this
+                                    // entry won't reach them. Advisory label only: never
+                                    // gate rendering/generation or rewrite the PRD here.
+                                    title={!f.id ? 'This scope entry does not reference a PRD feature, so downstream assets are generated without it.' : undefined}
+                                    className={`rounded-md border ${cardClasses} px-3 py-2`}
+                                >
+                                    {body}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         );
     };
@@ -978,34 +1022,38 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Current proposed scope</h3>
                 </div>
                 {rationale && (
-                    <div className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-neutral-800">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Synapse proposal</span>
+                    <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                        <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Synapse proposal</span>
                         {rationale}
                     </div>
                 )}
-                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    {renderScopeGroup('Proposed first release (MVP — Minimum Viable Product)', summary.buildFirst)}
-                    {renderScopeGroup('Build next', summary.buildNext)}
-                    {deferredCount > 0 && (
-                        <p className="text-xs text-neutral-500 mt-2">
-                            {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
-                            {onOpenDecisions ? (
-                                <button type="button" onClick={() => onOpenDecisions()} className="text-indigo-600 hover:text-indigo-800 underline">
-                                    Decision Center
-                                </button>
-                            ) : (
-                                <span className="text-neutral-600">Decision Center</span>
-                            )}
-                            .
-                        </p>
-                    )}
-                    <p className="text-[11px] text-neutral-400 mt-3">
-                        Full feature detail lives in the{' '}
-                        <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
-                            Features
-                        </button>{' '}tab.
+                {!isImplementationSummaryEmpty(summary) && (
+                    <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-xl p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {renderScopeBucket('Build first', ListChecks, 'green', summary.buildFirst, 'No MVP features tagged.')}
+                            {renderScopeBucket('Build next', ArrowRight, 'blue', summary.buildNext, 'No V1 features tagged.')}
+                        </div>
+                    </div>
+                )}
+                {deferredCount > 0 && (
+                    <p className="text-xs text-neutral-500 mt-3">
+                        {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
+                        {onOpenDecisions ? (
+                            <button type="button" onClick={() => onOpenDecisions()} className="text-indigo-600 hover:text-indigo-800 underline">
+                                Decision Center
+                            </button>
+                        ) : (
+                            <span className="text-neutral-600">Decision Center</span>
+                        )}
+                        .
                     </p>
-                </div>
+                )}
+                <p className="text-[11px] text-neutral-400 mt-2">
+                    Full feature detail lives in the{' '}
+                    <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
+                        Features
+                    </button>{' '}tab.
+                </p>
             </div>
         );
     };

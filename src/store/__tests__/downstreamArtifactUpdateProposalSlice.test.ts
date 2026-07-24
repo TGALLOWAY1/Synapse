@@ -89,6 +89,26 @@ beforeEach(() => {
 
 describe('downstream artifact-update proposal store boundary', () => {
     it('generates, authorizes, and atomically applies one exact screen-state removal as a new version', () => {
+        useProjectStore.setState({
+            artifactVersions: {
+                [projectId]: [{
+                    ...version,
+                    metadata: {
+                        validationBlockers: [{
+                            code: 'prd_traceability_unverified',
+                            message: 'Traceability needs review.',
+                        }],
+                        validationAcceptance: {
+                            schemaVersion: 1,
+                            actor: 'user',
+                            acceptedAt: 5,
+                            rationale: 'The source version was reviewed.',
+                            blockerFingerprint: 'source-only',
+                        },
+                    },
+                }],
+            },
+        });
         const plan = makePlan();
         expect(useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan)).toEqual({ ok: true, duplicate: false });
         const generated = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
@@ -104,6 +124,8 @@ describe('downstream artifact-update proposal store boundary', () => {
         const result = state.artifactVersions[projectId].find(candidate => candidate.id === applied.artifactVersionId)!;
         expect(result.parentVersionId).toBe(version.id);
         expect(result.provenance?.changeSource).toBe('user_edit');
+        expect(result.metadata.validationBlockers).toHaveLength(1);
+        expect(result.metadata.validationAcceptance).toBeUndefined();
         expect(JSON.parse(result.content).sections[0].screens[0].states).toEqual([]);
         expect(state.artifactVersions[projectId].find(candidate => candidate.id === version.id)?.content).toBe(version.content);
         expect(state.downstreamArtifactUpdateApplications[projectId]).toHaveLength(1);

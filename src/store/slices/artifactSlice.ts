@@ -1,9 +1,24 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype, SourceRef, HistoryEvent, VersionProvenance } from '../../types';
+import type {
+    AcceptArtifactValidationIssueResult,
+    Artifact,
+    ArtifactValidationAcceptance,
+    ArtifactVersion,
+    ArtifactType,
+    CoreArtifactSubtype,
+    SourceRef,
+    HistoryEvent,
+    VersionProvenance,
+} from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
+import {
+    artifactValidationBlockerSetFingerprint,
+    readArtifactValidationDisposition,
+    withoutArtifactValidationAcceptance,
+} from '../../lib/artifactValidationPolicy';
 
 export type ArtifactSlice = {
     artifacts: Record<string, Artifact[]>;
@@ -17,6 +32,7 @@ export type ArtifactSlice = {
     setPreferredVersion: ProjectState['setPreferredVersion'];
     revertArtifactToVersion: ProjectState['revertArtifactToVersion'];
     markArtifactCurrentForSpine: ProjectState['markArtifactCurrentForSpine'];
+    acceptArtifactValidationIssue: ProjectState['acceptArtifactValidationIssue'];
     getArtifactVersions: ProjectState['getArtifactVersions'];
     getPreferredVersion: ProjectState['getPreferredVersion'];
     getLatestArtifactVersion: ProjectState['getLatestArtifactVersion'];
@@ -126,7 +142,10 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 versionNumber,
                 parentVersionId: parentVersionId ?? null,
                 content,
-                metadata,
+                // Acceptance is exact-version user authority. All paths that
+                // create a version—including selective downstream clones—
+                // cross this boundary, so none may inherit it from a parent.
+                metadata: withoutArtifactValidationAcceptance(metadata),
                 sourceRefs,
                 generationPrompt,
                 isPreferred: true,
@@ -215,7 +234,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 versionNumber,
                 parentVersionId: currentPreferred?.id ?? null,
                 content: src.content,
-                metadata: src.metadata,
+                metadata: withoutArtifactValidationAcceptance(src.metadata),
                 sourceRefs: src.sourceRefs,
                 generationPrompt: src.generationPrompt,
                 isPreferred: true,
@@ -327,7 +346,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 versionNumber,
                 parentVersionId: src.id,
                 content: src.content,
-                metadata: src.metadata,
+                metadata: withoutArtifactValidationAcceptance(src.metadata),
                 sourceRefs: rebasedRefs,
                 generationPrompt: src.generationPrompt,
                 isPreferred: true,
@@ -360,6 +379,128 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         });
 
         return { versionId };
+    },
+
+    acceptArtifactValidationIssue: (projectId, input) => {
+        assertProjectCapability(get().projects[projectId], 'canReviewArtifacts');
+        let result: AcceptArtifactValidationIssueResult = {
+            status: 'rejected',
+            reason: 'artifact_not_found',
+        };
+
+        set((state) => {
+            const reject = (
+                reason: Extract<
+                    AcceptArtifactValidationIssueResult,
+                    { status: 'rejected' }
+                >['reason'],
+            ) => {
+                result = { status: 'rejected', reason };
+                return state;
+            };
+
+            const artifacts = state.artifacts[projectId] ?? [];
+            const artifact = artifacts.find(candidate => candidate.id === input.artifactId);
+            if (!artifact) return reject('artifact_not_found');
+
+            const versions = state.artifactVersions[projectId] ?? [];
+            const target = versions.find(
+                candidate => candidate.id === input.versionId
+                    && candidate.artifactId === input.artifactId,
+            );
+            if (!target) return reject('version_not_found');
+            if (!target.isPreferred || artifact.currentVersionId !== target.id) {
+                return reject('not_preferred');
+            }
+
+            const disposition = readArtifactValidationDisposition(target.metadata);
+            const fingerprint = artifactValidationBlockerSetFingerprint(disposition.blockers);
+            if (fingerprint !== input.expectedBlockerFingerprint) {
+                return reject('blockers_changed');
+            }
+            if (!input.rationale.trim()) return reject('rationale_required');
+            if (disposition.overridePolicy !== 'rationale_required') {
+                return reject('non_overridable');
+            }
+            if (disposition.accepted) return reject('already_accepted');
+
+            const now = Date.now();
+            const validationAcceptance: ArtifactValidationAcceptance = {
+                schemaVersion: 1,
+                actor: 'user',
+                acceptedAt: now,
+                rationale: input.rationale.trim(),
+                blockerFingerprint: fingerprint,
+            };
+            const job = state.jobs[projectId];
+            const slot = artifact.subtype ? job?.slots[artifact.subtype] : undefined;
+            const jobsPatch = artifact.subtype
+                && job
+                && slot?.status === 'needs_review'
+                && slot.artifactVersionId === target.id
+                ? {
+                    jobs: {
+                        ...state.jobs,
+                        [projectId]: {
+                            ...job,
+                            slots: {
+                                ...job.slots,
+                                [artifact.subtype]: {
+                                    ...slot,
+                                    status: 'done' as const,
+                                    error: undefined,
+                                },
+                            },
+                        },
+                    },
+                }
+                : {};
+
+            result = {
+                status: 'accepted',
+                artifactId: artifact.id,
+                versionId: target.id,
+            };
+            return {
+                artifactVersions: {
+                    ...state.artifactVersions,
+                    [projectId]: versions.map(version => version.id === target.id
+                        ? {
+                            ...version,
+                            metadata: {
+                                ...version.metadata,
+                                validationAcceptance,
+                            },
+                        }
+                        : version),
+                },
+                artifacts: {
+                    ...state.artifacts,
+                    [projectId]: artifacts.map(candidate => candidate.id === artifact.id
+                        ? { ...candidate, updatedAt: now }
+                        : candidate),
+                },
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [
+                        ...(state.historyEvents[projectId] ?? []),
+                        {
+                            id: uuidv4(),
+                            projectId,
+                            artifactId: artifact.id,
+                            artifactVersionId: target.id,
+                            type: 'ValidationIssueAccepted' as const,
+                            description:
+                                `${artifact.title} v${target.versionNumber} accepted with a noted validation issue`,
+                            createdAt: now,
+                        },
+                    ],
+                },
+                ...jobsPatch,
+            };
+        });
+
+        return result;
     },
 
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => {
@@ -410,11 +551,22 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         opts?: { historyDescription?: string },
     ) => {
         assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
+        // These fields participate in validation authority and may only be
+        // written by generation/version creation or the atomic acceptance
+        // action above. Generic UI metadata edits cannot forge or replace
+        // either side of the blocker fingerprint.
+        const {
+            validationAcceptance: ignoredAcceptance,
+            validationBlockers: ignoredBlockers,
+            ...safePatch
+        } = patch;
+        void ignoredAcceptance;
+        void ignoredBlockers;
         set((state) => {
             const allVersions = state.artifactVersions[projectId] || [];
             const updatedVersions = allVersions.map(v =>
                 v.id === versionId && v.artifactId === artifactId
-                    ? { ...v, metadata: { ...v.metadata, ...patch } }
+                    ? { ...v, metadata: { ...v.metadata, ...safePatch } }
                     : v
             );
             const projectArtifacts = state.artifacts[projectId] || [];

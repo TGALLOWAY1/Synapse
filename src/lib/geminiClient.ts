@@ -103,13 +103,13 @@ const getApiKey = () => {
 };
 
 /**
- * Default model. Gemini 3.5 Flash (GA, announced at I/O May 2026) is the
- * recommended everyday Flash model — it replaced the earlier Gemini 3 Flash
- * preview, shipping as GA with full (non-preview) quotas and frontier-class
- * quality at a similar price. See SettingsModal for the full catalog and
+ * Default model. Gemini 3.6 Flash (GA, released July 2026) is the recommended
+ * everyday Flash model — it replaced Gemini 3.5 Flash, shipping as GA with
+ * full (non-preview) quotas, fewer output tokens per task, and stronger
+ * multi-step/agentic performance. See SettingsModal for the full catalog and
  * `modelMigration.ts` for the one-shot upgrade of older Flash selections.
  */
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 
 /**
  * Per-tier defaults. These MUST match the tier defaults advertised in the
@@ -273,7 +273,7 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
             'Likely causes: (1) your API key is tied to a Google Cloud project without billing enabled — ' +
             'recreate the key in AI Studio on the project that has billing; (2) set your billing project ID ' +
             'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Flash-Lite Preview) ' +
-            'have reduced quotas even on paid tier — switch to a GA model like gemini-3.5-flash. ' +
+            'have reduced quotas even on paid tier — switch to a GA model like gemini-3.6-flash. ' +
             `Raw: ${message}`
         );
     }

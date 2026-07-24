@@ -44,8 +44,8 @@ function PrdHubCard() {
 }
 
 /**
- * Screen 7 — the connected workspace. A project rail showing the Plan →
- * Challenge → Build → History progression, the committed plan's PRD wired to
+ * Screen 7 — the connected workspace. A project rail showing the six-step
+ * Define → Refine → Finalize → Generate → Review → Build journey, the committed plan's PRD wired to
  * its generated artifacts (tap any node to trace dependencies), and a tappable
  * recent-activity timeline. Teaches that Synapse keeps the whole project
  * consistent.
@@ -60,7 +60,7 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
             accent="connected."
             subtitle="When the product changes, Synapse helps keep the rest of the project aligned."
         >
-            <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
+            <div className="grid min-w-0 gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
                 {/* Project rail (desktop) */}
                 <aside className="hidden rounded-2xl border border-neutral-700 bg-neutral-800/40 p-4 lg:block">
                     <div className="mb-4 flex items-center gap-2">
@@ -95,7 +95,7 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
                 </aside>
 
                 {/* Main canvas */}
-                <div className="space-y-4">
+                <div className="min-w-0 space-y-4">
                     <div className="rounded-2xl border border-neutral-700 bg-neutral-800/40 p-5">
                         <div className="mb-4 flex items-center justify-between">
                             <h3 className="text-sm font-semibold text-white">Generated Artifacts</h3>

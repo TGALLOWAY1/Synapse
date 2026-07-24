@@ -76,12 +76,12 @@ describe('SelectionActionDialog — desktop', () => {
         expect(box).toHaveValue('hi');
     });
 
-    it('renders the five action chips in order', () => {
+    it('renders the action chips in registry order', () => {
         mockMatchMedia(false);
         renderDialog();
         const chips = SELECTION_ACTIONS.map(tag => screen.getByRole('button', { name: tag }));
-        expect(chips).toHaveLength(5);
-        expect(SELECTION_ACTIONS).toEqual(['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace']);
+        expect(chips).toHaveLength(6);
+        expect(SELECTION_ACTIONS).toEqual(['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace', 'Critique']);
     });
 
     it('toggles aria-pressed on the chip matching the current intent', () => {

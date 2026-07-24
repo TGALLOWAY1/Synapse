@@ -73,6 +73,25 @@ describe('renderManifestMarkdown', () => {
         expect(md).toContain('Shared workspaces remain in this output.');
         expect(md).toContain('Next: Review and update Screens.');
     });
+
+    it('keeps a validation-blocked output visible even when semantic alignment is current', () => {
+        const manifest = buildExportManifest({
+            projectName: 'Acme',
+            entries: [{
+                title: 'Data Model',
+                versionNumber: 2,
+                status: 'needs_review',
+                alignmentState: 'aligned',
+                alignmentConfidence: 'definite',
+            }],
+        });
+        const md = renderManifestMarkdown(manifest);
+
+        expect(manifest.reviewCount).toBe(1);
+        expect(md).toContain('| Data Model | v2 | — | Needs validation review |');
+        expect(md).not.toContain('| Data Model | v2 | — | Aligned |');
+        expect(md).toContain('has a blocking validation issue');
+    });
 });
 
 describe('agent handoff manifest section', () => {

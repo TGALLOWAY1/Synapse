@@ -25,12 +25,12 @@ describe('traceRecorder', () => {
         const unsub = subscribeTraces(listener);
 
         const h = beginTrace({
-            model: 'gemini-3.5-flash',
+            model: 'gemini-3.6-flash',
             mode: 'json',
             systemInstruction: 'sys',
             promptText: 'do the thing',
             requestUrl: 'https://x',
-            requestBody: { model: 'gemini-3.5-flash' },
+            requestBody: { model: 'gemini-3.6-flash' },
             meta: { stage: 'PRD', purpose: 'Test' },
         });
         expect(h.id).toBeDefined();

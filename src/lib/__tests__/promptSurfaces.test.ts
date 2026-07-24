@@ -31,6 +31,7 @@ import {
     generateDecisionOptions,
     type DecisionOptionsTransport,
 } from '../planning/decisionOptionsGeneration';
+import { PRD_EDIT_ACTIONS } from '../prdEditActions';
 import type { MockupPayload, MockupScreen, MockupSettings, ScreenItem, StructuredPRD } from '../../types';
 
 const FIXTURE_IDEA = 'A trip-planning app for weekend hikers that builds routes from difficulty and season.';
@@ -198,5 +199,13 @@ describe('prompt surfaces — snapshot net', () => {
         expect(calls.length).toBeGreaterThan(0);
         expect(calls[0].system).toMatchSnapshot('system');
         expect(calls[0].prompt).toMatchSnapshot('user');
+    });
+
+    it('PRD edit-action system prompts', () => {
+        // Each highlight → refine action carries a specialized system prompt;
+        // lock them so an intentional prompt edit is a reviewed snapshot diff.
+        for (const action of PRD_EDIT_ACTIONS) {
+            expect(action.systemPrompt).toMatchSnapshot(`prd-edit-action:${action.id}`);
+        }
     });
 });

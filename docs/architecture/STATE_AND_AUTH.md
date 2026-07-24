@@ -25,7 +25,20 @@
   legacy markdown-only spines. Never append a markdown-only merge spine
   on top of a structured one — `canReview`/`canExploreOutputs` gate on
   the *latest* spine having a `structuredPRD`, so that silently disables
-  the Challenge and Explore/Build stages for the whole project. **Generation lifecycle:**
+  the Challenge and Explore/Build stages for the whole project.
+  **Staged edits (batch consolidation):** a branch can hold a concrete
+  replacement without committing — `stageBranch` sets its status to
+  `'resolved'` (the previously-dormant status) and stores
+  `Branch.proposedReplacement`; `unstageBranch` reverts it. Several staged
+  edits are then applied as **one** new spine version:
+  `applyStagedEditsToStructuredPRD` (pure, `src/lib/stagedBranchEdits.ts`)
+  applies each patch to the structured PRD in sequence — an edit whose
+  anchor a prior edit changed is *skipped and reported*, never dropped —
+  and `applyStagedBranchesToSpine` performs the atomic append, marks every
+  applied branch `'merged'`, and records one history event. An advisory,
+  fail-open pre-commit critique (`reviewStagedEdits`,
+  `src/lib/services/prdEditReview.ts`) can check the combined change against
+  the rest of the plan; it never blocks the commit. **Generation lifecycle:**
   `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
   legacy spines lack it) is stamped `'running'` by
   `markSpineGenerationStarted` when a PRD run actually begins (both
@@ -51,7 +64,9 @@
   `ArtifactVersion` (increments `versionNumber`, becomes preferred, carries
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
   via `setPreferredVersion` — keeps the audit log honest.
-- `feedbackSlice` — FeedbackItems with intent classification
+- `feedbackSlice` — legacy `FeedbackItem` reads and status updates. Persisted
+  feedback remains available to history/snapshot consumers, but no live UI
+  creates new feedback items; the unused creation action was retired.
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
@@ -412,4 +427,3 @@ rules:
   `localStorage` alone — a vault-only user has no localStorage key, so a
   localStorage-only gate wrongly routes them to Settings even though generation
   would succeed.
-

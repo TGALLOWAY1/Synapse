@@ -84,8 +84,8 @@ improvement. The following items were intentionally deferred.
 - [ ] **Schema-level normalization of issues.** Today the artifact stores
   `**Error Paths:**` and per-step error sub-bullets as free-text markdown,
   and the renderer classifies each line into
-  `alternate_path | edge_case | validation_warning | failure_mode |
-  unresolved_reference` at display time. Moving classification into the
+  `alternate_path | edge_case | validation_warning | failure_mode`
+  at display time. Moving classification into the
   generation prompt + structured JSON schema would eliminate ambiguity,
   improve staleness checks, and enable search/filter — but it touches
   `coreArtifactService.ts`, `artifactSchemas.ts`, and persistence. Defer

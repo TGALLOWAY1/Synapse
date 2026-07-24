@@ -55,13 +55,16 @@ request…").
 
 Most artifact validation is **advisory** — `validateArtifactContent` /
 `validateCrossArtifactConsistency` produce warnings stamped into
-`ArtifactVersion.metadata.validationWarnings` but never change status. A narrow,
-high-confidence set of defects is **blocking**: `detectArtifactBlockers(subtype,
-content, prd)` (pure) flags (1) a `data_model` with no API surface, (2)
-`user_flows` with no error paths, (3) an implementation-critical artifact
+`ArtifactVersion.metadata.validationWarnings` but never change status. Those
+warnings are included in the generation-complete/export checkpoint instead of
+being computed silently. A narrow, high-confidence set of defects is
+**blocking**: `detectArtifactBlockers(subtype, content, prd)` (pure) emits typed
+`ArtifactValidationBlocker` records for (1) a `data_model` with no API surface,
+(2) `user_flows` with no error paths, (3) an implementation-critical artifact
 (`data_model`/`user_flows`/`implementation_plan`) that references **none** of the
 PRD features (no traceability), and (4) a JSON-mode artifact
-(screen/data/component inventory) that parses but is structurally empty. A
+(screen/data/component inventory) that cannot be parsed or is structurally
+empty. A
 **truncated model response** is also always a blocker: `generateCoreArtifact`
 stamps `metadata.truncated` on a `MAX_TOKENS` finish (after salvaging what it
 can via `repairTruncatedJson`), and `runCoreArtifactSlot` prepends
@@ -70,11 +73,30 @@ partial content must never present as a trustworthy `done` artifact. When
 blockers exist, `runCoreArtifactSlot` still **saves the version** (content
 preserved for review) but stamps `metadata.validationBlockers` and sets the slot
 status to the new `GenerationStatus` value **`needs_review`** instead of `done`.
-The state is durable: `ArtifactWorkspace.slotStatusFor` re-derives `needs_review`
-from `readValidationBlockers(preferred.metadata)` after the transient job slot is
-cleared (post-reload). UI: an amber `ShieldAlert` `StatusDot` + an in-view
-"Needs review" banner listing the issues with a Regenerate action. Keep the
-blocker list conservative — advisory warnings must stay non-blocking.
+`artifactValidationPolicy.ts` is the read-time authority: truncation,
+unparseable/structurally incomplete output, malformed/unknown records, legacy
+string blockers, and mixed blocker sets are **non-overridable**. The semantic
+API-surface, error-path, and traceability codes are rationale-overridable only
+when every blocker in the set is eligible.
+
+For an eligible exact preferred version, `ArtifactValidationBanner` offers
+**Accept with noted issue**. The store atomically rechecks artifact/version
+identity, preferred status, blocker-set fingerprint, policy, and nonempty
+rationale before stamping `validationAcceptance` and appending one
+`ValidationIssueAccepted` history event. Original blockers remain attached and
+the UI/export calls the state an accepted issue, never passed validation.
+Acceptance is exact-version authority: every new-version boundary, revert, and
+mark-current clone strips it; changed blockers invalidate its fingerprint.
+Accepted versions may seed downstream generation, while unresolved or malformed
+blockers may not. The transient job slot is pinned to the generated version and
+only that matching `needs_review` slot can clear to `done`.
+
+The state is durable: `ArtifactWorkspace.slotStatusFor` reads
+`readArtifactValidationDisposition(preferred.metadata)` after the transient job
+slot clears. UI: an amber `ShieldAlert` `StatusDot` + the in-view validation
+banner with Regenerate and, only when policy permits, rationale-backed
+acceptance. Keep the blocker list conservative — advisory warnings stay
+non-blocking and appear in checkpoint summaries.
 
 **Automatic traceability repair — never surface a "no traceability" blocker
 before attempting repair** (`src/lib/artifactTraceabilityRepair.ts`, pure).
@@ -131,4 +153,3 @@ context is summarized via `summarizeScreenInventoryDependency`, which emits the
 **full screen roster (every id/name) first, never truncated**, then truncates the
 verbose prose — so downstream artifacts never lose a screen reference to a long
 prose cut.
-

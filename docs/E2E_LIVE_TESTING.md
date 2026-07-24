@@ -55,9 +55,10 @@ still clip.
    useful visual coverage.
 6. **Downstream asset generation** (unless `--skip-assets`). The plan is
    committed through the readiness gate — top-bar **Review readiness** →
-   ReadinessCheckpoint (**Commit plan** when ready-to-build, otherwise the
-   **Proceed with accepted risk** override, filling the rationale/containment
-   textareas for an exploring-phase working plan) → **FinalizationSuccessModal**
+   ReadinessCheckpoint (**Finalize plan** when ready-to-build, otherwise the
+   **Finalize with accepted risk** override: reveal the override section, fill
+   the rationale textarea, then **Finalize with N accepted blockers** for an
+   exploring-phase working plan) → **FinalizationSuccessModal**
    → **Generate build foundation** / **Explore outputs** → the one-time
    **Choose your visual direction** preset picker (Modern SaaS). That fires
    `artifactJobController.startAll`, which generates the core-artifact bundle +
@@ -67,15 +68,20 @@ still clip.
    `StatusDot`s in `nav[aria-label="Artifacts"]`, no "Creating your build
    assets…" pane). Progress screenshots are captured every ~45s.
 7. **The full view/tab inventory walk**, per requested viewport:
-   - PRD **Overview** and **Features** tabs (`#prd-tab-*`).
-   - The **Challenge** stage: Decision Center (queue + first record detail),
-     **Review findings**, **Review history**.
-   - Every artifact: Design System; User Flows (plus up to 3 per-flow shots
-     via the `Flow navigation` landmark); Screens (list, then the first
-     screen's detail **Overview / Flow / Mockups** tabs); Data Model;
-     Implementation Plan (**Build Brief / Roadmap / Prompts / Validation /
-     Coverage** section tabs); Dependency Graph.
-   - The History stage.
+   - PRD **Overview** and **Features** tabs (`#prd-tab-*`), reached via the
+     journey rail's **Define** step.
+   - The **Challenge** surface (journey **Define** → PlanningStateBar's
+     **Challenge this plan**): the review workspace, **Review findings**,
+     **Review history** — plus the **Decision Center slide-over** (overflow
+     menu entry; queue + first record detail).
+   - Every artifact (journey **Review** step): Design System; User Flows
+     (plus up to 3 per-flow shots via the `Flow navigation` landmark);
+     Screens (list, then the first screen's detail **Overview / Flow /
+     Mockups** tabs); Data Model; Implementation Plan (**Build Brief /
+     Roadmap / Prompts / Validation / Coverage** section tabs); Dependency
+     Graph.
+   - The **Project history** slide-over panel (overflow menu entry — history
+     is no longer a pipeline stage).
 8. `--interactions` only: answering one decision in the Decision Center
    (confirm → option+save → defer, whichever the record shape offers),
    captured after the pristine inventory shots.
@@ -218,18 +224,26 @@ update the script in the same change (treat drift here like docs drift):
   `Project name…` placeholder, the `Generate PRD` submit label.
 - Start-mode dialog: "How would you like to start?", the "Draft a working
   plan" option, the `Cancel` aria-label.
-- Pipeline-stage nav: `PipelineStageBar.tsx` — the
-  `nav[aria-label="Planning progression"]` buttons, whose accessible names are
-  `"<Label>: <description>"` (matched by label prefix: `Plan:`, `Challenge:`,
-  `Explore:`/`Build:` — outputs stage label flips at readiness — `History:`).
+- Journey nav: `JourneyRail.tsx` — the `nav[aria-label="Product journey"]`
+  buttons. Accessible names concatenate `"<n> · <status> <label>
+  <description>"` and label words collide with description words ("Review"
+  appears inside Finalize's description), so the driver matches each step by
+  a unique snippet of its description (`JOURNEY_STEP_PATTERNS`, sourced from
+  `src/lib/journeyPresentation.ts`). The Challenge surface is reached via
+  Define + the PlanningStateBar's `Challenge this plan` button; the
+  Decision Center and Project history are slide-overs behind the top-bar
+  `More actions` overflow menu (`Decision Center` / `Project History`
+  entries, `Close Decision Center` / `Close project history` buttons). The
+  `More actions` lookup is scoped to the top-bar `<header>` banner landmark —
+  `FlowSummaryCard` renders its own `More actions` button, so an unscoped
+  match is a strict-mode violation whenever User Flows is on screen.
 - PRD tabs: `#prd-tab-overview|features` ids in
   `src/components/prd/PrdViewTabs.tsx`; the PRD content panel id prefix
   `prd-panel-` (used for programmatic selection in `--interactions`).
-- Challenge stage: the `Decision Center` / `Review findings` /
-  `Review history` tab buttons (`ReviewWorkspace.tsx`), the
-  `Decision queue` / `Decision detail` aria-labels and the
+- Challenge surface: the `Review findings` / `Review history` tab buttons
+  (`ReviewWorkspace.tsx`), the `Decision queue` aria-label and the
   `Yes, that's right` / `Save decision` / `Defer` answer buttons
-  (`DecisionCenter.tsx`).
+  (`DecisionCenter.tsx`, hosted in `DecisionCenterSlideOver.tsx`).
 - Selection→branch loop (`--interactions`): the
   `[role="dialog"][aria-label="PRD edit actions"]` dialog and its
   `How should this change?` input + `Branch` submit
@@ -238,11 +252,15 @@ update the script in the same change (treat drift here like docs drift):
   `Commit to New Spine` buttons (`ConsolidationModal.tsx`).
 - PRD settle signal: `SpineVersion.generationPhase` and the
   `synapse-projects-storage*` persist key prefix (also the `--state`
-  export/seed contract — base key + `::u:dev-user`).
+  export/seed contract — base key + `::u:dev-user`). Persisted blobs over
+  16KB are lz-string compressed with an `__SYNLZ1__` prefix
+  (`src/store/persistCodec.ts`) — the driver injects lz-string into every
+  page and decodes through `window.__e2eDecodeBlob` in both settle polls;
+  parsing localStorage directly goes blind mid-generation.
 - Commit-to-build path: the top-bar `Review readiness` button
-  (`ProjectWorkspace.tsx`), the `Commit plan` / `Proceed with accepted risk` /
-  `Proceed with N open items` buttons and `#readiness-rationale` /
-  `#readiness-containment` textareas (`ReadinessCheckpoint.tsx`), the
+  (`ProjectWorkspace.tsx`), the `Finalize plan` / `Finalize with accepted
+  risk` / `Finalize with N accepted blockers` buttons and the
+  `#readiness-rationale` textarea (`ReadinessCheckpoint.tsx`), the
   `Generate build foundation` / `Explore outputs` button
   (`FinalizationSuccessModal.tsx`), and the `Choose your visual direction`
   preset picker (`DesignSystemPresetChoice.tsx`) — a `DesignPresetGrid` preview

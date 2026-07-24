@@ -54,7 +54,6 @@ export function PlanHeader({
         `${scope.milestones} milestone${scope.milestones === 1 ? '' : 's'}`,
         `${scope.tasks} task${scope.tasks === 1 ? '' : 's'}`,
         `${scope.promptPacks} prompt pack${scope.promptPacks === 1 ? '' : 's'}`,
-        `${scope.qualityGates} quality gate${scope.qualityGates === 1 ? '' : 's'}`,
     ];
     if (plan.summary.estimatedEffort) meta.push(plan.summary.estimatedEffort);
 
@@ -93,7 +92,7 @@ export function PlanHeader({
                     ) : scope.promptPacks > 0 ? (
                         <span>
                             <span className="font-semibold">All prompt packs copied.</span>{' '}
-                            Run your quality gates, then mark them Passed on the Validation tab.
+                            Hand the plan and prompts to your coding agent to start building.
                         </span>
                     ) : (
                         <span>{plan.readiness.recommendedNextStep ?? 'Generate the Implementation Plan to get a milestone roadmap.'}</span>

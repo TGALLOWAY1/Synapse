@@ -32,7 +32,7 @@ export function sealReadinessCommitmentEvent(
 }
 
 export function validateReadinessCommitmentEventIntegrity(event: ReadinessCommitmentEvent): boolean {
-    return event.eventSchemaVersion === 1
+    return (event.eventSchemaVersion === 1 || event.eventSchemaVersion === 2)
         && typeof event.eventIntegrityHash === 'string'
         && event.eventIntegrityHash === planningContentHash(eventIntegrityPayload(event));
 }
@@ -77,8 +77,20 @@ export function readinessAuthorizationMatchesReview(
     const expected = review.concerns.map(item => item.id).sort();
     const accepted = [...new Set(event.acceptedConcernIds)].sort();
     if (expected.length !== accepted.length || expected.some((id, index) => id !== accepted[index])) return false;
-    if (review.conclusion === 'not_ready' && !meaningful(event.rationale)) return false;
-    if (review.concerns.some(item => item.blocking) && !meaningful(event.containmentPlan)) return false;
+    if (event.eventSchemaVersion === 1) {
+        // Historical v1 authority retains the exact policy under which it was
+        // recorded. New v2 events use the narrow materiality checkpoint below.
+        if (review.conclusion === 'not_ready' && !meaningful(event.rationale)) return false;
+        if (review.concerns.some(item => item.blocking) && !meaningful(event.containmentPlan)) return false;
+        return true;
+    }
+    if (!Array.isArray(event.acceptedBlockingRecordIds) || !event.blockingSnapshotHash) return false;
+    const acceptedBlockers = [...new Set(event.acceptedBlockingRecordIds)].sort();
+    if (
+        acceptedBlockers.length !== event.acceptedBlockingRecordIds.length
+        || acceptedBlockers.some((id, index) => id !== event.acceptedBlockingRecordIds?.[index])
+    ) return false;
+    if (acceptedBlockers.length > 0 && !meaningful(event.rationale)) return false;
     return true;
 }
 

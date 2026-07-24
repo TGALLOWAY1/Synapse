@@ -299,8 +299,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   screen's system readiness). Only the P0 *primary* mockup gates. `buildScreenReviewModel`/`buildScreenReviewModelForItem`/
   `buildScreenReviewIndex` assemble the per-screen `ScreenReviewModel` (status +
   systemReadiness + issues + counts + `acceptedOverWarnings` + freshness +
-  checklist progress); the views use the `-ForItem`/`-Index` wrappers (which build
+  the legacy `reviewMeta` record); the views use the `-ForItem`/`-Index` wrappers (which build
   the variant grid), pure tests use the low-level fn with explicit signals.
+  Persisted `ScreenReviewMeta.checklist` values remain readable for backward
+  compatibility, but the unrendered checklist/progress projection has been
+  retired; do not reintroduce it as a second review gate.
   **Supporting review record** rides a NEW additive overlay field
   `ScreenMetadataEdit.review` (`ScreenReviewMeta` in `src/types`: checklist, note,
   override reason, sign-off `signature`, transition timestamps, plus the Review
@@ -892,4 +895,3 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `ScreenInventoryRenderer` path inside the Screens view. The legacy
   `screen_inventory` and `mockup` renderMain branches remain intact and
   internally reachable — do not delete them.
-

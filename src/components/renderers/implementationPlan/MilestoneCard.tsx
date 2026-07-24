@@ -18,10 +18,8 @@ import {
 import type { ImplementationPlanMilestone, ImplementationPromptPack, ProjectTask } from '../../../types';
 import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
-import type { QualityGateRunStatus } from '../../../lib/services/implementationPlanInsights';
 import { PromptPackCard } from './PromptPackCard';
 import { CopyTextButton } from './CopyTextButton';
-import { QualityGateCard } from './QualityGateCard';
 
 const PRIORITY_STYLE: Record<NonNullable<ImplementationPlanMilestone['priority']>, string> = {
     critical: 'bg-red-50 text-red-700 border-red-200',
@@ -56,9 +54,6 @@ interface Props {
      * the Implementation-progress checklist; no match = still just planned.
      */
     savedTaskById?: Map<string, ProjectTask>;
-    /** User-recorded gate outcomes; a gate absent here is Not run. */
-    gateStatuses?: Record<string, QualityGateRunStatus>;
-    onSetGateStatus?: (gateId: string, status: QualityGateRunStatus) => void;
     /** Prompt packs the user already copied (drives the Copied chip). */
     copiedPackIds?: ReadonlySet<string>;
     onPackCopied?: (packId: string) => void;
@@ -70,10 +65,9 @@ interface Props {
 
 /**
  * Full milestone detail in a fixed section order — Outcome → linked
- * artifacts → build tasks → prompt packs → quality gates → validation
- * commands → "Done when" — so every milestone card reads the same way.
- * Header shows the compact roadmap facts (priority, effort, dependencies,
- * counts).
+ * artifacts → build tasks → prompt packs → validation commands → "Done when"
+ * — so every milestone card reads the same way. Header shows the compact
+ * roadmap facts (priority, effort, dependencies, counts).
  */
 export function MilestoneCard({
     milestone: m,
@@ -81,8 +75,6 @@ export function MilestoneCard({
     milestoneNameById,
     defaultExpanded = false,
     savedTaskById,
-    gateStatuses = {},
-    onSetGateStatus,
     copiedPackIds,
     onPackCopied,
     onPacksCopied,
@@ -90,14 +82,12 @@ export function MilestoneCard({
 }: Props) {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const packs: ImplementationPromptPack[] = m.promptPacks ?? [];
-    const gates = m.qualityGates ?? [];
     const links = m.linkedArtifacts ?? {};
     const objective = m.objective ?? m.goal;
     const deps = (m.dependencies ?? []).map(d => milestoneNameById.get(d) ?? d);
     const counts = [
         `${m.tasks.length} task${m.tasks.length === 1 ? '' : 's'}`,
         `${packs.length} prompt${packs.length === 1 ? '' : 's'}`,
-        `${gates.length} gate${gates.length === 1 ? '' : 's'}`,
     ];
     const allPromptsText = packs.map(promptPackToClipboardText).join('\n\n---\n\n');
     const trackedCount = savedTaskById
@@ -265,34 +255,12 @@ export function MilestoneCard({
                                         pack={pack}
                                         defaultCollapsed={packs.length > 1}
                                         prerequisites={deps}
-                                        relatedGateTitles={gates.map(g => g.title)}
                                         copied={copiedPackIds?.has(pack.id) ?? false}
                                         onCopied={onPackCopied ? () => onPackCopied(pack.id) : undefined}
                                         navigationMilestoneId={m.id}
                                         focusedAcceptanceCriterionIndex={pack.acceptanceCriteria.findIndex((_criterion, criterionIndex) => (
                                             implementationPlanAnchor.promptCriterion(m.id, pack.id, criterionIndex) === focusAnchorId
                                         ))}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {gates.length > 0 && (
-                        <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">
-                                Quality Gates
-                            </p>
-                            <div className="space-y-2">
-                                {gates.map(g => (
-                                    <QualityGateCard
-                                        key={g.id}
-                                        gate={g}
-                                        status={gateStatuses[g.id] ?? 'not_run'}
-                                        onSetStatus={onSetGateStatus ? s => onSetGateStatus(g.id, s) : undefined}
-                                        milestoneLabel={`M${index + 1} · ${m.name}`}
-                                        verifyCommands={m.validationCommands ?? []}
-                                        blocksLabel={g.required ? `M${index + 1}` : undefined}
                                     />
                                 ))}
                             </div>

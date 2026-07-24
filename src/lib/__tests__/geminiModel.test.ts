@@ -3,8 +3,8 @@ import { DEFAULT_GEMINI_MODEL } from '../geminiClient';
 import { migrateGeminiFlashModel } from '../modelMigration';
 import { normalizeError, userMessage } from '../errors';
 
-const LATEST_FLASH = 'gemini-3.5-flash';
-const FLASH_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_05';
+const LATEST_FLASH = 'gemini-3.6-flash';
+const FLASH_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_07';
 
 describe('Gemini Flash model default', () => {
     it('defaults to the latest GA Flash model', () => {
@@ -13,6 +13,7 @@ describe('Gemini Flash model default', () => {
 
     it('is a GA model id (no preview suffix) and not an older Flash id', () => {
         expect(DEFAULT_GEMINI_MODEL).not.toMatch(/preview/i);
+        expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3.5-flash');
         expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3-flash-preview');
         expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-2.5-flash');
     });
@@ -23,13 +24,19 @@ describe('migrateGeminiFlashModel', () => {
         localStorage.clear();
     });
 
-    it('moves an older preview Flash primary selection to 3.5 Flash', () => {
+    it('moves a 3.5 Flash primary selection to 3.6 Flash', () => {
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.5-flash');
+        migrateGeminiFlashModel();
+        expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
+    });
+
+    it('moves an older preview Flash primary selection to 3.6 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3-flash-preview');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('moves a legacy 2.5 Flash selection to 3.5 Flash', () => {
+    it('moves a legacy 2.5 Flash selection to 3.6 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-2.5-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
@@ -63,7 +70,7 @@ describe('migrateGeminiFlashModel', () => {
 
 describe('model access guard message', () => {
     it('surfaces a clear access-guard message for model-not-found errors', () => {
-        const err = normalizeError(new Error('Gemini API Error: 404 - Publisher model `gemini-3.5-flash` not found'));
+        const err = normalizeError(new Error('Gemini API Error: 404 - Publisher model `gemini-3.6-flash` not found'));
         expect(err.category).toBe('model_not_found');
         const msg = userMessage(err);
         expect(msg).toMatch(/could not access the selected model/i);

@@ -55,14 +55,4 @@ export const ISSUE_KIND_META: Record<FlowIssueKind, IssueKindMeta> = {
         sectionBorder: 'border-red-200',
         sectionHeader: 'text-red-800',
     },
-    unresolved_reference: {
-        label: 'Unresolved reference',
-        shortLabel: 'Unresolved',
-        description: 'A reference (feature, screen, state) that has not been defined yet.',
-        badgeBg: 'bg-neutral-200',
-        badgeText: 'text-neutral-800',
-        sectionBg: 'bg-neutral-50',
-        sectionBorder: 'border-neutral-300',
-        sectionHeader: 'text-neutral-700',
-    },
 };

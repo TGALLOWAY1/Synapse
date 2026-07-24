@@ -51,8 +51,6 @@ function reviewModel(overrides: Partial<ScreenReviewModel> = {}): ScreenReviewMo
         infoCount: 0,
         acceptedOverWarnings: false,
         freshness: 'unknown' as ScreenReviewFreshnessStatus,
-        checklist: {},
-        checklistProgress: { checked: 0, total: 8 },
         ...overrides,
     };
 }

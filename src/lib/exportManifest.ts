@@ -31,7 +31,7 @@ export interface ExportManifest {
     /** Positional label of the exported PRD version ("Version 3"). */
     prdLabel?: string;
     entries: ExportManifestEntry[];
-    /** Entries whose status is stale (needs_update / update_recommended). */
+    /** Entries whose canonical status requires sync or validation review. */
     staleCount: number;
     /** Outputs that deserve review, including advisory/legacy uncertainty. */
     reviewCount: number;
@@ -52,7 +52,8 @@ export function buildExportManifest(input: {
         entries: input.entries,
         staleCount: input.entries.filter((e) => isStaleStatus(e.status)).length,
         reviewCount: input.entries.filter((e) => (
-            e.alignmentState ? e.alignmentState !== 'aligned' : isStaleStatus(e.status)
+            e.status === 'needs_review'
+            || (e.alignmentState ? e.alignmentState !== 'aligned' : isStaleStatus(e.status))
         )).length,
         blockingCount: input.entries.filter((e) => e.blocksBuildReadiness === true).length,
     };
@@ -81,8 +82,13 @@ export function renderManifestMarkdown(manifest: ExportManifest): string {
     if (manifest.entries.length > 0) {
         lines.push('', '| Asset | Version | Generated from | Status |', '| --- | --- | --- | --- |');
         for (const e of manifest.entries) {
+            const statusLabel = e.status === 'needs_review'
+                ? DEPENDENCY_STATUS_LABELS.needs_review
+                : e.alignmentState
+                    ? ALIGNMENT_LABELS[e.alignmentState]
+                    : DEPENDENCY_STATUS_LABELS[e.status];
             lines.push(
-                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${e.alignmentState ? ALIGNMENT_LABELS[e.alignmentState] : DEPENDENCY_STATUS_LABELS[e.status]} |`,
+                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${statusLabel} |`,
             );
         }
     }
@@ -99,10 +105,18 @@ export function renderManifestMarkdown(manifest: ExportManifest): string {
             lines.push(`- **${entry.title} — ${confidence}:** ${entry.alignmentSummary ?? 'Review against the current plan.'}${next}`);
         }
     }
+    const validationReviewCount = manifest.entries.filter(
+        entry => entry.status === 'needs_review',
+    ).length;
     if (manifest.blockingCount > 0) {
         lines.push(
             '',
             `> ⚠️ ${manifest.blockingCount} output${manifest.blockingCount === 1 ? '' : 's'} in this export ${manifest.blockingCount === 1 ? 'requires' : 'require'} alignment review before build. The saved work remains useful for exploration; treat the current PRD as the source of truth where they disagree.`,
+        );
+    } else if (validationReviewCount > 0) {
+        lines.push(
+            '',
+            `> ⚠️ ${validationReviewCount} output${validationReviewCount === 1 ? '' : 's'} ${validationReviewCount === 1 ? 'has' : 'have'} a blocking validation issue. Review the recorded checks before relying on ${validationReviewCount === 1 ? 'it' : 'them'} for implementation.`,
         );
     } else if (manifest.reviewCount > 0) {
         lines.push(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Download, X, FileText, Package, Copy, Check, Bot } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import { useProjectSyncStore } from '../store/projectSyncStore';
@@ -16,13 +16,18 @@ import {
 } from '../lib/services/prdMarkdownRenderer';
 import { buildExportManifest, renderManifestMarkdown, type ExportManifestEntry } from '../lib/exportManifest';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
-import { isStaleStatus } from '../lib/artifactFreshness';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
     getArtifactMeta,
     isHiddenArtifactSubtype,
 } from '../lib/coreArtifactPipeline';
 import type { Artifact } from '../types';
+import type { PlanningDestination } from '../lib/planning/planningNavigation';
+import {
+    renderWorkflowCheckpointSummaryMarkdown,
+    type WorkflowCheckpointSummary,
+} from '../lib/workflowCheckpointSummary';
+import { WorkflowCheckpointSummaryCard } from './workflow/WorkflowCheckpointSummaryCard';
 
 // Screen inventory is now persisted as JSON. For human-readable exports,
 // re-render it through the markdown converter; legacy markdown content
@@ -37,11 +42,23 @@ function exportContentFor(artifact: Artifact, raw: string): string {
 
 interface ExportModalProps {
     projectId: string;
-    planningReady: boolean;
+    checkpointSummary: WorkflowCheckpointSummary;
+    buildBlocked?: boolean;
+    blockingPlanningItems?: Array<{ recordId: string; title: string }>;
+    onResolveBuildBlockers?: () => void;
+    onNavigateCheckpoint?: (destination: PlanningDestination) => void;
     onClose: () => void;
 }
 
-export function ExportModal({ projectId, planningReady, onClose }: ExportModalProps) {
+export function ExportModal({
+    projectId,
+    checkpointSummary,
+    buildBlocked = false,
+    blockingPlanningItems = [],
+    onResolveBuildBlockers,
+    onNavigateCheckpoint,
+    onClose,
+}: ExportModalProps) {
     const {
         getProject, getLatestSpine, getArtifacts, getArtifactVersions,
         getProjectOutputAlignment, getSpineVersions,
@@ -55,6 +72,9 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
     // Which card most recently showed a "Copied" confirmation.
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
     const [recoverySaved, setRecoverySaved] = useState(false);
+    const dialogRef = useRef<HTMLDivElement>(null);
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+    const headingId = useId();
     // Surface a durability warning right where the user is about to rely on the
     // export: their latest changes may not have reached the cloud.
     const cloudAtRisk = syncInfo?.state === 'error' || syncInfo?.state === 'conflict';
@@ -74,13 +94,45 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
         }
     };
 
-    // Allow dismissing the modal with the Escape key.
+    // Keep keyboard interaction contained in the modal and return focus to the
+    // control that opened it when the modal closes.
     useEffect(() => {
+        const previouslyFocused = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+        closeButtonRef.current?.focus();
+
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                onClose();
+                return;
+            }
+            if (e.key !== 'Tab' || !dialogRef.current) return;
+
+            const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            )];
+            if (focusable.length === 0) {
+                e.preventDefault();
+                dialogRef.current.focus();
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
         };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            previouslyFocused?.focus();
+        };
     }, [onClose]);
 
     const project = getProject(projectId);
@@ -135,10 +187,6 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
         prdLabel: spineLabelOf(latestSpine?.id),
         entries: manifestEntries,
     });
-    const reviewTitles = manifestEntries
-        .filter(entry => entry.alignmentState ? entry.alignmentState !== 'aligned' : isStaleStatus(entry.status))
-        .map(entry => entry.title);
-
     // The default PRD export is one coherent three-part document. Prefer
     // rendering it from the canonical structured object so the Part I/II/III
     // structure is guaranteed regardless of the stored responseText; fall back
@@ -183,6 +231,7 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
         const data = {
             project: project,
             manifest,
+            workflowCheckpoint: checkpointSummary,
             structuredPRD: latestSpine.structuredPRD,
             artifacts: orderedCoreArtifacts.map(a => {
                 const versions = getArtifactVersions(projectId, a.id);
@@ -210,7 +259,9 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
     };
 
     const buildFullBundle = (): string => {
-        const sections: string[] = [renderManifestMarkdown(manifest), '\n---\n'];
+        const sections: string[] = [];
+        sections.push(renderWorkflowCheckpointSummaryMarkdown(checkpointSummary), '\n---\n');
+        sections.push(renderManifestMarkdown(manifest), '\n---\n');
         if (latestSpine) {
             sections.push('# Product Requirements Document\n', prdMarkdown(), '\n---\n');
         }
@@ -233,7 +284,7 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
             projectName: project?.name || 'This product',
             prdMarkdown: latestSpine ? prdMarkdown() : undefined,
             manifestMarkdown: renderManifestMarkdown(manifest),
-            exploratory: !latestSpine?.isFinal || !planningReady,
+            checkpointMarkdown: renderWorkflowCheckpointSummaryMarkdown(checkpointSummary),
             artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
                 title: displayTitle(a),
@@ -253,13 +304,24 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
             <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={headingId}
+                tabIndex={-1}
                 className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
-                    <h3 className="font-bold text-neutral-900">Export Project</h3>
-                    <button onClick={onClose} className="p-2 hover:bg-neutral-100 rounded transition">
-                        <X size={18} />
+                    <h2 id={headingId} className="font-bold text-neutral-900">Export Project</h2>
+                    <button
+                        ref={closeButtonRef}
+                        type="button"
+                        onClick={onClose}
+                        aria-label="Close export dialog"
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded transition hover:bg-neutral-100"
+                    >
+                        <X size={18} aria-hidden="true" />
                     </button>
                 </div>
 
@@ -293,35 +355,61 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                         </div>
                     )}
 
-                    {manifest.reviewCount > 0 && (
-                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                    {buildBlocked && (
+                        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-950">
                             <div className="flex items-start gap-2">
-                                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-600" />
                                 <div className="min-w-0 flex-1">
-                                    <p className="text-sm font-medium">
-                                        {manifest.blockingCount > 0
-                                            ? `${manifest.blockingCount} output${manifest.blockingCount === 1 ? '' : 's'} need alignment review before build`
-                                            : `${manifest.reviewCount} output${manifest.reviewCount === 1 ? '' : 's'} have advisory alignment notes`}
+                                    <p className="text-sm font-semibold">Finalize blocking decisions before export</p>
+                                    <p className="mt-1 text-xs leading-5 text-red-800">
+                                        {blockingPlanningItems.length} planning item{blockingPlanningItems.length === 1 ? '' : 's'} explicitly marked
+                                        as blocking must be resolved or accepted at the Finalize checkpoint.
                                     </p>
-                                    <p className="mt-0.5 text-xs text-amber-800">
-                                        {reviewTitles.join(', ')} — exports preserve each saved version and explain
-                                        whether the impact is definite, possible, or unknown. The work remains useful
-                                        for exploration. Review it in Project Map → Dependency Graph before relying on
-                                        it for implementation, or export anyway.
-                                    </p>
+                                    {blockingPlanningItems.length > 0 && (
+                                        <ul className="mt-2 space-y-1 text-xs text-red-800">
+                                            {blockingPlanningItems.slice(0, 3).map(item => (
+                                                <li key={item.recordId}>• {item.title}</li>
+                                            ))}
+                                            {blockingPlanningItems.length > 3 && (
+                                                <li>• {blockingPlanningItems.length - 3} more</li>
+                                            )}
+                                        </ul>
+                                    )}
+                                    {onResolveBuildBlockers && (
+                                        <button
+                                            type="button"
+                                            onClick={onResolveBuildBlockers}
+                                            className="mt-3 inline-flex min-h-10 items-center rounded-md bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-800"
+                                        >
+                                            Open Finalize checkpoint
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     )}
 
+                    <WorkflowCheckpointSummaryCard
+                        summary={checkpointSummary}
+                        onOpen={onNavigateCheckpoint ? row => {
+                            onClose();
+                            onNavigateCheckpoint(row.destination);
+                        } : undefined}
+                    />
+
+                    <fieldset
+                        disabled={buildBlocked}
+                        aria-describedby={buildBlocked ? 'export-materiality-blocked' : undefined}
+                        className="m-0 space-y-3 border-0 p-0 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        {buildBlocked && (
+                            <span id="export-materiality-blocked" className="sr-only">
+                                Export actions are unavailable until blocking planning decisions are finalized.
+                            </span>
+                        )}
+
                     {/* --- EXPORT: whole-project bundles --- */}
                     <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
-
-                    {(!latestSpine?.isFinal || !planningReady) && (
-                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-                            <strong>Exploratory export.</strong> This plan is not ready to serve as a trusted implementation foundation. Exports retain that warning so polished documents do not imply settled reasoning.
-                        </div>
-                    )}
 
                     {/* Agent handoff — the build-companion preset */}
                     <div className="flex items-stretch gap-2">
@@ -333,7 +421,9 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                             <Bot size={18} className="text-violet-600 shrink-0" />
                             <div className="min-w-0">
                                 <div className="text-sm font-medium text-violet-900">Copy for coding agent</div>
-                                <div className="text-xs text-violet-700">{latestSpine?.isFinal && planningReady ? 'Committed plan + aligned implementation context' : 'Plan + explicit exploratory warning'}</div>
+                                <div className="text-xs text-violet-700">
+                                    Checkpoint + current implementation context
+                                </div>
                             </div>
                             {copiedKey === 'handoff'
                                 ? <Check size={16} className="text-violet-600 shrink-0 ml-auto" />
@@ -456,6 +546,7 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                             ))}
                         </div>
                     )}
+                    </fieldset>
                 </div>
             </div>
         </div>

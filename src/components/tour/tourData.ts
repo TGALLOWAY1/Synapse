@@ -141,7 +141,7 @@ export interface DecisionProposalDemo {
 
 export const DECISION_DEMO = {
     /** Tab strip mirrors the live Challenge workspace tabs. */
-    challengeTabs: ['Review findings', 'Decision Center', 'Review history'],
+    challengeTabs: ['Decision Center', 'Review findings', 'Review history'],
     decision: {
         id: 'collab-model',
         conditionLabel: 'Needs a decision',
@@ -386,13 +386,13 @@ export const TOUR_ASSETS: TourAsset[] = [
         preview: ['User', 'Song', 'Track', 'Section', 'Collaborator'],
     },
     {
-        // Consolidated Development artifact: milestones now carry their own
-        // prompt packs and quality gates (the old standalone Prompt Pack card
-        // folded into this one).
+        // Consolidated Development artifact: milestones carry their own
+        // copy-ready prompt packs (the old standalone Prompt Pack card folded
+        // into this one). Synapse ends at the plan + prompts handoff.
         id: 'implementation_plan',
         group: 'development',
         name: 'Implementation Plan',
-        tagline: 'Milestones, prompt packs & quality gates',
+        tagline: 'Milestones & copy-ready prompt packs',
         icon: Terminal,
         accent: 'text-amber-300 bg-amber-500/10',
         previewKind: 'roadmap',
@@ -400,7 +400,7 @@ export const TOUR_ASSETS: TourAsset[] = [
             'M1 — Capture & projects · 2 prompt packs',
             'M2 — Arrangement · 2 prompt packs',
             'M3 — Collaboration · 1 prompt pack',
-            'M4 — Export & launch · quality gates',
+            'M4 — Export & launch · 1 prompt pack',
         ],
     },
 ];
@@ -416,16 +416,17 @@ export const TOUR_PROJECT = {
 
 /**
  * The workspace's planning progression, mirroring the production
- * `PipelineStageBar` (src/components/PipelineStageBar.tsx): Plan → Challenge →
- * Build → History. (In the live app the Build tab reads "Explore" until the
- * plan is committed; the tour shows the committed state.) Keep these labels in
- * sync if the stage bar changes.
+ * `JourneyRail` (src/components/JourneyRail.tsx): Define → Refine → Finalize →
+ * Generate → Review → Build. Persisted stage keys remain an implementation
+ * detail, and project history opens as a panel instead of occupying a step.
  */
 export const WORKSPACE_NAV = [
-    'Plan',
-    'Challenge',
+    'Define',
+    'Refine',
+    'Finalize',
+    'Generate',
+    'Review',
     'Build',
-    'History',
 ];
 
 export interface ActivityEntry {

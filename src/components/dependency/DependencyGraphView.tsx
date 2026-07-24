@@ -1,11 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle,
-    Code2, Database, ExternalLink, FileText, Image, Info, ListChecks, Loader2, Package, Palette,
-    PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
+    Code2, Database, ExternalLink, FileText, Image, Info, Loader2, Package, Palette,
+    PencilLine, RefreshCcw, Waypoints, X,
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
-import { artifactJobController } from '../../lib/services/artifactJobController';
 import {
     buildArtifactDependencyGraph,
     computeDisplayEdges,
@@ -25,7 +24,6 @@ import { OutputAlignmentBadge } from '../OutputAlignmentStatus';
 import type { OutputAlignment } from '../../lib/planning/outputAlignment';
 import type { ArtifactSlotKey, ProjectPlatform, StructuredPRD } from '../../types';
 import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
-import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface DependencyGraphViewProps {
     projectId: string;
@@ -35,8 +33,8 @@ interface DependencyGraphViewProps {
     projectPlatform?: ProjectPlatform;
     /** Navigate the workspace to a node's artifact view. */
     onOpenNode: (nodeId: DependencyNodeId) => void;
-    /** Open a bounded, non-executing update plan for a supported affected output. */
-    onOpenUpdatePlan?: (artifactId: string) => void;
+    /** Open the shared output-sync triage for affected outputs. */
+    onOpenSyncOutputs?: () => void;
 }
 
 const NODE_ICONS: Record<DependencyNodeId, typeof FileText> = {
@@ -63,6 +61,7 @@ const STATUS_PILL_CLASSES: Record<DependencyNodeStatus, string> = {
     needs_update: 'bg-amber-50 text-amber-800 border-amber-300',
     update_recommended: 'bg-amber-50 text-amber-700 border-amber-200',
     generating: 'bg-sky-50 text-sky-700 border-sky-200',
+    needs_review: 'bg-amber-50 text-amber-800 border-amber-300',
     error: 'bg-red-50 text-red-700 border-red-200',
     missing: 'bg-neutral-100 text-neutral-500 border-neutral-200',
 };
@@ -105,10 +104,10 @@ type DetailTab = 'overview' | 'dependencies' | 'impact' | 'history';
 type ViewMode = 'graph' | 'impact';
 
 export function DependencyGraphView({
-    projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode, onOpenUpdatePlan,
+    projectId, onOpenNode, onOpenSyncOutputs,
 }: DependencyGraphViewProps) {
     const capabilities = useProjectCapabilities(projectId);
-    const { getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment, getJob } = useProjectStore();
+    const { getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment } = useProjectStore();
 
     // Freshness comes from the ONE canonical seam — the same input assembly and
     // evaluator (evaluateDependencyGraph) every other surface consumes — so the
@@ -125,38 +124,14 @@ export function DependencyGraphView({
     const [selectedId, setSelectedId] = useState<DependencyNodeId | null>(null);
     const [detailTab, setDetailTab] = useState<DetailTab>('overview');
     const [showLegend, setShowLegend] = useState(false);
-    const [updateConfirm, setUpdateConfirm] = useState<
-        { title: string; order: DependencyNodeId[] } | null
-    >(null);
 
-    // Spines + live job are still read directly: the PRD history list, the
-    // "mark up to date" target spine, and the jobActive gate.
+    // Spines remain a direct read for the PRD history list.
     const spines = getSpineVersions(projectId);
-    const latestSpine = spines.find(s => s.isLatest);
-    const job = getJob(projectId);
 
-    // node id → artifact id (content lookup / mark-current / history). The PRD
-    // node has no backing artifact.
+    // node id → artifact id (content lookup / history). The PRD node has no
+    // backing artifact.
     const artifactIdOf = (id: DependencyNodeId): string | undefined =>
         id === 'prd' ? undefined : artifactIdBySlot[id as ArtifactSlotKey];
-
-    const jobActive = !!job && Object.values(job.slots).some(
-        s => s && (s.status === 'generating' || s.status === 'queued'),
-    );
-
-    const startArgs = { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform };
-
-    const runUpdates = (order: DependencyNodeId[]) => {
-        if (!capabilities.canGenerateArtifacts) return;
-        const slots = order.filter((id): id is ArtifactSlotKey => id !== 'prd');
-        if (slots.length === 0) return;
-        if (slots.length === 1) {
-            artifactJobController.retrySlot(slots[0], startArgs);
-        } else {
-            artifactJobController.regenerateSlots(slots, startArgs);
-        }
-        setUpdateConfirm(null);
-    };
 
     const titleOf = (id: DependencyNodeId) => getDependencyNode(graph, id)?.title ?? id;
     const evalOf = (id: DependencyNodeId): DependencyNodeEvaluation | undefined => evaluations.get(id);
@@ -164,12 +139,6 @@ export function DependencyGraphView({
     const selectNode = (id: DependencyNodeId) => {
         setSelectedId(prev => (prev === id ? prev : id));
         setDetailTab('overview');
-    };
-
-    // Confirm-modal openers -----------------------------------------------------
-    const confirmSingleUpdate = (id: DependencyNodeId) => {
-        if (id === 'prd') return;
-        setUpdateConfirm({ title: `Update ${titleOf(id)}`, order: [id] });
     };
 
     // --- canvas geometry --------------------------------------------------------
@@ -231,20 +200,6 @@ export function DependencyGraphView({
     }
 
     const selectedEval = selectedId ? evalOf(selectedId) : undefined;
-
-    // "Confirm aligned" — the user asserts the artifact is still valid for
-    // the current PRD; the store appends a rebased clone (honest history).
-    const canMarkCurrent = (id: DependencyNodeId): boolean => {
-        const ev = evalOf(id);
-        return !!latestSpine
-            && !!artifactIdOf(id)
-            && (ev?.status === 'needs_update' || ev?.status === 'update_recommended');
-    };
-    const markCurrentNode = (id: DependencyNodeId) => {
-        const artifactId = artifactIdOf(id);
-        if (!artifactId || !latestSpine) return;
-        useProjectStore.getState().markArtifactCurrentForSpine(projectId, artifactId, latestSpine.id);
-    };
 
     // Removed features (per the selected node's PRD change summary) that the
     // artifact's current content still mentions — the deletion blast radius.
@@ -421,7 +376,9 @@ export function DependencyGraphView({
                                             <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
                                                 {node.id === 'prd'
                                                     ? <StatusPill status="source" />
-                                                    : alignment
+                                                    : status === 'needs_review'
+                                                        ? <StatusPill status={status} />
+                                                        : alignment
                                                         ? <OutputAlignmentBadge alignment={alignment} />
                                                         : impacted
                                                             ? <ImpactedPill />
@@ -458,18 +415,24 @@ export function DependencyGraphView({
                     onClose={() => setSelectedId(null)}
                     onSelect={selectNode}
                     onOpenNode={onOpenNode}
-                    onOpenUpdatePlan={
-                        onOpenUpdatePlan
-                        && (selectedId === 'screen_inventory' || selectedId === 'user_flows' || selectedId === 'data_model')
-                        && artifactIdOf(selectedId) !== undefined
-                        && alignmentByNode.get(selectedId)?.state !== 'aligned'
-                            ? () => onOpenUpdatePlan(artifactIdOf(selectedId)!)
+                    onSyncOutputs={
+                        onOpenSyncOutputs
+                        && capabilities.canReviewArtifacts
+                        && selectedId !== 'prd'
+                        && (
+                            (
+                                alignmentByNode.get(selectedId) !== undefined
+                                && alignmentByNode.get(selectedId)?.state !== 'aligned'
+                            )
+                            || selectedEval.status === 'needs_update'
+                            || selectedEval.status === 'update_recommended'
+                            || selectedEval.status === 'needs_review'
+                            || selectedEval.impactedBy.length > 0
+                        )
+                            ? onOpenSyncOutputs
                             : undefined
                     }
-                    onUpdate={capabilities.canGenerateArtifacts ? () => confirmSingleUpdate(selectedId) : undefined}
-                    onMarkCurrent={capabilities.canReviewArtifacts && canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
                     removedFeatureRefs={selectedRemovedFeatureRefs}
-                    jobActive={jobActive}
                     titleOf={titleOf}
                     history={
                         selectedId === 'prd'
@@ -493,40 +456,6 @@ export function DependencyGraphView({
                 />
             )}
 
-            {/* Update confirm modal */}
-            {updateConfirm && (
-                <ConfirmDialog
-                    title={updateConfirm.title}
-                    cancelLabel="Cancel"
-                    confirmLabel={
-                        <>
-                            <RefreshCcw size={13} />
-                            {updateConfirm.order.length === 1 ? 'Update' : `Update ${updateConfirm.order.length} artifacts`}
-                        </>
-                    }
-                    onCancel={() => setUpdateConfirm(null)}
-                    onConfirm={() => runUpdates(updateConfirm.order)}
-                >
-                    <p className="text-sm text-neutral-700 mt-1">
-                        {updateConfirm.order.length === 1
-                            ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
-                            : 'Regenerates these artifacts in dependency order, so each uses the reviewed upstream version:'}
-                    </p>
-                    {updateConfirm.order.length > 1 && (
-                        <ol className="mt-2 space-y-1">
-                            {updateConfirm.order.map((id, i) => (
-                                <li key={id} className="flex items-center gap-2 text-sm text-neutral-800">
-                                    <span className="w-4 text-right text-[11px] text-neutral-400">{i + 1}.</span>
-                                    {titleOf(id)}
-                                </li>
-                            ))}
-                        </ol>
-                    )}
-                    <p className="text-xs text-neutral-500 mt-2">
-                        Current versions remain available in version history.
-                    </p>
-                </ConfirmDialog>
-            )}
         </div>
     );
 }
@@ -679,13 +608,9 @@ interface DetailPanelProps {
     onClose: () => void;
     onSelect: (id: DependencyNodeId) => void;
     onOpenNode: (id: DependencyNodeId) => void;
-    onOpenUpdatePlan?: () => void;
-    onUpdate?: () => void;
-    /** Present only when the node is stale and can be confirmed current. */
-    onMarkCurrent?: () => void;
+    onSyncOutputs?: () => void;
     /** Removed-feature names this artifact's content still mentions. */
     removedFeatureRefs: string[];
-    jobActive: boolean;
     titleOf: (id: DependencyNodeId) => string;
     history: HistoryEntry[];
 }
@@ -702,14 +627,12 @@ const CHANGE_SOURCE_LABELS: Record<string, string> = {
 
 function DetailPanel({
     nodeId, evaluation, alignment, graph, evaluations, tab, onTabChange, onClose, onSelect,
-    onOpenNode, onOpenUpdatePlan, onUpdate, onMarkCurrent, removedFeatureRefs,
-    jobActive, titleOf, history,
+    onOpenNode, onSyncOutputs, removedFeatureRefs, titleOf, history,
 }: DetailPanelProps) {
     const node = getDependencyNode(graph, nodeId);
     const Icon = NODE_ICONS[nodeId] ?? Package;
     const deps = getDirectDependencies(graph, nodeId);
     const { direct, indirect } = computeDownstreamImpacts(graph, nodeId);
-    const canUpdate = nodeId !== 'prd' && Boolean(onUpdate);
     const impacted = evaluation.status === 'up_to_date' && evaluation.impactedBy.length > 0;
 
     const TABS: Array<{ key: DetailTab; label: string }> = [
@@ -752,7 +675,9 @@ function DetailPanel({
                             <h3 className="text-sm font-bold text-neutral-900">{node?.title ?? nodeId}</h3>
                             {nodeId === 'prd'
                                 ? <StatusPill status="source" />
-                                : alignment ? <OutputAlignmentBadge alignment={alignment} />
+                                : evaluation.status === 'needs_review'
+                                    ? <StatusPill status={evaluation.status} />
+                                    : alignment ? <OutputAlignmentBadge alignment={alignment} />
                                     : impacted ? <ImpactedPill /> : <StatusPill status={evaluation.status} />}
                             {evaluation.manuallyEdited && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-medium">
@@ -764,13 +689,13 @@ function DetailPanel({
                     </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                    {onOpenUpdatePlan && (
+                    {onSyncOutputs && (
                         <button
                             type="button"
-                            onClick={onOpenUpdatePlan}
-                            className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+                            onClick={onSyncOutputs}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-md bg-indigo-600 px-3 text-xs font-medium text-white transition hover:bg-indigo-700"
                         >
-                            <ListChecks size={13} /> Update plan
+                            <RefreshCcw size={13} /> Sync outputs
                         </button>
                     )}
                     <button
@@ -780,27 +705,6 @@ function DetailPanel({
                     >
                         <ExternalLink size={12} /> Open
                     </button>
-                    {onMarkCurrent && (
-                        <button
-                            type="button"
-                            onClick={onMarkCurrent}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md hover:bg-emerald-100 transition"
-                            title="Confirm this artifact is still valid for the current PRD without regenerating it"
-                        >
-                            <ShieldCheck size={12} /> Confirm aligned
-                        </button>
-                    )}
-                    {canUpdate && (
-                        <button
-                            type="button"
-                            disabled={jobActive}
-                            onClick={onUpdate}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                            title={jobActive ? 'Generation is already running' : undefined}
-                        >
-                            <RefreshCcw size={12} /> Update
-                        </button>
-                    )}
                     <button
                         type="button"
                         onClick={onClose}

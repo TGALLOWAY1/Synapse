@@ -1,24 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+    Accessibility,
     AlertTriangle,
     ArrowRight,
+    Boxes,
+    Brain,
+    Check,
     CheckCircle2,
     ChevronDown,
     ChevronRight,
     Circle,
     Clock3,
+    Crosshair,
+    Database,
     History,
     Link2,
+    ListChecks,
     Loader2,
+    Lock,
     RefreshCcw,
+    Rocket,
+    Search,
     ShieldAlert,
+    ShieldCheck,
     Sparkles,
+    User,
     X,
+    type LucideIcon,
 } from 'lucide-react';
-import {
-    DecisionCenter,
-    type DecisionAction,
-    type DecisionCenterRecordView,
+import type {
+    DecisionAction,
+    DecisionCenterRecordView,
 } from './DecisionCenter';
 import type {
     AssumptionEvidenceActionGuard,
@@ -28,12 +40,16 @@ import type {
 } from './AssumptionValidationPanel';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 import { MIN_CLOSURE_REASON_LENGTH } from '../../lib/planning';
+import type { BatchVerdictCandidate, BatchVerdictResult } from '../../lib/planning';
 
 export type ReviewSpecialistOption = {
     id: string;
     name: string;
     responsibility: string;
     selectionReason: string;
+    /** The concrete goals this specialist scrutinizes, shown in the setup
+     * row's expandable detail. Optional — omit it to render no expander. */
+    focusAreas?: string[];
     recommended?: boolean;
 };
 
@@ -139,18 +155,10 @@ export interface ReviewWorkspaceProps {
     initialDecisionId?: string;
     initialIssueId?: string;
     initialFindingId?: string;
-    /** When false, the optional specialist critique is gated: its start surface
-     * is replaced by a prompt to address open decisions first. Omitted/true
-     * keeps the current behavior (critique runnable). Never gates the Decision
-     * Center, history, or an already-completed run. */
-    critiqueUnlocked?: boolean;
-    /** Count of still-open surfaced decisions, shown in the gate copy. */
+    /** Count of still-open planning items. These remain advisory and never
+     * disable specialist critique actions. */
     openDecisionCount?: number;
-    /** Defers every still-open surfaced decision at once — the gate's escape
-     * hatch so an unsure user can proceed to the optional critique. */
-    onDeferOpenDecisions?: () => void;
-    /** Jumps to the Explore/Build stage. Surfaced by the Decision Center and
-     * the critique gate so open decisions never read as blocking assets. */
+    /** Jumps to the Explore/Build stage from the Decision Center. */
     onContinueToExplore?: () => void;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
@@ -161,8 +169,10 @@ export interface ReviewWorkspaceProps {
     onActOnIssue: (runId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => void;
     onReopenIssue: (runId: string, issueId: string, reason: string, expectedUpdatedAt: number) => void;
     onTriageFinding: (runId: string, findingId: string) => void;
-    onConfirmPlanningRecord: (recordId: string) => void;
-    onReopenPlanningRecord: (recordId: string) => void;
+    /** @deprecated Decision Center authority now lives in DecisionCenterContainer. */
+    onConfirmPlanningRecord?: (recordId: string) => void;
+    /** @deprecated Decision Center authority now lives in DecisionCenterContainer. */
+    onReopenPlanningRecord?: (recordId: string) => void;
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPrepareDecisionOptions?: (recordId: string) => void;
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
@@ -195,6 +205,9 @@ export interface ReviewWorkspaceProps {
         revisitCondition?: string;
     }) => void;
     onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
+    recommendationBatchBusy?: boolean;
+    recommendationBatchResult?: BatchVerdictResult;
+    onAcceptRecommendations?: (candidates: BatchVerdictCandidate[]) => void;
     readOnly?: boolean;
 }
 
@@ -229,170 +242,220 @@ function StatusIcon({ status }: { status: ReviewSpecialistProgress['status'] }) 
     return <Circle size={15} className="text-neutral-300" aria-label="Queued" />;
 }
 
-function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpenDecisions, onContinueToExplore }: {
-    openDecisionCount: number;
-    readOnly?: boolean;
-    onGoToDecisions: () => void;
-    onDeferOpenDecisions?: () => void;
-    onContinueToExplore?: () => void;
-}) {
+function CritiqueOpenItemsSuggestion({ count, className = '' }: { count: number; className?: string }) {
+    if (count <= 0) return null;
     return (
-        <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
-            <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-8">
-                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500">
-                    <Clock3 size={20} />
-                </div>
-                <h1 className="text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">Answer your open decisions first</h1>
-                <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    The specialist critique is optional and works best once your draft has no open decisions.
-                    {openDecisionCount > 0
-                        ? ` ${openDecisionCount} decision${openDecisionCount === 1 ? '' : 's'} still ${openDecisionCount === 1 ? 'needs' : 'need'} an answer.`
-                        : ''} Answer them in the Decision Center — or defer them all and come back to the critique whenever you're ready.
-                </p>
-                {!readOnly && (
-                    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                        <button type="button" onClick={onGoToDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">
-                            Open Decision Center <ArrowRight size={14} className="shrink-0" />
-                        </button>
-                        {onDeferOpenDecisions && openDecisionCount > 0 && (
-                            <button type="button" onClick={onDeferOpenDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 text-sm font-semibold text-neutral-700 hover:bg-neutral-50">
-                                <Clock3 size={14} /> Defer the remaining {openDecisionCount} and continue
-                            </button>
-                        )}
-                    </div>
-                )}
-                {onContinueToExplore && (
-                    <p className="mt-4 text-xs text-neutral-500">
-                        Only this critique waits on decisions — your design assets don't.{' '}
-                        <button type="button" onClick={onContinueToExplore} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
-                            Continue to Explore
-                        </button>
-                    </p>
-                )}
-            </div>
-        </div>
+        <p className={`text-xs leading-5 text-amber-800 ${className}`} role="note">
+            {count} open item{count === 1 ? '' : 's'} — critiquing now may re-raise {count === 1 ? 'it' : 'them'}.
+        </p>
     );
 }
+
+// Each challenger carries a distinct semantic accent (solid icon tile) so the
+// panel scans as a set of specialists, not a list of checkboxes. Keyed by the
+// registry specialist id; DEFAULT_ACCENT covers any future/unknown specialist.
+const SPECIALIST_ACCENTS: Record<string, { icon: LucideIcon; tile: string }> = {
+    ai_model_risk: { icon: Brain, tile: 'bg-violet-500' },
+    security_privacy: { icon: Lock, tile: 'bg-emerald-500' },
+    product_scope: { icon: Crosshair, tile: 'bg-blue-500' },
+    ux_behavior: { icon: User, tile: 'bg-orange-500' },
+    data_backend: { icon: Database, tile: 'bg-teal-500' },
+    architecture: { icon: Boxes, tile: 'bg-indigo-500' },
+    accessibility: { icon: Accessibility, tile: 'bg-sky-500' },
+    reliability_qa: { icon: ShieldCheck, tile: 'bg-rose-500' },
+    delivery_operations: { icon: Rocket, tile: 'bg-amber-500' },
+};
+const DEFAULT_ACCENT: { icon: LucideIcon; tile: string } = { icon: Sparkles, tile: 'bg-neutral-500' };
+
+const WHAT_HAPPENS_NEXT: Array<{ icon: LucideIcon; title: string; detail: string }> = [
+    { icon: Search, title: 'Specialists independently review your plan', detail: 'Each specialist performs a focused critique.' },
+    { icon: ListChecks, title: 'Findings become decisions', detail: 'You review findings and choose actions.' },
+    { icon: RefreshCcw, title: 'Improve and iterate', detail: 'Refine your plan and rerun the critique when needed.' },
+];
 
 function ReviewSetup({
     projectName,
     panel,
-    sources,
-    missingSources,
     busy,
     readOnly,
+    openDecisionCount,
     onStart,
 }: {
     projectName: string;
     panel: ReviewSpecialistOption[];
-    sources: string[];
-    missingSources: string[];
     busy?: boolean;
     readOnly?: boolean;
+    openDecisionCount: number;
     onStart: ReviewWorkspaceProps['onStartReview'];
 }) {
     const [selected, setSelected] = useState(() => new Set(panel.filter(p => p.recommended !== false).map(p => p.id)));
-    const [focus, setFocus] = useState('');
+    const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
     const omittedRecommended = panel.filter(option => option.recommended !== false && !selected.has(option.id));
+    const allSelected = panel.length > 0 && panel.every(option => selected.has(option.id));
 
     const toggle = (id: string) => setSelected(prev => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id); else next.add(id);
         return next;
     });
+    const toggleExpanded = (id: string) => setExpanded(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+    const toggleAll = () => setSelected(allSelected ? new Set() : new Set(panel.map(option => option.id)));
 
     return (
-        <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
-            <div className="mb-7">
-                <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700">
-                    <ShieldAlert size={20} />
-                </div>
-                <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Run an optional specialist critique</h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
-                    This critique is optional — run it when you want an adversarial second opinion on the current draft.
-                    A small panel of specialists will independently inspect {projectName} for contradictions, unsupported
-                    assumptions, and implementation risks. Each finding becomes a new decision you choose to act on or set aside.
-                </p>
-            </div>
-
-            <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
-                <div className="border-b border-neutral-100 px-4 py-4 sm:px-5">
-                    <h2 className="font-semibold text-neutral-900">Recommended panel</h2>
-                    <p className="mt-1 text-sm text-neutral-500">Selected for this project and its current artifacts.</p>
-                </div>
-                <div className="divide-y divide-neutral-100">
-                    {panel.map(specialist => (
-                        <label key={specialist.id} className="flex cursor-pointer items-start gap-3 px-4 py-4 hover:bg-neutral-50 sm:px-5">
-                            <input
-                                type="checkbox"
-                                checked={selected.has(specialist.id)}
-                                onChange={() => toggle(specialist.id)}
-                                disabled={readOnly}
-                                className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-500"
-                            />
-                            <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-semibold text-neutral-900">{specialist.name}</span>
-                                <span className="mt-0.5 block text-sm text-neutral-600">{specialist.responsibility}</span>
-                                <span className="mt-1 block text-xs text-neutral-400">Why selected: {specialist.selectionReason}</span>
-                            </span>
-                        </label>
-                    ))}
-                </div>
-                {omittedRecommended.length > 0 && (
-                    <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 sm:px-5">
-                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                        <span>
-                            This narrower review remains useful for exploration, but it will not satisfy build-readiness coverage.
-                            Restore {omittedRecommended.map(option => option.name).join(', ')} for a complete checkpoint challenge.
-                        </span>
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+                {/* Primary column — specialist selection */}
+                <div className="min-w-0">
+                    <div className="mb-5 flex items-start gap-3">
+                        <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700">
+                            <ShieldAlert size={20} />
+                        </div>
+                        <div className="min-w-0">
+                            <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Run an optional specialist critique</h1>
+                            <p className="mt-2 text-sm leading-6 text-neutral-600">
+                                This critique is optional — run it when you want an adversarial second opinion on the current draft.
+                                A small panel of specialists will independently inspect {projectName} for contradictions, unsupported
+                                assumptions, and implementation risks. Each finding becomes a new decision you choose to act on or set aside.
+                            </p>
+                            <CritiqueOpenItemsSuggestion count={openDecisionCount} className="mt-2" />
+                        </div>
                     </div>
-                )}
-            </section>
 
-            <section className="mt-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
-                <h2 className="font-semibold text-neutral-900">Review scope</h2>
-                <p className="mt-1 text-sm text-neutral-500">The review is pinned to the current versions of these sources.</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                    {sources.map(source => <span key={source} className="rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-700">{source}</span>)}
+                    <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
+                        <div className="flex items-center justify-between gap-3 border-b border-neutral-100 px-4 py-4 sm:px-5">
+                            <div className="min-w-0">
+                                <h2 className="font-semibold text-neutral-900">Recommended panel</h2>
+                                <p className="mt-1 text-sm text-neutral-500">Select specialists for this project and its current artifacts.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={toggleAll}
+                                disabled={readOnly || panel.length === 0}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                <Check size={15} /> {allSelected ? 'Clear all' : 'Select all'}
+                            </button>
+                        </div>
+                        <div className="divide-y divide-neutral-100">
+                            {panel.map(specialist => {
+                                const accent = SPECIALIST_ACCENTS[specialist.id] ?? DEFAULT_ACCENT;
+                                const AccentIcon = accent.icon;
+                                const focusAreas = specialist.focusAreas ?? [];
+                                const canExpand = focusAreas.length > 0;
+                                const isExpanded = expanded.has(specialist.id);
+                                return (
+                                    <div key={specialist.id} className="transition hover:bg-neutral-50/70">
+                                        <div className="flex items-start gap-3 px-4 py-3.5 sm:px-5">
+                                            <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selected.has(specialist.id)}
+                                                    onChange={() => toggle(specialist.id)}
+                                                    disabled={readOnly}
+                                                    className="mt-3.5 h-4 w-4 shrink-0 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-500"
+                                                />
+                                                <span className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white ${accent.tile}`}>
+                                                    <AccentIcon size={20} />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block text-sm font-semibold text-neutral-900">{specialist.name}</span>
+                                                    <span className="mt-0.5 block text-sm text-neutral-600">{specialist.responsibility}</span>
+                                                    <span className="mt-1 block text-xs text-neutral-400">Why selected: {specialist.selectionReason}</span>
+                                                </span>
+                                            </label>
+                                            {canExpand && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleExpanded(specialist.id)}
+                                                    aria-expanded={isExpanded}
+                                                    aria-label={`${isExpanded ? 'Hide' : 'Show'} what ${specialist.name} reviews`}
+                                                    className="mt-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600"
+                                                >
+                                                    <ChevronDown size={18} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                                </button>
+                                            )}
+                                        </div>
+                                        {canExpand && isExpanded && (
+                                            <div className="px-4 pb-4 sm:px-5">
+                                                <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3 sm:ml-[3.25rem]">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">What this specialist scrutinizes</p>
+                                                    <ul className="mt-2 space-y-1.5">
+                                                        {focusAreas.slice(0, 5).map((goal, index) => (
+                                                            <li key={index} className="flex gap-2 text-xs leading-5 text-neutral-600">
+                                                                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-neutral-400" />
+                                                                <span>{goal}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {omittedRecommended.length > 0 && (
+                            <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 sm:px-5">
+                                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                                <span>
+                                    This narrower review remains useful for exploration, but it will not satisfy build-readiness coverage.
+                                    Restore {omittedRecommended.map(option => option.name).join(', ')} for a complete checkpoint challenge.
+                                </span>
+                            </div>
+                        )}
+                    </section>
                 </div>
-                {missingSources.length > 0 && (
-                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                        <span>Coverage gap: {missingSources.join(', ')} {missingSources.length === 1 ? 'is' : 'are'} not available yet.</span>
-                    </div>
-                )}
-                <label className="mt-5 block text-sm font-medium text-neutral-800" htmlFor="review-focus">Optional focus</label>
-                <textarea
-                    id="review-focus"
-                    value={focus}
-                    onChange={e => setFocus(e.target.value)}
-                    rows={3}
-                    placeholder="For example: focus on mobile failure recovery or privacy-sensitive data flows"
-                    className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-800 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
-                />
-            </section>
 
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-neutral-500">Findings remain suggestions until you explicitly act on them.</p>
-                <button
-                    type="button"
-                    disabled={readOnly || selected.size === 0 || busy}
-                    onClick={() => void onStart({ specialistIds: [...selected], focus: focus.trim() || undefined })}
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                    {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                    {readOnly ? 'Reviews are read-only in this example' : 'Start specialist review'}
-                </button>
+                {/* Sidebar — what happens next + primary action */}
+                <aside className="lg:sticky lg:top-6">
+                    <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+                        <h2 className="font-semibold text-neutral-900">What happens next</h2>
+                        <ol className="mt-4 space-y-4">
+                            {WHAT_HAPPENS_NEXT.map((step, index) => {
+                                const StepIcon = step.icon;
+                                return (
+                                    <li key={index} className="flex gap-3">
+                                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                                            <StepIcon size={17} />
+                                        </span>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold text-neutral-900">{step.title}</p>
+                                            <p className="mt-0.5 text-xs leading-5 text-neutral-500">{step.detail}</p>
+                                        </div>
+                                    </li>
+                                );
+                            })}
+                        </ol>
+                        <button
+                            type="button"
+                            disabled={readOnly || selected.size === 0 || busy}
+                            onClick={() => void onStart({ specialistIds: [...selected], focus: undefined })}
+                            className="mt-5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                            {readOnly ? 'Reviews are read-only in this example' : 'Start specialist review'}
+                        </button>
+                        <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">
+                            <Lock size={12} className="shrink-0" /> Only you can view this critique and its findings.
+                        </p>
+                    </div>
+                </aside>
             </div>
         </div>
     );
 }
 
-function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: {
+function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis, openDecisionCount, readOnly }: {
     run: ReviewRunView;
     onCancel: () => void;
     onRetrySpecialist: (id: string) => void;
     onRetrySynthesis: () => void;
+    openDecisionCount: number;
+    readOnly?: boolean;
 }) {
     const completed = run.specialists.filter(s => s.status === 'complete').length;
     const failed = run.specialists.filter(s => s.status === 'failed').length;
@@ -409,8 +472,11 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                             </h1>
                         </div>
                         <p className="mt-2 text-sm text-neutral-500">Reviewing {run.sourceLabel}. Completed work is preserved if another specialist fails.</p>
+                        {(run.status === 'interrupted' || run.status === 'failed') && (
+                            <CritiqueOpenItemsSuggestion count={openDecisionCount} className="mt-2" />
+                        )}
                     </div>
-                    {active && <button type="button" onClick={onCancel} className="min-h-10 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel review</button>}
+                    {active && !readOnly && <button type="button" onClick={onCancel} className="min-h-10 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel review</button>}
                 </div>
 
                 <div className="mt-5 h-2 overflow-hidden rounded-full bg-neutral-100" aria-label={`${completed} of ${run.specialists.length} specialists complete`}>
@@ -433,7 +499,7 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                                     <p className="mt-1 text-xs leading-5 text-emerald-700">{specialist.coverageSummary}</p>
                                 )}
                             </div>
-                            {specialist.status === 'failed' && (
+                            {specialist.status === 'failed' && !readOnly && (
                                 <button type="button" onClick={() => onRetrySpecialist(specialist.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">
                                     <RefreshCcw size={12} /> Retry
                                 </button>
@@ -447,7 +513,7 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                         {failed} specialist{failed === 1 ? '' : 's'} failed. The review can still finish with clearly marked coverage gaps.
                     </div>
                 )}
-                {(run.status === 'interrupted' || run.status === 'failed') && (
+                {(run.status === 'interrupted' || run.status === 'failed') && !readOnly && (
                     <div className="mt-5 flex justify-end">
                         <button type="button" onClick={onRetrySynthesis} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
                             <RefreshCcw size={14} /> Resume review
@@ -734,7 +800,7 @@ function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChang
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, readOnly, critiqueLocked, initialIssueId, initialFindingId }: {
+function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, openDecisionCount, readOnly, initialIssueId, initialFindingId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
@@ -742,11 +808,8 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
     onReopenIssue: ReviewWorkspaceProps['onReopenIssue'];
     onNewReview: () => void;
     onRetryCoverage: () => void;
+    openDecisionCount: number;
     readOnly?: boolean;
-    /** When true, re-running critique work is gated behind open decisions; the
-     * findings stay fully visible and triageable, but the "review again" /
-     * "retry coverage" affordances are hidden. */
-    critiqueLocked?: boolean;
     initialIssueId?: string;
     initialFindingId?: string;
 }) {
@@ -835,7 +898,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <div className="flex-1">
                         <span>Review complete with a coverage gap: {failed} specialist{failed === 1 ? '' : 's'} did not finish. Successful findings were still validated and synthesized.</span>
-                        {!readOnly && !critiqueLocked && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
+                        {!readOnly && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
                     </div>
                 </div>
             )}
@@ -846,7 +909,8 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
                 <div className="space-y-2">
-                    {!readOnly && !critiqueLocked && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
+                    {!readOnly && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
+                    <CritiqueOpenItemsSuggestion count={openDecisionCount} />
                 <div className="grid grid-cols-3 gap-2 text-center sm:flex">
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length + untriagedFindings.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-amber-700">{blocking}</div><div className="text-[11px] text-neutral-500">Build blockers</div></div>
@@ -885,69 +949,46 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
 }
 
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
-    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? (props.critiqueUnlocked === false ? 'decisions' : 'review'));
+    const openDecisionCount = props.openDecisionCount ?? 0;
+    const normalizeTab = (tab: ReviewWorkspaceProps['initialTab']): 'review' | 'history' =>
+        tab === 'history' ? 'history' : 'review';
+    const [tab, setTab] = useState<'review' | 'history'>(() => normalizeTab(props.initialTab));
     const [lastInitialTab, setLastInitialTab] = useState(props.initialTab);
     if (props.initialTab !== lastInitialTab) {
         setLastInitialTab(props.initialTab);
-        if (props.initialTab) setTab(props.initialTab);
+        if (props.initialTab) setTab(normalizeTab(props.initialTab));
     }
     const [startingNewReview, setStartingNewReview] = useState(false);
     const activeRun = startingNewReview ? undefined : (props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0]);
     const chronologicalRuns = useMemo(() => [...props.runs].sort((a, b) => b.capturedAt - a.capturedAt), [props.runs]);
     const isInProgress = activeRun && ['running', 'synthesizing', 'validating', 'interrupted', 'failed'].includes(activeRun.status);
+    // The redesigned challenge/setup page is a single, tab-free two-column
+    // layout — but only the *fresh* first-run setup (no runs yet) drops the
+    // tabs. Once any run exists, Findings/History stay available so the run
+    // surfaces, the history list, AND the "review current plan" setup remain a
+    // click away from the prior completed run. Clicking a tab clears the
+    // start-new-review intent so it navigates back rather than staying on setup.
+    const showTabs = tab === 'history' || !!activeRun || props.runs.length > 0;
+    const openTab = (next: 'review' | 'history') => { setStartingNewReview(false); setTab(next); };
 
     return (
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
-            <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
-                <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
-                    <button type="button" aria-label={props.planningRecords.length > 0 ? `Decision Center, ${props.planningRecords.length} records` : 'Decision Center'} onClick={() => setTab('decisions')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Decisions</span><span aria-hidden="true" className="hidden sm:inline">Decision Center</span> {props.planningRecords.length > 0 && <span aria-hidden="true" className="ml-1 text-xs text-neutral-400">{props.planningRecords.length}</span>}</button>
-                    {/* Visible labels stay one naming family across breakpoints —
-                        "Decision Center" is the documented product name, and the
-                        other two tabs read identically on mobile and desktop
-                        ("Findings" / "History"). The fuller aria-label keeps the
-                        accessible name unambiguous regardless of viewport. */}
-                    <button type="button" aria-label="Review findings" onClick={() => setTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">Findings</span></button>
-                    <button type="button" aria-label="Review history" onClick={() => setTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">History</span></button>
+            {showTabs && (
+                <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
+                    <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
+                        <button type="button" aria-label="Review findings" onClick={() => openTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">Findings</span></button>
+                        <button type="button" aria-label="Review history" onClick={() => openTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true">History</span></button>
+                    </div>
                 </div>
-            </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto">
-                {tab === 'decisions' ? (
-                    <DecisionCenter
-                        records={props.planningRecords}
-                        initialSelectedId={props.initialDecisionId}
-                        readOnly={props.readOnly}
-                        onDecide={(recordId, action, value, rationale) => {
-                            if (props.onDecidePlanningRecord) {
-                                props.onDecidePlanningRecord(recordId, action, value, rationale);
-                            } else if (action === 'reopen') {
-                                props.onReopenPlanningRecord(recordId);
-                            } else if (action === 'confirm' || action === 'custom') {
-                                props.onConfirmPlanningRecord(recordId);
-                            }
-                        }}
-                        onPrepareOptions={props.onPrepareDecisionOptions}
-                        onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
-                        onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
-                        onReviewAlignmentProposal={props.onReviewAlignmentProposal}
-                        onRequestAlignmentProposal={props.onRequestAlignmentProposal}
-                        onGenerateAssumptionValidationPlan={props.onGenerateAssumptionValidationPlan}
-                        onRecordAssumptionValidationPlan={props.onRecordAssumptionValidationPlan}
-                        onAddAssumptionEvidence={props.onAddAssumptionEvidence}
-                        onCorrectAssumptionEvidence={props.onCorrectAssumptionEvidence}
-                        onRetractAssumptionEvidence={props.onRetractAssumptionEvidence}
-                        onInterpretAssumptionEvidence={props.onInterpretAssumptionEvidence}
-                        onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
-                        onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
-                        onReopenAssumptionOutcome={props.onReopenAssumptionOutcome}
-                        onContinueToExplore={props.onContinueToExplore}
-                    />
-                ) : tab === 'history' ? (
+                {tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
                         <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Review history</h1>
                         <p className="mt-1 text-sm text-neutral-500">Each review remains attached to the exact project versions it inspected.</p>
                         <div className="mt-6 space-y-3">
                             {chronologicalRuns.map(run => (
-                                <button key={run.id} type="button" onClick={() => { props.onSelectRun(run.id); setTab('review'); }} className="flex w-full items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm hover:border-neutral-300">
+                                <button key={run.id} type="button" onClick={() => { setStartingNewReview(false); props.onSelectRun(run.id); setTab('review'); }} className="flex w-full items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm hover:border-neutral-300">
                                     <History size={16} className="mt-0.5 shrink-0 text-neutral-400" />
                                     <span className="min-w-0 flex-1">
                                         <span className="block text-sm font-semibold text-neutral-900">{run.label}</span>
@@ -969,20 +1010,9 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         </div>
                     </div>
                 ) : !activeRun ? (
-                    props.critiqueUnlocked === false ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
-                    ) : (
-                        <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
-                    )
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} busy={props.busy} readOnly={props.readOnly} openDecisionCount={openDecisionCount} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
                 ) : isInProgress ? (
-                    // A stalled (interrupted/failed) run's only actions are resume/retry —
-                    // restarting critique work — so gate it behind decisions too. A live
-                    // in-flight run keeps showing progress (it was started when unlocked).
-                    props.critiqueUnlocked === false && (activeRun.status === 'interrupted' || activeRun.status === 'failed') ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
-                    ) : (
-                        <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
-                    )
+                    <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} openDecisionCount={openDecisionCount} readOnly={props.readOnly} />
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
                     <ReviewResults
                         run={activeRun}
@@ -991,16 +1021,14 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onTriageFinding={props.onTriageFinding}
                         onReopenIssue={props.onReopenIssue}
                         readOnly={props.readOnly}
-                        critiqueLocked={props.critiqueUnlocked === false}
+                        openDecisionCount={openDecisionCount}
                         initialIssueId={props.initialIssueId}
                         initialFindingId={props.initialFindingId}
                         onNewReview={() => setStartingNewReview(true)}
                         onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)}
                     />
-                ) : props.critiqueUnlocked === false ? (
-                    <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
                 ) : (
-                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} busy={props.busy} readOnly={props.readOnly} openDecisionCount={openDecisionCount} onStart={props.onStartReview} />
                 )}
             </div>
         </div>

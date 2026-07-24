@@ -237,6 +237,7 @@ export const DEPENDENCY_STATUS_LABELS: Record<DependencyNodeStatus, string> = {
     needs_update: 'Needs update',
     update_recommended: 'Update recommended',
     generating: 'Generating…',
+    needs_review: 'Needs validation review',
     error: 'Failed',
     missing: 'Not generated',
 };

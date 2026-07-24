@@ -4,7 +4,7 @@ import type { LlmTraceCall } from '../trace/traceTypes';
 
 const makeCall = (over: Partial<LlmTraceCall> & { id: string; createdAt: number }): LlmTraceCall => ({
     provider: 'gemini',
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.6-flash',
     mode: 'json',
     status: 'success',
     startedAt: over.createdAt,
@@ -56,7 +56,7 @@ describe('groupIntoSessions', () => {
 
 describe('filterTraces', () => {
     const calls = [
-        makeCall({ id: 'ok', createdAt: 1, model: 'gemini-3.5-flash', meta: { stage: 'PRD', purpose: 'Generate Features' } }),
+        makeCall({ id: 'ok', createdAt: 1, model: 'gemini-3.6-flash', meta: { stage: 'PRD', purpose: 'Generate Features' } }),
         makeCall({ id: 'err', createdAt: 2, status: 'error', error: 'boom', meta: { stage: 'Artifact' } }),
         makeCall({ id: 'retry', createdAt: 3, retryCount: 2, meta: { stage: 'PRD' } }),
     ];
@@ -77,8 +77,8 @@ describe('filterTraces', () => {
 
 describe('diffCalls', () => {
     it('marks changed and unchanged fields', () => {
-        const a = makeCall({ id: 'a', createdAt: 1, model: 'gemini-3.5-flash', promptText: 'X' });
-        const b = makeCall({ id: 'b', createdAt: 2, model: 'gemini-3.5-flash', promptText: 'Y' });
+        const a = makeCall({ id: 'a', createdAt: 1, model: 'gemini-3.6-flash', promptText: 'X' });
+        const b = makeCall({ id: 'b', createdAt: 2, model: 'gemini-3.6-flash', promptText: 'Y' });
         const rows = diffCalls(a, b);
         expect(rows.find((r) => r.field === 'Model')?.changed).toBe(false);
         expect(rows.find((r) => r.field === 'Prompt')?.changed).toBe(true);

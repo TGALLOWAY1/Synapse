@@ -1,24 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from 'react';
+import { getActionFromIntent } from './prdEditActions';
 
 interface IntentInfo {
     intent: string;
     helper: string;
 }
 
-const INTENT_PATTERNS: { prefix: string; intent: string; helper: string }[] = [
-    { prefix: 'clarify', intent: 'Clarify', helper: 'Ask for precision, fix ambiguity, or correct a specific detail tied to this text.' },
-    { prefix: 'expand', intent: 'Expand', helper: 'Add depth or options. Generate UX ideas, NB3 prompts, or elaborations.' },
-    { prefix: 'specify', intent: 'Specify', helper: 'Turn this into implementable requirements: constraints, acceptance criteria, data/API details.' },
-    { prefix: 'alternative', intent: 'Alternative', helper: 'Propose a different approach or architecture and explain tradeoffs.' },
-    { prefix: 'replace', intent: 'Replace', helper: 'Suggest a concrete change. The system will apply locally or across the document during consolidation.' },
-];
-
 export function getIntentInfo(text: string): IntentInfo | null {
-    if (!text) return null;
-    const lower = text.toLowerCase();
-    const match = INTENT_PATTERNS.find(p => lower.startsWith(p.prefix));
-    return match ? { intent: match.intent, helper: match.helper } : null;
+    // Labels and helper copy live in the PRD edit-action registry (single
+    // source of truth); this derives the hint from the intent's `"<Label>: "`
+    // prefix.
+    const action = getActionFromIntent(text);
+    return action ? { intent: action.label, helper: action.helper } : null;
 }
 
 /** Inline hint used in the selection popover */

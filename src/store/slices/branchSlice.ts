@@ -9,6 +9,9 @@ export type BranchSlice = {
     createBranch: ProjectState['createBranch'];
     addBranchMessage: ProjectState['addBranchMessage'];
     mergeBranch: ProjectState['mergeBranch'];
+    stageBranch: ProjectState['stageBranch'];
+    unstageBranch: ProjectState['unstageBranch'];
+    applyStagedBranchesToSpine: ProjectState['applyStagedBranchesToSpine'];
     deleteBranch: ProjectState['deleteBranch'];
     getBranchesForSpine: ProjectState['getBranchesForSpine'];
 };
@@ -153,6 +156,119 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                         after: "(Consolidated changes)"
                     }]
                 }
+            };
+
+            return {
+                branches: { ...state.branches, [projectId]: updatedBranches },
+                spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), mergeEvent] },
+            };
+        });
+
+        return { newSpineId };
+    },
+
+    // Stage a branch: hold a concrete replacement for later batch consolidation.
+    // The dormant 'resolved' status is now the "staged, ready to apply" state.
+    stageBranch: (projectId: string, branchId: string, proposedReplacement: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
+        set((state) => {
+            const projectBranches = state.branches[projectId] || [];
+            const updatedBranches = projectBranches.map(b =>
+                b.id === branchId
+                    ? { ...b, status: 'resolved' as const, proposedReplacement }
+                    : b
+            );
+            return { branches: { ...state.branches, [projectId]: updatedBranches } };
+        });
+    },
+
+    // Return a staged branch to the active conversation, dropping its held patch.
+    unstageBranch: (projectId: string, branchId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
+        set((state) => {
+            const projectBranches = state.branches[projectId] || [];
+            const updatedBranches = projectBranches.map(b =>
+                b.id === branchId
+                    ? { ...b, status: 'active' as const, proposedReplacement: undefined }
+                    : b
+            );
+            return { branches: { ...state.branches, [projectId]: updatedBranches } };
+        });
+    },
+
+    // Apply several staged edits as ONE new spine version. The caller has
+    // already applied each edit's patch to `finalStructuredPRD` (sequentially,
+    // via applyStagedEditsToStructuredPRD) and re-projected `finalResponseText`;
+    // this performs the atomic append + marks every applied branch 'merged' +
+    // records a single history event. All state reads happen inside set() so a
+    // concurrent mutation cannot be clobbered by a stale snapshot.
+    applyStagedBranchesToSpine: (
+        projectId: string,
+        spineVersionId: string,
+        finalStructuredPRD: StructuredPRD,
+        finalResponseText: string,
+        appliedBranchIds: string[],
+        editSummary: string,
+    ) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
+        const snapshot = get();
+        const oldSpine = (snapshot.spineVersions[projectId] || []).find(v => v.id === spineVersionId);
+        if (!oldSpine) throw new Error('Spine not found');
+
+        const now = Date.now();
+        const historyEventId = uuidv4();
+        const newSpineId = uuidv4();
+        const appliedSet = new Set(appliedBranchIds);
+
+        set((state) => {
+            const projectBranches = state.branches[projectId] || [];
+            const updatedBranches = projectBranches.map(b =>
+                appliedSet.has(b.id) ? { ...b, status: 'merged' as const } : b
+            );
+
+            const currentVersions = state.spineVersions[projectId] || [];
+            const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+            const newSpine: SpineVersion = {
+                id: newSpineId,
+                projectId,
+                promptText: oldSpine.promptText,
+                responseText: finalResponseText,
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+                // Same carry-forward rules as mergeBranch: safety review and
+                // preflight answers bind to the idea; structuredPRD/prdVersion/
+                // generationMeta keep Challenge/Build available and preserve the
+                // incomplete-PRD affordances.
+                safetyReview: oldSpine.safetyReview,
+                preflightSession: oldSpine.preflightSession,
+                structuredPRD: finalStructuredPRD,
+                prdVersion: oldSpine.prdVersion,
+                generationMeta: oldSpine.generationMeta,
+                provenance: {
+                    changeSource: 'branch_merge',
+                    editSummary,
+                },
+            };
+
+            const mergeEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: 'Consolidated',
+                description: editSummary,
+                createdAt: now,
+                diff: {
+                    matches: appliedBranchIds.map(id => {
+                        const b = projectBranches.find(x => x.id === id);
+                        return {
+                            before: b ? b.anchorText : '(edit)',
+                            after: '(Consolidated changes)',
+                        };
+                    }),
+                },
             };
 
             return {

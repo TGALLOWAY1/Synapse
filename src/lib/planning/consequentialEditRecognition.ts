@@ -89,7 +89,7 @@ const SECTION_IMPACT: Record<string, { sections: string[]; slots: ArtifactSlotKe
         slots: ['screen_inventory', 'user_flows', 'component_inventory', 'implementation_plan', 'mockup'],
     },
     features: {
-        sections: ['Features', 'Proposed First Release', 'User Loops', 'UX Pages', 'Architecture', 'Data Model', 'Success Metrics', 'Implementation Plan'],
+        sections: ['Features', 'Proposed First Release', 'User Flows', 'UX Pages', 'Architecture', 'Data Model', 'Success Metrics', 'Implementation Plan'],
         slots: ['screen_inventory', 'user_flows', 'component_inventory', 'data_model', 'implementation_plan', 'mockup'],
     },
     architecture: {
@@ -109,7 +109,7 @@ const SECTION_IMPACT: Record<string, { sections: string[]; slots: ArtifactSlotKe
         slots: ['component_inventory', 'data_model', 'implementation_plan'],
     },
     primaryActions: {
-        sections: ['Primary Actions', 'Features', 'User Loops', 'UX Pages'],
+        sections: ['Primary Actions', 'Features', 'User Flows', 'UX Pages'],
         slots: ['screen_inventory', 'user_flows', 'component_inventory', 'implementation_plan', 'mockup'],
     },
     domainEntities: {
@@ -117,7 +117,7 @@ const SECTION_IMPACT: Record<string, { sections: string[]; slots: ArtifactSlotKe
         slots: ['screen_inventory', 'user_flows', 'data_model', 'implementation_plan', 'mockup'],
     },
     mvpScope: {
-        sections: ['Proposed First Release', 'Features', 'User Loops', 'UX Pages', 'Implementation Plan'],
+        sections: ['Proposed First Release', 'Features', 'User Flows', 'UX Pages', 'Implementation Plan'],
         slots: ALL_ARTIFACT_SLOTS,
     },
     successMetrics: {
@@ -161,7 +161,7 @@ const TARGET_LOCATIONS: Partial<Record<string, PlanningLocation[]>> = {
         { kind: 'success_criterion', section: 'Success Metrics', label: 'Success metrics', jsonPath: '$.successMetrics' },
     ],
     features: [
-        { kind: 'flow_step', section: 'User Loops', label: 'Core user loops', jsonPath: '$.userLoops' },
+        { kind: 'flow_step', section: 'User Flows', label: 'Core user flows', jsonPath: '$.userLoops' },
         { kind: 'flow_step', section: 'UX Pages', label: 'User experience', jsonPath: '$.uxPages' },
         { kind: 'claim', section: 'Architecture', label: 'Architecture approach', jsonPath: '$.architecture' },
         { kind: 'data_expectation', section: 'Data Model', label: 'Product data model', jsonPath: '$.richDataModel' },
@@ -188,7 +188,7 @@ const TARGET_LOCATIONS: Partial<Record<string, PlanningLocation[]>> = {
     ],
     primaryActions: [
         { kind: 'feature', section: 'Features', label: 'Feature set', jsonPath: '$.features' },
-        { kind: 'flow_step', section: 'User Loops', label: 'Core user loops', jsonPath: '$.userLoops' },
+        { kind: 'flow_step', section: 'User Flows', label: 'Core user flows', jsonPath: '$.userLoops' },
         { kind: 'flow_step', section: 'UX Pages', label: 'User experience', jsonPath: '$.uxPages' },
     ],
     domainEntities: [
@@ -198,7 +198,7 @@ const TARGET_LOCATIONS: Partial<Record<string, PlanningLocation[]>> = {
     ],
     mvpScope: [
         { kind: 'feature', section: 'Features', label: 'Feature tiers', jsonPath: '$.features' },
-        { kind: 'flow_step', section: 'User Loops', label: 'Core user loops', jsonPath: '$.userLoops' },
+        { kind: 'flow_step', section: 'User Flows', label: 'Core user flows', jsonPath: '$.userLoops' },
         { kind: 'flow_step', section: 'UX Pages', label: 'User experience', jsonPath: '$.uxPages' },
         { kind: 'scope', section: 'Implementation Plan', label: 'Implementation sequence', jsonPath: '$.implementationPlan' },
     ],

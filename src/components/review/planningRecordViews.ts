@@ -1,4 +1,5 @@
 import type { PlanningRecord, SpineVersion } from '../../types';
+import { derivePlanningRecordPresentation } from '../../lib/planning/planningRecordGrouping';
 import {
     alignmentProposalReviews,
     isDecisionImpactStale,
@@ -9,6 +10,7 @@ import {
     assumptionValidationReadiness,
     planningContentHash,
     projectAssumptionValidation,
+    recommendationBatchCandidate,
 } from '../../lib/planning';
 import type { PlanningRecordView } from './ReviewWorkspace';
 
@@ -23,6 +25,17 @@ export const buildPlanningRecordViews = (params: {
     optionSuggestions?: Record<string, { busy: boolean; error?: string }>;
 }): PlanningRecordView[] => {
     const { planningRecords, latestSpine, alignmentAnalysis, optionSuggestions } = params;
+    const presentationGroupByRecordId = new Map(
+        derivePlanningRecordPresentation(planningRecords).flatMap(entry => (
+            entry.kind === 'group'
+                ? entry.recordIds.map(recordId => [recordId, {
+                    key: entry.key,
+                    kind: entry.groupKind,
+                    label: entry.label,
+                }] as const)
+                : []
+        )),
+    );
     return planningRecords.map(record => {
         const projection = projectDecision(record);
         const validationProjection = record.type === 'assumption' ? projectAssumptionValidation(record) : undefined;
@@ -74,6 +87,7 @@ export const buildPlanningRecordViews = (params: {
             options: record.decisionOptions,
             optionsSuggestion: optionSuggestions?.[record.id],
             recommendation: record.recommendationDetail ?? (record.recommendation ? { summary: record.recommendation } : undefined),
+            batchRecommendation: recommendationBatchCandidate(record, latestSpine?.id),
             resolution: option?.label ?? projection.answer,
             rationale: projection.rationale,
             sourceLabels: (record.sources ?? []).map(source => source.sourceType === 'prd_assumption'
@@ -84,6 +98,7 @@ export const buildPlanningRecordViews = (params: {
                 : record.sourceState === 'missing'
                     ? 'The source assumption is no longer present in the current PRD. Review whether this decision is still valid.'
                     : undefined,
+            presentationGroup: presentationGroupByRecordId.get(record.id),
             sourceIssueIds: record.sourceReviewIssueId ? [record.sourceReviewIssueId] : [],
             createdAt: record.createdAt,
             history: (record.events ?? []).map(event => ({

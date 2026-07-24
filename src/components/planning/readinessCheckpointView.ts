@@ -91,10 +91,20 @@ function commitmentView(
     const commit = useActive ? state.activeCommit : state.latestCommit;
     if (!commit) return undefined;
     const acceptedCount = state.authorization?.acceptedConcernIds.length ?? 0;
+    const acceptedHardBlockerCount = state.authorization?.eventSchemaVersion === 2
+        ? state.authorization.acceptedBlockingRecordIds?.length ?? 0
+        : undefined;
     return {
-        // Advisory concerns can remain on a review that is categorically ready.
-        // They do not turn a ready user commitment into an override.
-        kind: review.conclusion === 'ready_to_build' ? 'ready' : 'with_open_questions',
+        // V2 finalization authority distinguishes explicit materiality blockers
+        // from broader analytical readiness warnings. Historical v1 events
+        // retain the conclusion policy under which they were recorded.
+        kind: state.authorization?.eventSchemaVersion === 2
+            ? acceptedHardBlockerCount
+                ? 'with_open_questions'
+                : 'ready'
+            : review.conclusion === 'ready_to_build'
+                ? 'ready'
+                : 'with_open_questions',
         committedAt: commit.at,
         rationale: state.authorization?.rationale,
         containment: state.authorization?.containmentPlan,
@@ -109,9 +119,15 @@ export function buildReadinessCheckpointView(
     events: ReadinessCommitmentEvent[],
     versionLabel: string,
     comparisonSummary?: string[],
+    hardBlockingRecordIds: readonly string[] = [],
 ): ReadinessCheckpointView {
     const commitmentState = deriveReadinessCommitmentState(review, events);
     const integrityValid = currentness.integrityValid;
+    const hardBlockingIds = new Set(hardBlockingRecordIds);
+    // The checkpoint authority is the exact materiality snapshot, even if a
+    // legacy or partially projected readiness review omitted one of those
+    // records from its broader analytical concern list.
+    const hardBlockerCount = hardBlockingIds.size;
     return {
         id: review.id,
         versionLabel,
@@ -128,6 +144,8 @@ export function buildReadinessCheckpointView(
                 detail: criterion?.explanation ?? concern.consequence,
                 consequence: concern.consequence,
                 severity: concern.blocking ? 'blocker' as const : 'attention' as const,
+                hardBlocking: concern.actionTarget.kind === 'planning_record'
+                    && hardBlockingIds.has(concern.actionTarget.planningRecordId),
                 actionLabel: readinessActionLabel(concern.actionTarget),
             };
         }),
@@ -144,6 +162,7 @@ export function buildReadinessCheckpointView(
             })),
         })),
         caveats: review.caveats,
+        hardBlockerCount,
         // Never project a commitment as authoritative when the review it was
         // bound to fails integrity validation.
         commitment: integrityValid ? commitmentView(review, commitmentState, true) : undefined,

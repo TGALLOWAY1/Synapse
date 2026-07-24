@@ -27,7 +27,16 @@ describe('revertArtifactToVersion', () => {
         const { artifactId } = store.createArtifact(projectId, 'core_artifact', 'Screen Inventory', 'screen_inventory');
 
         const { versionId: v1Id } = store.createArtifactVersion(
-            projectId, artifactId, 'v1 content', { k: 1 }, spineRef(spineId), 'prompt-1',
+            projectId,
+            artifactId,
+            'v1 content',
+            {
+                k: 1,
+                validationBlockers: ['legacy blocker'],
+                validationAcceptance: { actor: 'user' },
+            },
+            spineRef(spineId),
+            'prompt-1',
         );
         store.createArtifactVersion(
             projectId, artifactId, 'v2 content', { k: 2 }, spineRef(spineId), 'prompt-2',
@@ -43,7 +52,10 @@ describe('revertArtifactToVersion', () => {
         const reverted = versions.find(v => v.id === revertId)!;
         expect(reverted.versionNumber).toBe(3);
         expect(reverted.content).toBe('v1 content');
-        expect(reverted.metadata).toEqual({ k: 1 });
+        expect(reverted.metadata).toEqual({
+            k: 1,
+            validationBlockers: ['legacy blocker'],
+        });
         expect(reverted.generationPrompt).toBe('prompt-1');
         expect(reverted.sourceRefs).toEqual(spineRef(spineId));
         expect(reverted.isPreferred).toBe(true);

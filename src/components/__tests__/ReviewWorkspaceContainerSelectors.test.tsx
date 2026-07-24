@@ -5,8 +5,12 @@ import { useProjectStore } from '../../store/projectStore';
 import { ReviewWorkspaceContainer } from '../review/ReviewWorkspaceContainer';
 
 vi.mock('../review/ReviewWorkspace', () => ({
-    ReviewWorkspace: ({ projectName, onReopenAssumptionOutcome }: { projectName: string; onReopenAssumptionOutcome?: (recordId: string, reason: string) => void }) => (
-        <div data-testid="review-workspace" data-reopen-handler={typeof onReopenAssumptionOutcome}>{projectName}</div>
+    ReviewWorkspace: ({ projectName }: {
+        projectName: string;
+    }) => (
+        <div data-testid="review-workspace">
+            {projectName}
+        </div>
     ),
 }));
 
@@ -71,9 +75,8 @@ describe('ReviewWorkspaceContainer project collection selectors', () => {
             spineVersions: { [PROJECT_ID]: [spine] },
         });
 
-        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} critiqueUnlocked />)).not.toThrow();
+        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} />)).not.toThrow();
         expect(screen.getByTestId('review-workspace')).toHaveTextContent('Signal Notes');
-        expect(screen.getByTestId('review-workspace')).toHaveAttribute('data-reopen-handler', 'function');
     });
 
     it('mounts a real structured project when review collections are seeded', () => {
@@ -89,7 +92,7 @@ describe('ReviewWorkspaceContainer project collection selectors', () => {
             planningRecords: { [PROJECT_ID]: [] },
         });
 
-        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} critiqueUnlocked />)).not.toThrow();
+        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} />)).not.toThrow();
         expect(screen.getByTestId('review-workspace')).toHaveTextContent('Signal Notes');
     });
 });
