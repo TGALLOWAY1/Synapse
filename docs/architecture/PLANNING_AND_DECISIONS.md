@@ -10,8 +10,13 @@ existing persisted stage keys: Plan and Challenge both belong to Refine,
 Finalize is the readiness checkpoint, and project history opens as a panel.
 The **Decision Center is a universal slide-over** that preserves the originating
 surface and exact return context; it is also available from the workspace
-overflow menu. The Refine review surface contains **Findings → History**.
-The specialist critique (the Findings tab) is **optional and never
+overflow menu. The Refine review surface opens on a **tab-free specialist
+critique setup page** — a two-column layout pairing the recommended specialist
+panel (colored per-challenger accents, Select all, per-row expandable focus
+areas) with a **What happens next** sidebar and the primary action. The
+**Findings → History** tabs are retained on the run surfaces (progress,
+results, and the history list) so any completed run stays reachable; only the
+fresh setup page omits them. The specialist critique is **optional and never
 decision-count gated**. Starting a new run, resuming an interrupted/failed run,
 retrying partial coverage, and reviewing again remain available while decisions
 are open. Those surfaces show one quiet advisory — “N open items; critiquing now
