@@ -72,7 +72,7 @@ npm run e2e:smoke            # no key: boot + form + start-dialog only
 - The default live run walks the **whole arc**: idea → PRD → commit through
   the readiness gate → asset bundle → the full view/tab inventory (PRD
   Overview+Features, Challenge surface findings/history + Decision Center slide-over, every
-  artifact including Implementation Plan's five section tabs, Screens
+  artifact including Implementation Plan's four section tabs, Screens
   list→detail Overview/Flow/Mockups, per-flow User Flows shots, History) →
   `state.json` export. Screenshots are **full-height** (the harness grows
   the viewport past the app's internal scroll panes). Pass
