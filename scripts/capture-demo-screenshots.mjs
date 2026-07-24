@@ -128,7 +128,6 @@ const ARTIFACTS = [
                 { slug: 'build-brief', label: 'Build Brief' },
                 { slug: 'roadmap', label: 'Roadmap' },
                 { slug: 'prompts', label: 'Prompts' },
-                { slug: 'validation', label: 'Validation' },
                 { slug: 'coverage', label: 'Coverage' },
             ],
         },

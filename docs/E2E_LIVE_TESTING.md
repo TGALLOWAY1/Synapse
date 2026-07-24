@@ -78,7 +78,7 @@ still clip.
      (plus up to 3 per-flow shots via the `Flow navigation` landmark);
      Screens (list, then the first screen's detail **Overview / Flow /
      Mockups** tabs); Data Model; Implementation Plan (**Build Brief /
-     Roadmap / Prompts / Validation / Coverage** section tabs); Dependency
+     Roadmap / Prompts / Coverage** section tabs); Dependency
      Graph.
    - The **Project history** slide-over panel (overflow menu entry — history
      is no longer a pipeline stage).
@@ -275,7 +275,7 @@ update the script in the same change (treat drift here like docs drift):
   `User Flows`, `Screens`, `Data Model`, `Implementation Plan`,
   `Dependency Graph`); on mobile via the `Open artifact list` drawer button.
 - In-artifact navigation: the `Implementation plan sections` nav with labels
-  `Build Brief` / `Roadmap` / `Prompts` / `Validation` / `Coverage`
+  `Build Brief` / `Roadmap` / `Prompts` / `Coverage`
   (`ConsolidatedPlanView.tsx` — `capture-demo-screenshots.mjs` shares these),
   the `Screen detail sections` tablist (`Overview` / `Flow` / `Mockups`) +
   screen cards (`main button:has(h4)`) + the `All screens` back button
