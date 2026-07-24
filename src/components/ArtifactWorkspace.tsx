@@ -44,6 +44,8 @@ import {
 import { hasOpenAIKey } from '../lib/openaiClient';
 import { useMockupImageStore } from '../store/mockupImageStore';
 import { isMockupApproved } from '../lib/mockupApproval';
+import { effectiveImageVersionId } from '../lib/artifactImageVersion';
+import { pickOverlayKeys } from '../lib/artifactOverlays';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
 import {
     buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
@@ -320,7 +322,7 @@ export function ArtifactWorkspace({
     const isMobile = useIsMobile();
     const {
         getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
-        updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
+        updateArtifactOverlay, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
         acceptArtifactValidationIssue,
     } = useProjectStore();
@@ -608,7 +610,12 @@ export function ArtifactWorkspace({
     // per-variant image store), keyed by screenId → variantId → coverage. Loaded
     // lazily; feeds both the artifact-level rollup and the per-screen cards so
     // they reflect real generated variants, not just derived recommendations.
-    const mockupVersionId = mockupPreferred?.id;
+    // Image records are addressed by the version that owns them, which is NOT
+    // always the preferred version: restore, "mark up to date" and overlay
+    // edits append content-identical clones that inherit the source's images.
+    // Resolving here fixes every image read in this component at once —
+    // presence badges, variant loading, and the mockupHasImages gate below.
+    const mockupVersionId = mockupPreferred ? effectiveImageVersionId(mockupPreferred) : undefined;
     const loadVariantImagesForVersion = useMockupVariantImageStore(s => s.loadForVersion);
     const variantImagesMap = useMockupVariantImageStore(s => s.images);
     useEffect(() => {
@@ -747,7 +754,10 @@ export function ArtifactWorkspace({
         if (!capabilities.canEditArtifacts) return;
         if (!mockupArtifact || !mockupPreferred) return;
         const links = { ...readScreenLinks(mockupPreferred.metadata), [mockupScreenId]: screenId };
-        updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, { screenLinks: links });
+        const screenName = screenIndex.byId.get(screenId)?.baseScreen.name ?? screenId;
+        updateArtifactOverlay(projectId, mockupArtifact.id, { screenLinks: links }, {
+            historyDescription: `Mockup screen relinked to ${screenName}`,
+        });
     };
 
     // Repair: hide a warning (current behavior is kept — nothing else changes).
@@ -756,9 +766,9 @@ export function ArtifactWorkspace({
         if (!invArtifact || !invPreferred) return;
         const dismissed = new Set(readDismissedScreenIssues(invPreferred.metadata));
         dismissed.add(issueKey);
-        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, {
+        updateArtifactOverlay(projectId, invArtifact.id, {
             dismissedScreenIssues: Array.from(dismissed),
-        });
+        }, { historyDescription: 'Screen issue dismissed' });
     };
 
     // Persist (or clear, with null) one screen's metadata edit overlay.
@@ -769,7 +779,10 @@ export function ArtifactWorkspace({
         const next: Record<string, ScreenMetadataEdit> = { ...current };
         if (edit) next[screenId] = edit;
         else delete next[screenId];
-        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next }, {
+        // Clearing an edit ("reset to generated") drops hand-authored work, so
+        // the overlay writer appends rather than amends — the prior edit stays
+        // restorable from version history.
+        updateArtifactOverlay(projectId, invArtifact.id, { screenEdits: next }, {
             historyDescription: edit
                 ? `Screen details edited: ${edit.name ?? screenId}`
                 : `Screen details reset to generated: ${screenId}`,
@@ -795,8 +808,10 @@ export function ArtifactWorkspace({
             appended.push(mockup);
         }
         if (appended.length > 0) {
-            updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, {
-                extraScreens: existing,
+            updateArtifactOverlay(projectId, mockupArtifact.id, { extraScreens: existing }, {
+                historyDescription: appended.length === 1
+                    ? `Added ${appended[0].name} to mockups`
+                    : `Added ${appended.length} screens to mockups`,
             });
         }
         return appended;
@@ -843,7 +858,7 @@ export function ArtifactWorkspace({
         ? {
             projectId,
             artifactId: invArtifact.id,
-            artifactVersionId: invPreferred.id,
+            artifactVersionId: effectiveImageVersionId(invPreferred),
             productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
             productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
             designTokens,
@@ -868,7 +883,7 @@ export function ArtifactWorkspace({
         ? {
             projectId,
             artifactId: mockupArtifact.id,
-            versionId: mockupPreferred.id,
+            versionId: effectiveImageVersionId(mockupPreferred),
             payload: mockupPayload,
             settings: extractMockupSettings(mockupPreferred),
             versionNumber: mockupPreferred.versionNumber,
@@ -1717,15 +1732,19 @@ export function ArtifactWorkspace({
             // keyed `${versionId}:…`) and user-uploaded (screenUploadImagesMap, keyed
             // by the mockup version id). A version with either already-present set
             // renders straight through instead of re-gating on flow approval.
+            // Resolved through the image-source pointer: a restored or
+            // marked-current clone inherits the source's images, and reading its
+            // own id would report "no images" while the approval overlay copied
+            // forward — hiding the gate on an apparently empty mockup.
+            const preferredImageVersionId = effectiveImageVersionId(preferred);
             const mockupHasImages =
-                Object.keys(mockupImagesMap).some(k => k.startsWith(`${preferred.id}:`)) ||
-                Object.values(screenUploadImagesMap).some(r => r.artifactVersionId === preferred.id);
+                Object.keys(mockupImagesMap).some(k => k.startsWith(`${preferredImageVersionId}:`)) ||
+                Object.values(screenUploadImagesMap).some(r => r.artifactVersionId === preferredImageVersionId);
             const showApprovalGate = capabilities.canGenerateArtifacts && !mockupApproved && !mockupHasImages;
             const handleApproveMockupFlows = (selectedScreenIds: string[]) => {
-                updateArtifactVersionMetadata(
+                updateArtifactOverlay(
                     projectId,
                     mockup.id,
-                    preferred.id,
                     {
                         mockupApproval: {
                             approvedAt: Date.now(),
@@ -1746,7 +1765,10 @@ export function ArtifactWorkspace({
                     void imageStore.generate({
                         projectId,
                         artifactId: mockup.id,
-                        versionId: preferred.id,
+                        // Write to the image-owning version so the approval's
+                        // renders stay reachable from the clone this approval
+                        // just appended (and from any later clone of it).
+                        versionId: preferredImageVersionId,
                         screen,
                         payload,
                         settings,
@@ -1817,7 +1839,7 @@ export function ArtifactWorkspace({
                                 versionNumber={preferred.versionNumber}
                                 createdAt={preferred.createdAt}
                                 sourceSpineVersionId={preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
-                                versionId={preferred.id}
+                                versionId={effectiveImageVersionId(preferred)}
                                 projectId={projectId}
                                 artifactId={mockup.id}
                             />
@@ -1871,11 +1893,14 @@ export function ArtifactWorkspace({
         const handleConvertToTasks = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? () => setTasksModalSource({ artifactId: artifact.id, content: preferred.content })
             : undefined;
-        // Progress is per-version plumbing (like relink/dismiss), not a
-        // content edit — no history event.
+        // Plan progress is user-authored work like any other overlay: ticking
+        // tasks coalesces into one version, while clearing progress appends so
+        // it stays recoverable.
         const handleUpdatePlanProgress = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? (next: unknown) => {
-                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { planProgress: next });
+                updateArtifactOverlay(projectId, artifact.id, { planProgress: next }, {
+                    historyDescription: 'Implementation plan progress updated',
+                });
             }
             : undefined;
         const planSourceVersions = subtype === 'implementation_plan'
@@ -2337,8 +2362,11 @@ export function ArtifactWorkspace({
                             before: versions.find(v => v.id === id)?.content ?? '',
                             after: preferred?.content ?? '',
                         })}
+                        hasCurrentOverlayEdits={
+                            Object.keys(pickOverlayKeys(preferred?.metadata)).length > 0
+                        }
                         onRestore={capabilities.canEditArtifacts
-                            ? (id) => revertArtifactToVersion(projectId, artifactId, id)
+                            ? (id, opts) => revertArtifactToVersion(projectId, artifactId, id, opts)
                             : undefined}
                         onClose={() => setVersionHistoryArtifactId(null)}
                     />

@@ -325,7 +325,25 @@ export interface ProjectState {
     // Versioning: restore a historical artifact version by appending a cloned
     // ArtifactVersion (increments versionNumber, becomes preferred) rather than
     // only re-pointing isPreferred — keeps the audit log honest.
-    revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => { versionId: string };
+    // `restoreOverlays` opts into taking the RESTORED version's user overlays
+    // too. Default (omitted) keeps the current version's overlays — screen
+    // edits, sign-offs and plan progress made since are newer work that the
+    // content restore should not silently discard.
+    revertArtifactToVersion: (
+        projectId: string,
+        artifactId: string,
+        sourceVersionId: string,
+        opts?: { restoreOverlays?: boolean },
+    ) => { versionId: string };
+    // The single write path for user-authored overlays; appends or amends a
+    // version so the edit is recoverable. Returns undefined when the artifact
+    // has no preferred version.
+    updateArtifactOverlay: (
+        projectId: string,
+        artifactId: string,
+        patch: Record<string, unknown>,
+        opts: { historyDescription: string; editSummary?: string },
+    ) => { versionId: string | undefined };
     // Versioning: user asserts the preferred version is still current for a
     // newer spine — appends a cloned version whose sourceRefs are rebased onto
     // the given spine version and each dependency's current preferred version.

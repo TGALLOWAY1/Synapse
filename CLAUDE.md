@@ -317,11 +317,22 @@ rationale and detail.
     revert/restore always **appends** a new version — history is never mutated
     or deleted. Never parse a version number out of an id; labels derive from
     array position. → VERSIONING_AND_EXPORT.md, STATE_AND_AUTH.md
-12. **User edits are overlays:** screen/prompt/plan-progress edits live in
-    `ArtifactVersion.metadata` overlays (`screenEdits`, `promptEdits`,
-    `planProgress`, `extraScreens`), never rewrites of `content`; overlay
-    writers must merge from the existing edit so unknown keys survive.
-    → SCREENS_EXPERIENCE.md
+12. **User edits are overlays, and overlays are versioned:** screen/plan/
+    approval edits live in `ArtifactVersion.metadata` overlays (key list in
+    `src/lib/artifactOverlays.ts`), never rewrites of `content`; overlay
+    writers must merge from the existing edit so unknown keys survive. Every
+    user overlay write goes through **`updateArtifactOverlay`** (append-or-
+    amend + an `Edited` event) — never `updateArtifactVersionMetadata`, which
+    is for system metadata only and mutates in place. A patch that overwrites
+    or removes existing user work always appends.
+    → VERSIONING_AND_EXPORT.md, SCREENS_EXPERIENCE.md
+12b. **Image reads resolve the version pointer:** mockup/upload/variant images
+    are keyed by artifact version id, and restore / mark-current / overlay
+    edits append content-identical clones under a new id. Every image key or
+    prefix must be built from `effectiveImageVersionId(version)`
+    (`src/lib/artifactImageVersion.ts`), and every clone-appending action must
+    stamp `metadata.imageSourceVersionId` — otherwise the clone renders
+    image-less while the bytes still exist. → VERSIONING_AND_EXPORT.md
 13. **User authority over planning is append-only:** `PlanningRecord` is the
     single durable aggregate for decisions/assumptions/risks — do not add a
     parallel decision collection. Verdict events in `DecisionEvent[]` are

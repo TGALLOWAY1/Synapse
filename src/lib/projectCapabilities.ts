@@ -118,7 +118,7 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'createArtifact', 'updateArtifact',
     'deleteArtifact', 'createArtifactVersion', 'revertArtifactToVersion', 'markArtifactCurrentForSpine',
     'acceptArtifactValidationIssue',
-    'setPreferredVersion', 'updateArtifactVersionMetadata',
+    'setPreferredVersion', 'updateArtifactVersionMetadata', 'updateArtifactOverlay',
     'updateFeedbackStatus', 'saveTasks', 'setTaskStatus', 'removeProjectTask', 'recordTaskExports',
     'createReviewRun', 'updateReviewRun', 'createSpecialistRun', 'updateSpecialistRun',
     'addReviewFinding', 'addReviewIssue', 'applyReviewIssueDisposition', 'reopenReviewIssue',
