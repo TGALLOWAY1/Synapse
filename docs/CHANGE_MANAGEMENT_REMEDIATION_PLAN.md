@@ -86,7 +86,7 @@ that needs to break one of these is mis-designed — redesign the phase.
 ```
 Phase 0  Guardrails + ledger          (no behavior change)
    |
-   +--> Phase 1  Reconciliation vocabulary + honest labels   [CM-7, CM-8]
+   +--> Phase 1  Reconciliation vocabulary + honest labels   [narrows CM-7, CM-8]
    |        |
    |        v
    +--> Phase 2  Dependency registry + mandatory coverage    [CM-1]  <- Critical
@@ -169,7 +169,7 @@ committed.
 
 **Goal:** stop the two places where the product's own copy overstates what the
 user did.
-**Closes:** CM-7, CM-8.
+**Narrows:** CM-7, CM-8. **Closes:** neither — see "Why narrowed, not closed" below.
 **Effort:** 1–2 weeks.
 
 **Scope**
@@ -202,9 +202,24 @@ user did.
    that routes through the existing finalize path rather than inheriting
    approval implicitly.
 
-**Explicitly not closed:** neither change proves semantic consistency — that is
-Phase 2's coverage work and Phase 3's baseline. Phase 1 only guarantees the copy
-matches the evidence.
+**Why narrowed, not closed**
+
+Both findings' recommended changes reach past what Phase 1 can build, and the
+§5 ledger rule applies to this program's own claims first:
+
+- **CM-8** asks for a disposition and rationale *tied to the specific change
+  set*. Phase 1 can only tie them to a spine version, which identifies the
+  content reviewed but not the proposal that motivated the review. CM-8 closes
+  in **Phase 3**, when `reconciliation.changeSetId` becomes recordable.
+- **CM-7** asks for a reapproval flow *with impact review*. Phase 1 delivers the
+  honest label and a deliberate reapproval affordance; the impact review it
+  should carry does not exist until Phase 2's coverage projection. CM-7 closes
+  in **Phase 2c**, when reapproval can show unresolved coverage before the user
+  re-approves.
+
+Neither change proves semantic consistency. Phase 1 only guarantees the copy
+matches the evidence — which is worth shipping alone, because today's copy does
+not.
 
 **Tests:** reconciliation vocabulary unit tests; store tests for the new
 provenance on both actions; legacy-record tests (no reconciliation field →
@@ -222,7 +237,8 @@ user-visible copy change — review per the README rule.
 
 **Goal:** make "reviewed" mean "every required dependency category has a
 disposition", not "the four supported slots that happened to bind".
-**Closes:** CM-1 (Critical).
+**Closes:** CM-1 (Critical) at 2c; CM-7 at 2c, once reapproval can show
+unresolved coverage.
 **Effort:** 4–8 weeks. Ship as 2a → 2b → 2c.
 
 **Phase 2a — the registry and `unknown` items (2–3 weeks)**
@@ -234,13 +250,37 @@ disposition", not "the four supported slots that happened to bind".
    metrics. Each entry declares its detection source (artifact slot, PRD
    section, or *none yet*) and whether detection is `structural`, `lexical`, or
    `absent`.
-2. Replace the two silent `continue` statements in
-   `downstreamUpdatePlanGeneration.ts` with `unknown — review required` items.
+2. Replace the silent `continue` statements in `deriveDownstreamUpdatePlans`
+   with `unknown — review required` items. There are four, not two: no bound
+   regions (:636), `isLikelyUnaffected` suppression (:632), an `aligned`
+   alignment state (:601), and a missing preferred version (:604). Each needs a
+   decision — emit an item or record deliberate, commented negative scope.
    `isLikelyUnaffected` is demoted from a suppression boundary to a **certainty
    downgrade**: it may mark an item `possible`, never remove it.
-3. Extend `DownstreamUpdateRegion`'s `artifact_review` fallback with a
-   `category_unmapped` reason so a required category with no artifact still
-   produces a review item.
+3. **A project-level container for unmapped categories.** A required category
+   with no artifact — analytics/success metrics, API contracts, testing
+   obligations — cannot be represented as a `DownstreamUpdatePlan` item, because
+   `deriveDownstreamUpdatePlans` iterates existing artifacts (:599) and every
+   plan requires a `DownstreamUpdatePlanArtifactBinding`. A region kind alone
+   cannot fix this. Phase 2a therefore adds:
+   - a **derived** project-scoped coverage projection (no persistence — it is
+     recomputed from spine, planning records, and artifacts, per invariant 4);
+   - one **new sealed, append-only collection**,
+     `coverageDispositionEvents` — project- and category-scoped, not artifact-
+     bound — holding the user's disposition and rationale for a category the
+     artifact-bound plan machinery cannot reach. Sealed with `hashReviewValue`,
+     `actor: 'user'`, keyed by spine version + planning context hash.
+
+   This is the one place Phase 2 persists new state, so invariant 5 applies in
+   full: `ALL_PROJECT_COLLECTIONS`, snapshot collect/restore +
+   `namespaceSnapshotForRestore`, project sync, demo cleanup, and
+   `PERSISTENT_STORE_ACTIONS`. Phase 3 then adds an **optional**
+   `changeSetId` to these events rather than migrating them — pre-Phase-3
+   dispositions stay readable and display as ungrouped.
+
+   The alternative — pulling the Change Set model forward from Phase 3 — was
+   rejected: it would make the Critical finding wait on a 4–6 week data-model
+   phase, and §3's rationale is that coverage honesty ships first.
 
 **Phase 2b — coverage projection and surface (1–2 weeks)**
 
@@ -281,7 +321,9 @@ WORKSPACE_AND_ARTIFACTS.md (coverage surface).
 ### Phase 3 — Approved baseline and the Change Set object
 
 **Goal:** one answerable authority question.
-**Closes:** CM-2. **Depends on:** Phase 1 (vocabulary), Phase 2 (coverage).
+**Closes:** CM-2; CM-8, once `reconciliation.changeSetId` ties a review
+disposition to the proposal it reviewed.
+**Depends on:** Phase 1 (vocabulary), Phase 2 (coverage).
 **Effort:** 4–6 weeks.
 
 **Scope**
@@ -430,16 +472,21 @@ unrelated screen edits; image continuity through the clone.
 Update the row in the **same commit** that lands the work. A phase is not done
 while its rows say otherwise.
 
-| ID | Severity | Phase | Status | Closed by |
-|---|---|---|---|---|
-| CM-1 | Critical | 2 | Not started | — |
-| CM-2 | High | 3 | Not started | — |
-| CM-3 | High | 6 | Not started | — |
-| CM-4 | Medium | 7 | Not started | — |
-| CM-5 | High | 4 | Not started | — |
-| CM-6 | Medium | 5 | Not started | — |
-| CM-7 | Medium | 1 | Not started | — |
-| CM-8 | Medium | 1 | Not started | — |
+| ID | Severity | Narrowed by | Closed by phase | Status | Closed by |
+|---|---|---|---|---|---|
+| CM-1 | Critical | 2a | 2c | Not started | — |
+| CM-2 | High | — | 3 | Not started | — |
+| CM-3 | High | — | 6 | Not started | — |
+| CM-4 | Medium | PR #326 | 7 | Not started | — |
+| CM-5 | High | 2a | 4 | Not started | — |
+| CM-6 | Medium | — | 5 | Not started | — |
+| CM-7 | Medium | 1 | 2c | Not started | — |
+| CM-8 | Medium | 1 | 3 | Not started | — |
+
+"Narrowed by" and "Closed by phase" are the *planned* phases; "Status" and
+"Closed by" record what actually happened. A finding whose recommended change
+spans phases is narrowed first and closed later — the two columns exist so that
+distinction cannot be lost by a phase claiming more than it shipped.
 
 Status values: `Not started` · `In progress` · `Narrowed` · `Closed`.
 Use **Narrowed** (not Closed) when a phase reduces severity without meeting the
