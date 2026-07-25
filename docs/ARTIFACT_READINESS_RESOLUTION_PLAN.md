@@ -124,9 +124,20 @@ decision in the pipeline comment so the next reader does not "optimize" it back 
 (+ snapshot), `src/lib/services/implementationPlanAdapter.ts` (provenance source ref),
 `src/lib/__tests__/coreArtifactPipeline.test.ts` (depth assertion + rationale).
 
-**Exit criteria.** Plan provenance lists a `user_flows` source version; a stale/missing
-`user_flows` marks the plan stale via the existing freshness engine; plan prompt context
-includes flow steps; depth test documents the accepted 3-layer pipeline.
+**A missing dependency is not a stale one.** `evaluateDependencyGraph` short-circuits when the
+upstream snapshot is absent — `if (!depSnapshot) continue; // dep missing — nothing concrete to
+compare` (`src/lib/artifactDependencyGraph.ts:487`). A *changed* `user_flows` therefore marks
+the plan `needs_update`, but a **missing or errored** one leaves the plan `up_to_date` and
+records the problem only in `impactedBy`, via the propagation loop at `:566-589` (whose
+`troubled()` predicate does include `missing` and `error`). So `isStaleStatus(plan.status)`
+alone will not catch it. W2 and W6 must read **`impactedBy`** alongside status. Do not "fix"
+this by changing the freshness engine's status semantics — one engine, one vocabulary (rule 9),
+and `up_to_date` for an uncomparable dependency is deliberate.
+
+**Exit criteria.** Plan provenance lists a `user_flows` source version; a **changed**
+`user_flows` marks the plan stale via the existing freshness engine; a **missing or errored**
+`user_flows` surfaces through `impactedBy` and is a W6 blocker; plan prompt context includes
+flow steps; depth test documents the accepted 3-layer pipeline.
 
 **Docs.** `docs/architecture/WORKSPACE_AND_ARTIFACTS.md`, `docs/ARTIFACT_DEPENDENCY_GRAPH.md`.
 
@@ -141,9 +152,21 @@ string `"api endpoint"` appears at all (`src/lib/artifactBlockingValidation.ts:7
 endpoint can pass every check while saying nothing implementable.
 
 **Design.**
-1. **Schema.** Extend `ParsedApiEndpoint` with optional fields: `auth` (authn + authz rule),
-   `requestSchema`, `responseSchema`, `errors`, `pagination`, `idempotency`, `rateLimit`,
-   `requirementIds` (from W1), `tests`. All optional — legacy data models keep parsing.
+1. **Schema — all three layers, not just the parsed one.** The endpoint shape is declared in
+   three places, and widening only the parsed type means the model is never *asked* for the
+   new fields and the generated payload is dropped before it reaches markdown:
+   - `src/lib/schemas/artifactSchemas.ts` — the `dataModelSchema.apiEndpoints` **response
+     schema** that constrains generation. Today it allows exactly `method`/`path`/
+     `description`/`entity`, all four `required`. New fields are added here as **non-required**
+     properties so a model that omits one still produces a parseable artifact.
+   - `src/types/index.ts` — `DataModelContent.apiEndpoints`, currently an inline
+     `{ method; path; description; entity }[]` literal. Promote it to a named
+     `ApiEndpointContract` type with the new fields optional (rule 3).
+   - `src/lib/services/dataModelMarkdown.ts` — `ParsedApiEndpoint` plus the emitter/parser.
+
+   New optional fields: `auth` (authn + authz rule), `requestSchema`, `responseSchema`,
+   `errors`, `pagination`, `idempotency`, `rateLimit`, `requirementIds` (from W1), `tests`.
+   All three layers move in the same commit, or the exit criterion below is unreachable.
 2. **Emitter + parser.** Widen the `## API Endpoints` table round-trip in
    `dataModelMarkdown.ts` (currently a 3–4 column table) to a per-endpoint block form so
    schemas and error lists survive markdown. Keep the table parser as a legacy fallback.
@@ -252,13 +275,39 @@ New module `src/lib/planning/buildPacketReadiness.ts`, modelled on the existing
 | Criterion | Source of truth |
 |---|---|
 | Required artifacts exist and are non-errored | artifact slots |
-| No required source stale or missing | `evaluateProjectFreshness` (rule 9 — consumed, not re-derived) |
+| No required source stale or missing | `evaluateProjectFreshness` status **and `impactedBy`** — see W2 on why status alone misses a missing dependency (rule 9 — consumed, not re-derived) |
 | Zero unresolved blocking validation issues | `artifactBlockingValidation` + W3 completeness |
-| Every P0/P1 requirement maps to a task and a criterion | W1 + coverage matrix |
+| Every **in-scope** requirement maps to a task and a criterion | W1 + coverage matrix — see the scope definition below |
 | Every endpoint reachable from the first slice has a complete contract | W3 |
 | Conditional security/privacy + measurement obligations satisfied | W5 |
 | First milestone is an executable vertical slice with no unresolved dependency | plan adapter |
-| Product reasoning is approved | `derivePlanningReadiness.isReadyToBuild` (as **one input**, not the answer) |
+| Product reasoning is **committed**, not merely projected | the current committed `ReadinessReview` — see below |
+
+**"In-scope requirement" has to be defined in the codebase's own vocabulary.** The audit says
+"every P0/P1 requirement", but P0/P1 is **screen** vocabulary — `Feature` carries
+`priority?: 'must' | 'should' | 'could'` and `tier?: 'mvp' | 'v1' | 'later'`
+(`src/types/index.ts:68-89`), never P0/P1. Left as-is, two implementations would gate two
+different feature sets, or none. The blocking set is therefore:
+
+> `tier === 'mvp'` **or** `priority === 'must'`, with features that declare *neither* field
+> counted as in scope.
+
+The "neither field" fallback matches how `derivePlanningReadiness` already resolves scope —
+`mvpFeatures` treats `tier === undefined` as MVP and falls back to all features when the MVP
+set is empty (`planningReadiness.ts:207-208`) — so the gate and the existing scope criterion
+agree on which features matter. Non-blocking coverage for `should`/`could`/`v1`/`later`
+features is still reported, just as a warning.
+
+**Approval must come from the committed checkpoint, not the live projection.**
+`isReadyToBuild` is a projection recomputed on every render; it can read true before the user
+has reviewed or committed anything. The actual authority is the current, integrity-checked
+readiness commitment — `currentCommittedReadiness` in `ProjectWorkspace.tsx:908-911`, which
+filters `readinessReviews` by `commitmentRemainsCurrent(...)` **and** an `activeCommit`. If W6
+sourced this criterion from the projection, a user who satisfies the derived criteria but never
+approved the PRD would silently pass a blocker labelled "approved". So: this criterion requires
+a **current committed `ReadinessReview`**; the derived projection is at most an input to *when
+the commit action is offered*, never evidence that it happened. (`isCommitmentUnverifiable` at
+`:917-920` is the case to fail closed on.)
 
 **Non-blocking warnings** are allowed only when owner, impact, and rationale are recorded —
 otherwise they are blockers. No composite confidence score (rule 13). Nothing auto-rewrites
@@ -269,7 +318,7 @@ an artifact.
 `PlanningStateBar.tsx`, and W7's Final Review.
 
 **Exit criteria.** A project with an approved PRD but a stale data model, an incomplete
-endpoint contract, or an uncovered P0 requirement reports **not** build-ready, with the specific
+endpoint contract, or an uncovered in-scope requirement reports **not** build-ready, with the specific
 blocker and a navigable action target. The two readiness states are separately visible and
 never conflated in copy.
 
