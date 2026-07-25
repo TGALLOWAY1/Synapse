@@ -261,7 +261,9 @@ Standalone design docs (referenced from the topic docs):
 `docs/ADVERSARIAL_PLANNING_REVIEW.md`, `docs/UNCERTAINTY_FIRST_PLANNING.md`,
 `docs/DECISION_CENTER_SIMPLIFICATION_PLAN.md`, `docs/VERSIONING_ASSESSMENT.md`,
 `docs/ORCHESTRATION_AND_METRICS.md`, `docs/QA_CHECKLIST.md`,
-`docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`, `docs/audits/WORKFLOW_AUDIT.md`.
+`docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md`,
+`docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`, `docs/audits/WORKFLOW_AUDIT.md`,
+`docs/audits/ARTIFACTS_BUILD_READINESS_AUDIT_2026-07-25.md`.
 
 ## Cross-cutting rules (always apply)
 
