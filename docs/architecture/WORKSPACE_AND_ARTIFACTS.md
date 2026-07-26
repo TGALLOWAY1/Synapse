@@ -383,6 +383,51 @@ stale and why, and the safe update order. See
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/
   `mockup` into the Screens view since neither has its own sidebar row.
 
+### Build-packet readiness (is this packet implementable?)
+
+`src/lib/planning/buildPacketReadiness.ts` (`deriveBuildPacketReadiness`, pure +
+unit-tested) is the artifact-side readiness evaluator from
+[docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md)
+§W6. It answers **"is the implementation packet complete and current?"** — a
+*different* question from `derivePlanningReadiness`'s "is the product reasoning
+sound?". The authority model, the eight criteria, and the never-conflate rule
+live in [PLANNING_AND_DECISIONS.md](PLANNING_AND_DECISIONS.md); what matters
+here is how it sits on the workspace:
+
+- **Required slots are `buildPacketRequiredSlots()` = `visibleCoreSubtypes()` +
+  `mockup`** — deliberately the same set `ProjectWorkspace.assetsReady` gates on,
+  so unhiding/hiding a subtype moves both signals together and the gate can
+  never demand an output the pipeline does not produce. A slot is *present* when
+  it has a preferred version and is neither errored nor still generating;
+  presence unions the caller's slot state with the freshness engine's
+  `missing` / `error` / `generating` statuses, so a disagreement fails closed.
+- **It consumes the one freshness engine** — `useProjectFreshness` through
+  `src/hooks/useBuildPacketInputs.ts` — and reads **both `status` and
+  `impactedBy`**. That second read is load-bearing:
+  `evaluateDependencyGraph` short-circuits when an upstream snapshot is absent,
+  so a plan whose `user_flows` input is **missing or errored** stays
+  `up_to_date` and records the problem only in `impactedBy`. Never "fix" that in
+  the engine (one engine, one vocabulary — cross-cutting rule 9); read
+  `impactedBy`.
+- **Validation** comes from the per-version disposition
+  (`readArtifactValidationDisposition`): `needs_review` blocks, while an
+  `accepted_issue` — which carries the user's recorded rationale — is reported
+  as a non-blocking warning. Endpoint completeness comes from
+  `apiContractCompleteness` and blocks only for endpoints reachable from the
+  **first milestone**; a later-slice gap is a warning.
+- **Nothing about it gates rendering or generation.** It is a derived,
+  never-persisted read-side layer (rule 10) that *reports*. Exploratory output
+  generation stays available exactly as before.
+- **Workspace consumers.** The header outputs CTA no longer labels itself
+  "Build outputs" from the planning-readiness projection (the audited false
+  claim); it reads off the recorded commitment
+  (`displaysCurrentCommitment`), and its hover copy states the packet state
+  separately. `PlanningStateBar` renders an "Implementation packet" block with
+  its own "Packet checks" disclosure next to the "Product-reasoning checks"
+  one. The single-primary-action Final Review surface on the Implementation Plan
+  page is plan §W7 and is not built yet — until then, the Coverage tab and the
+  Dependency Graph remain the detailed views.
+
 ### Implementation tasks (plan → tracked checklist)
 
 The Implementation Plan artifact converts into trackable build tasks.

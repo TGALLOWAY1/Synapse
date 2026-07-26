@@ -78,6 +78,8 @@ import {
     projectDecision,
     type PlanningAttentionItem,
 } from '../lib/planning';
+import { deriveBuildPacketReadiness } from '../lib/planning/buildPacketReadiness';
+import { useBuildPacketInputs } from '../hooks/useBuildPacketInputs';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
@@ -709,6 +711,13 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         });
     }, [projectId, viewedSpineId, earlyDesignSpine, earlyDesignProject]);
 
+    // Store-derived half of the build-packet readiness input (plan §W6): per-slot
+    // artifact state, the ONE freshness evaluation, the resolved data
+    // model/endpoints, and the consolidated plan. Must be read here — before the
+    // guard below — because it is a hook; the pure evaluator runs further down,
+    // once the PRD, safety context, and committed readiness checkpoint are known.
+    const buildPacketInputs = useBuildPacketInputs(projectId ?? '');
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -944,6 +953,35 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     };
     const planningReadiness = derivePlanningReadiness(planningReadinessInput);
+    // The SECOND, separate readiness question (plan §W6): "is the implementation
+    // packet complete and current?" — never the same question as
+    // `planningReadiness` ("is the product reasoning sound?"). The two states are
+    // surfaced separately and must never be conflated in copy.
+    //
+    // Approval authority: the committed criterion reads the CURRENT COMMITTED
+    // readiness review (`currentCommittedReadiness`, already filtered by
+    // `commitmentRemainsCurrent(...)` + `activeCommit`) — never
+    // `planningReadiness.isReadyToBuild`, which is a projection recomputed every
+    // render. That projection is passed only so the blocker copy can say whether a
+    // commit action is currently on offer, and `isCommitmentUnverifiable` fails
+    // the criterion closed.
+    const buildPacketReadiness = deriveBuildPacketReadiness({
+        ...buildPacketInputs,
+        prd: activeSpine?.structuredPRD,
+        safety: activeSpine?.safetyReview,
+        committedReadiness: currentCommittedReadiness
+            ? {
+                reviewId: currentCommittedReadiness.review.id,
+                spineVersionId: currentCommittedReadiness.review.spineVersionId,
+                conclusion: currentCommittedReadiness.review.conclusion,
+                committedAt: currentCommittedReadiness.commitment.activeCommit!.at,
+                acceptedRiskRationale: currentCommittedReadiness.commitment.authorization?.rationale,
+            }
+            : null,
+        commitmentUnverifiable: isCommitmentUnverifiable,
+        planningProjectionReadyToBuild: planningReadiness.isReadyToBuild,
+        currentSpineVersionId: activeSpine?.id,
+    });
     const materialityGateSnapshot = planningSourceSpine
         ? deriveMaterialityGateSnapshot({
             currentSpineVersionId: planningSourceSpine.id,
@@ -1432,10 +1470,23 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
     // Route to outputs. Visible as soon as a safe structured PRD exists —
     // commitment is not required, so users always see the way to their design
-    // assets (the label reads "Explore" until the plan is ready to build).
+    // assets (the label reads "Explore" until the plan has been committed).
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
+    // Honest hover copy for the outputs CTA. The label states the action; this
+    // states the two readiness facts separately — whether the reasoning is
+    // committed, and (once outputs exist) whether the implementation packet is
+    // complete. Neither is derived from the other.
+    const assetsOutputsCtaTitle = assetsBuilding
+        ? 'Outputs are being generated from this plan'
+        : assetsReady
+            ? buildPacketReadiness.isPacketComplete
+                ? 'Review outputs — the implementation packet is complete and current'
+                : `Review outputs — ${buildPacketReadiness.blockers.length} implementation ${buildPacketReadiness.blockers.length === 1 ? 'blocker' : 'blockers'} remain in the packet`
+            : displaysCurrentCommitment
+                ? 'Generate outputs from the committed plan'
+                : 'Generate exploratory outputs from this working plan — committing the plan comes first';
     // `structuredPRD` turns truthy after the FIRST section streams in, so this
     // pill used to appear mid-generation and invite the user to build outputs
     // from a half-written plan. Gate it on the run being settled.
@@ -1866,13 +1917,22 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         <button
                             onClick={assetsReady ? handleOpenAssets : handleGenerateAssets}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
-                            title="Generate or review outputs from this plan"
+                            title={assetsOutputsCtaTitle}
                         >
                             {assetsBuilding
                                 ? <Loader2 size={14} className="animate-spin" />
                                 : <ArrowRight size={14} />}
                             <span className="hidden sm:inline">
-                                {assetsBuilding ? 'Building outputs…' : assetsReady ? 'Review outputs' : planningReadiness.isReadyToBuild ? 'Build outputs' : 'Explore outputs'}
+                                {/* This label must never claim build readiness from the
+                                    planning-readiness projection — that answers "is the product
+                                    reasoning sound?", not "is the implementation packet
+                                    complete?" (plan §W6). It reads off the recorded commitment
+                                    instead; packet completeness is a separate state, surfaced
+                                    separately (PlanningStateBar + the title above). */}
+                                {assetsBuilding
+                                    ? 'Building outputs…'
+                                    : assetsReady ? 'Review outputs'
+                                        : displaysCurrentCommitment ? 'Build outputs' : 'Explore outputs'}
                             </span>
                         </button>
                     )}
@@ -2520,6 +2580,11 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                                         ) : (
                                                             <PlanningStateBar
                                                                 readiness={planningReadiness}
+                                                                // The separate build-packet state (§W6). Only shown
+                                                                // once outputs exist — before that there is no packet
+                                                                // to report on, and every criterion would read as an
+                                                                // un-actionable blocker.
+                                                                buildPacket={generatedOutputs.length > 0 ? buildPacketReadiness : undefined}
                                                                 // Avoid duplicating the executive summary: StructuredPRDView's
                                                                 // Overview already renders `executiveSummary` just below, so only
                                                                 // surface the vision here as a fallback when there's no summary.

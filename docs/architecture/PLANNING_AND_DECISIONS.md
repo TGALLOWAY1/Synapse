@@ -43,7 +43,9 @@ impact previews / the write-barrier apply path in
   scope, material open decisions/assumptions, current challenge coverage,
   source drift, incomplete sections, and output alignment. Never replace it
   with a percentage or artifact-count score. Missing outputs do not reduce
-  planning readiness.
+  planning readiness. **It answers "is the product reasoning sound?" and
+  nothing else** — do not widen it to look at artifacts; that is the separate
+  build-packet evaluator's job (see "Two readiness evaluators" below).
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
   current readiness category, supporting criteria, and the three planning tools
   as an always-visible, ordered set — Decision Center (settle open choices /
@@ -311,6 +313,80 @@ identity instead of label-matching heuristics.
   W7 Final Review). Per-criterion *lifecycle* state (approved/superseded,
   with owner) is explicitly deferred — that would be persisted state and is
   out of this layer's scope (see the plan's §6).
+
+### Two readiness evaluators: reasoning vs. packet (never conflate them)
+
+There are **two** readiness evaluators, answering **two different questions**.
+They are independently reportable, and the copy at every surface must keep them
+apart (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W6 — the audit's central
+finding was a truth-in-signalling defect, where the reasoning projection was
+presented as build readiness):
+
+| Evaluator | Question | Reads |
+|---|---|---|
+| `derivePlanningReadiness` (`planningReadiness.ts`) | *is the product **reasoning** sound?* | PRD foundation, scope, decisions, challenge, alignment |
+| `deriveBuildPacketReadiness` (`buildPacketReadiness.ts`) | *is the implementation **packet** complete and current?* | artifact slots, freshness, validation, coverage, API contracts, plan shape, the committed checkpoint |
+
+- **Do not widen `derivePlanningReadiness`** to cover artifacts, and do not add
+  an `isReadyToBuild`-style field to the packet evaluator — it deliberately
+  exports `isPacketComplete` so the two can never be swapped by autocomplete.
+- **Eight blocking criteria** (`BUILD_PACKET_CRITERION_ORDER`), each with
+  evidence and a navigable action target: required outputs exist and are
+  non-errored · no required source stale **or** missing · zero unresolved
+  blocking validation issues · every in-scope requirement maps to a task and a
+  verification criterion · every endpoint reachable from the first slice has a
+  complete contract · conditional security/privacy + measurement obligations
+  discharged · the first milestone is an executable slice with no unresolved
+  dependency · the product reasoning is **committed**.
+- **Sources are consumed, never re-derived.** Staleness comes from the one
+  freshness engine (`evaluateProjectFreshness` / `useProjectFreshness`, rule 9)
+  and is read through **both `status` and `impactedBy`** — a MISSING or ERRORED
+  dependency leaves the dependent `up_to_date` and shows up only in
+  `impactedBy`. Validation state comes from
+  `readArtifactValidationDisposition`; endpoint completeness from
+  `apiContractCompleteness`; obligations from `crossCuttingObligations`;
+  requirement/criterion identity from `requirementIdentity`; the plan shape from
+  the consolidated-plan adapter.
+- **In-scope requirement** = `tier === 'mvp'` **or** `priority === 'must'`, with
+  a feature declaring **neither** field counted in scope, and the same
+  empty-set fallback `derivePlanningReadiness`'s `scopeCandidates` applies (no
+  match → every feature is in scope), so the gate and the planning scope
+  criterion never disagree and "no in-scope requirement" can never become a
+  vacuous pass. `should` / `could` / `v1` / `later` coverage is reported as a
+  **non-blocking warning**.
+- **Approval authority is the committed checkpoint, not the projection.** The
+  committed criterion requires a **current committed `ReadinessReview`** — the
+  caller's `commitmentRemainsCurrent(...)` + `activeCommit` filter
+  (`currentCommittedReadiness` in `ProjectWorkspace`). It **fails closed** on
+  `isCommitmentUnverifiable`, on a commitment bound to a different spine
+  version, and on a `not_ready` commitment with no recorded rationale.
+  `planningReadiness.isReadyToBuild` is passed in **only** so the blocker copy
+  can say whether a commit action is currently on offer — it can never satisfy
+  the criterion. A `not_ready` commitment **with** the authorizing event's
+  rationale is reported as an accepted-risk warning.
+- **Warnings are earned.** A non-blocking warning is permitted only when
+  `owner`, `impact`, and `rationale` are all recorded (the type requires all
+  three); anything that cannot state them is a blocker. There is **no composite
+  score** (rule 13) and nothing auto-rewrites an artifact.
+- **Derived, never persisted** (rule 10) and **advisory transport**: the
+  evaluator reports; it never blocks rendering or generation on its own.
+  `src/hooks/useBuildPacketInputs.ts` assembles the store-derived half of its
+  input (slot states, freshness, resolved data model/endpoints, consolidated
+  plan) and is the only React binding — it resolves the Data Model through the
+  same `resolveDataModelForTrace` the advisory obligations card uses, so the
+  gate and that card can never disagree about which obligations are owed.
+- **The gate must never be stricter than the generator** (plan §7). Every
+  blocking criterion ships with a test proving a freshly generated, well-formed
+  project satisfies it (`buildPacketReadiness.test.ts`). Anything the generator
+  is not prompted to produce — verbatim PRD-criterion restatements in the plan,
+  a vertical (UI + data) first milestone, supplementary endpoint fields — is a
+  warning, not a blocker.
+
+Consumers today: `ProjectWorkspace` (the outputs CTA no longer claims build
+readiness from the reasoning projection; its label reads off the recorded
+commitment) and `PlanningStateBar` (an "Implementation packet" block with its
+own "Packet checks" disclosure, beside the "Product-reasoning checks" one). The
+single-CTA Final Review surface is plan §W7 and is not built yet.
 
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence

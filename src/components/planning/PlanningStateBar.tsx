@@ -1,8 +1,9 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Circle, ClipboardCheck, Compass, ListChecks, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Circle, ClipboardCheck, Compass, ListChecks, Package, ShieldCheck, Sparkles } from 'lucide-react';
 import type { ComponentType } from 'react';
 import {
     derivePlanningOverviewPresentation,
     projectCommitmentCopy,
+    type BuildPacketReadiness,
     type PlanningOverviewTone,
     type PlanningReadiness,
     type ProjectCommitmentCondition,
@@ -10,6 +11,13 @@ import {
 
 interface Props {
     readiness: PlanningReadiness;
+    /**
+     * The SEPARATE build-packet state (plan §W6): "is the implementation packet
+     * complete and current?". Rendered as its own block, never merged with
+     * `readiness` ("is the product reasoning sound?"). Absent while no outputs
+     * exist yet.
+     */
+    buildPacket?: BuildPacketReadiness;
     planSummary?: string;
     committed: boolean;
     legacyCommitted?: boolean;
@@ -46,7 +54,7 @@ type PlanningTool = {
     onClick: () => void;
 };
 
-export function PlanningStateBar({ readiness, planSummary, committed, legacyCommitted = false, onReviewReadiness, onOpenDecisions, onOpenChallenge, onOpenFeatures, answerableCount = 0, onStartSharpen }: Props) {
+export function PlanningStateBar({ readiness, buildPacket, planSummary, committed, legacyCommitted = false, onReviewReadiness, onOpenDecisions, onOpenChallenge, onOpenFeatures, answerableCount = 0, onStartSharpen }: Props) {
     const commitmentCondition: ProjectCommitmentCondition = legacyCommitted
         ? 'legacy_commitment'
         : committed
@@ -166,9 +174,78 @@ export function PlanningStateBar({ readiness, planSummary, committed, legacyComm
                 </div>
             </div>
 
+            {/* The SECOND readiness state (plan §W6), rendered as its own block.
+                The product-reasoning checks below answer "is the reasoning
+                sound?"; this answers "is the implementation packet complete and
+                current?". Neither is derived from the other and the copy never
+                merges them. */}
+            {buildPacket && (
+                <div className={`mt-4 rounded-xl px-3 py-3 ${surface}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                            <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">Implementation packet</p>
+                            <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold">
+                                <Package size={14} className="shrink-0 opacity-70" aria-hidden="true" />
+                                {buildPacket.headline}
+                            </p>
+                            <p className="mt-0.5 text-xs leading-5 opacity-70">{buildPacket.summary}</p>
+                            <p className="mt-1 text-[11px] leading-5 opacity-60">
+                                A separate check from the plan readiness above: that one asks whether the product
+                                reasoning is sound, this one asks whether the outputs a build would read are
+                                complete and current.
+                            </p>
+                        </div>
+                        {!buildPacket.isPacketComplete && (
+                            <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 text-[11px] font-bold uppercase tracking-wider">
+                                {buildPacket.blockers.length} {buildPacket.blockers.length === 1 ? 'blocker' : 'blockers'}
+                            </span>
+                        )}
+                    </div>
+                    <details className="group mt-2">
+                        <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
+                            <ChevronDown size={15} className="transition group-open:rotate-180" /> Packet checks
+                            <span className="text-xs font-medium opacity-60">
+                                ({buildPacket.criteria.filter(item => !item.blocking).length}/{buildPacket.criteria.length} passing)
+                            </span>
+                        </summary>
+                        <div className={`mt-2 rounded-xl p-2 ${surfaceFaint}`}>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                {buildPacket.criteria.map(item => (
+                                    <div key={item.id} className={`flex items-start gap-2 rounded-lg p-3 ${calm ? 'bg-white' : 'bg-white/60'}`}>
+                                        {item.blocking
+                                            ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                                            : item.status === 'met'
+                                                ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" />
+                                                : <Circle size={15} className="mt-0.5 shrink-0 text-neutral-400" />}
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold">{item.label}</p>
+                                            <p className="mt-0.5 text-xs leading-5 opacity-70">{item.explanation}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {buildPacket.warnings.length > 0 && (
+                                <div className="mt-2 px-1">
+                                    <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">
+                                        Recorded, not blocking
+                                    </p>
+                                    <ul className="mt-1 space-y-1">
+                                        {buildPacket.warnings.map(warning => (
+                                            <li key={warning.id} className="text-xs leading-5 opacity-70">
+                                                <span className="font-semibold">{warning.title}</span> — {warning.impact}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    </details>
+                </div>
+            )}
+
             <details className="mt-3 group">
                 <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
-                    <ChevronDown size={15} className="transition group-open:rotate-180" /> Readiness checks
+                    <ChevronDown size={15} className="transition group-open:rotate-180" /> Product-reasoning checks
                     <span className="text-xs font-medium opacity-60">({metCount}/{readiness.criteria.length} passing)</span>
                 </summary>
                 <div className={`mt-2 rounded-xl p-2 ${surfaceFaint}`}>
