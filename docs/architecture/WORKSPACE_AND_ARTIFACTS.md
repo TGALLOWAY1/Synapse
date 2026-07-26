@@ -222,6 +222,18 @@ Convert-to-Tasks all keep working). See
   checklist derivations in `implementationPlanInsights.ts`, and the overlay
   field; do not resurrect model-authored "passed" styling (gates were always
   Not run until a user recorded an outcome).
+- **Requirement / criterion identity for coverage & traceability.** Stable
+  ids come from the derived `src/lib/requirementIdentity.ts` layer
+  (`RequirementId` = `Feature.id`; `CriterionId` hashes the normalized
+  criterion text — see "Derived requirement & criterion identity" in
+  PLANNING_AND_DECISIONS.md). Coverage and traceability surfaces key off
+  these ids, never off array position or raw prose equality; criterion prose
+  found in screens, tasks, and Definition-of-Done lines resolves through
+  `resolveCriterionRefs` with an explicit
+  `exact | normalized | fuzzy | unmatched` confidence, and `unmatched` is
+  reported, never dropped. The layer is derived and advisory only
+  (cross-cutting rule 10); consumer wiring lands with the
+  ARTIFACT_READINESS_RESOLUTION_PLAN workstreams (W3/W6/W7).
 - The demo project is a **cloud snapshot** and carries the legacy
   two-artifact shape until the owner re-pins a regenerated snapshot; the
   adapter is what keeps it rendering consolidated in the meantime. Do not add

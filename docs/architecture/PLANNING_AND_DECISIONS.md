@@ -276,6 +276,42 @@ impact previews / the write-barrier apply path in
   protected from pruning so nothing readiness/commitment currently relies on
   disappears.
 
+### Derived requirement & criterion identity (read-side, advisory)
+
+`src/lib/requirementIdentity.ts` (pure, unit-tested) is the identity substrate
+from docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W1: stable ids for
+requirements and acceptance criteria so coverage/traceability can key off
+identity instead of label-matching heuristics.
+
+- `RequirementId` **is** the existing `Feature.id` — reused, never a parallel
+  id scheme.
+- `CriterionId` = `` `${featureId}.AC.${hash8(normalize(text))}` `` — derived
+  from the criterion's **normalized text**, never its array position.
+  Reordering a feature's criteria changes no id; rewording one criterion
+  changes exactly that one id (deliberate — a reworded criterion is a
+  different criterion, and the id delta is the drift signal).
+- `buildRequirementIndex` indexes a structured PRD's features across all five
+  criterion lists the PRD markdown renders as acceptance-criteria groups
+  (`acceptanceCriteria`, plus premium `successCriteria` / `edgeCases` /
+  `failureModes` / `uiAcceptanceCriteria`).
+  `resolveCriterionRefs(text, index)` maps criterion prose quoted in screen
+  contracts, implementation tasks, and plan Definition-of-Done lines back to
+  canonical ids with an honest confidence label:
+  `exact | normalized | fuzzy | unmatched`. The fuzzy tier is deliberately
+  conservative (token-overlap thresholds documented in the module);
+  `unmatched` is a **first-class reported state** — "not traced to a PRD
+  criterion" — never silently dropped and never auto-rewritten to force a
+  match.
+- **Derived, never persisted** (cross-cutting rule 10): ids are recomputed on
+  read as a pure function of PRD content — no new collection, no
+  `ALL_PROJECT_COLLECTIONS` / snapshot / sync wiring — so legacy projects
+  gain traceability with no migration. The layer is advisory: nothing gates
+  rendering or generation on it. Consumers land in the later plan
+  workstreams (W3 API-contract `requirementIds`, W6 build-packet coverage,
+  W7 Final Review). Per-criterion *lifecycle* state (approved/superseded,
+  with owner) is explicitly deferred — that would be persisted state and is
+  out of this layer's scope (see the plan's §6).
+
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence
 scores, automatic artifact rewriting, or model-authored user verdicts.
