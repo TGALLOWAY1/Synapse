@@ -196,9 +196,22 @@ Convert-to-Tasks all keep working). See
   Steps / Acceptance Criteria / Quality Gates / Validation Commands / Commit
   Guidance; no triple backticks inside bodies — they'd collide with the
   markdown fences). It has true data deps on `screen_inventory` +
-  `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
-  layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
-  over the **active** pipeline). New runs never generate `prompt_pack` (see
+  `data_model` + `user_flows`. The `user_flows` edge is a **deliberate W2
+  decision** (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W2): flows carry
+  the alternate/error journeys the plan must turn into engineering work, so
+  they reach the plan as prompt context (via `buildDependencyContext`, with a
+  flows-aware summary — `summarizeUserFlowsDependency` — that preserves every
+  flow's steps, decisions, error paths, and edge cases past the truncation
+  budget), as a provenance `SourceRef`, and as a freshness input. This makes
+  the **active pipeline 3 layers deep** (`screen_inventory → user_flows →
+  implementation_plan`); the added wall-clock was accepted — do not
+  "optimize" the edge back out. `user_flows` stays **out of
+  `REQUIRED_DEPENDENCIES`**: plan generation waits for flows but proceeds
+  with degraded context when they are missing/errored, and that gap surfaces
+  through the dependency graph's `impactedBy` (see
+  docs/ARTIFACT_DEPENDENCY_GRAPH.md), not as a generation blocker. The
+  pipeline-shape tests assert ≥3-wide layer 1 and **exactly 3 layers** over
+  the **active** pipeline. New runs never generate `prompt_pack` (see
   the retired-subtype rules above). Generated plans still carry
   `qualityGates`/`globalQualityGates` and `validationCommands` in the data
   model (the schema/prompt are unchanged), but only the validation commands

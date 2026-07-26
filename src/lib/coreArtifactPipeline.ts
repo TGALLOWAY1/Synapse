@@ -78,11 +78,22 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
         description: 'Milestones and copy-ready prompt packs',
         // True data deps: the consolidated plan links milestones to screen and
         // entity names and writes prompt packs that reference them, so it
-        // needs those artifacts' output as prompt context. user_flows is
-        // deliberately NOT a dep — flow links are nice-to-have and adding the
-        // edge would make the active pipeline 3 layers deep (see the depth
-        // test in coreArtifactPipeline.test.ts).
-        dependsOn: ['screen_inventory', 'data_model'],
+        // needs those artifacts' output as prompt context.
+        //
+        // user_flows is a DELIBERATE dep (W2, docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md
+        // §W2): flows carry the alternate/error journeys the plan must turn
+        // into engineering work — without the edge the plan reads "current"
+        // while the artifact defining those journeys is stale or absent, and
+        // its prompt never sees them. Because user_flows itself depends on
+        // screen_inventory, this makes the active pipeline THREE layers deep;
+        // the added wall-clock (~one user_flows run before the plan starts)
+        // was weighed and accepted in that plan doc. Do NOT remove the edge to
+        // "restore parallelism" — that re-opens the audited defect. The depth
+        // test in coreArtifactPipeline.test.ts documents the accepted shape.
+        // Note user_flows stays OUT of REQUIRED_DEPENDENCIES below: plan
+        // generation waits for flows but is not blocked when they are
+        // missing/errored (degraded context instead).
+        dependsOn: ['screen_inventory', 'data_model', 'user_flows'],
         displayOrder: 7,
     },
 ];
@@ -103,6 +114,10 @@ export const REQUIRED_DEPENDENCIES: Partial<Record<CoreArtifactSubtype, CoreArti
     user_flows: ['screen_inventory'],
     // The consolidated plan links milestones/prompt packs to concrete screens
     // and entities; both are required for a trustworthy, traceable plan.
+    // user_flows is deliberately NOT required (W2): generation waits for
+    // flows (dependsOn) but proceeds with degraded context when they are
+    // missing/errored — the gap then surfaces via the dependency graph's
+    // impactedBy, not as a generation blocker.
     implementation_plan: ['screen_inventory', 'data_model'],
 };
 

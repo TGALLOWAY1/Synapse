@@ -380,6 +380,9 @@ function deriveTraceability(milestones: ImplementationPlanMilestone[]): Implemen
             screens: dedupe([...(links.screens ?? []), ...taskScreens]),
             dataModels: dedupe([...(links.dataModels ?? []), ...taskData]),
             components: dedupe(links.components ?? []),
+            // Flow links are milestone-level only (task linkedArtifacts has no
+            // userFlows field). Recorded since the plan sources user_flows (W2).
+            userFlows: dedupe(links.userFlows ?? []),
             promptPackIds: (m.promptPacks ?? []).map(p => p.id),
             qualityGateIds: (m.qualityGates ?? []).map(g => g.id),
         };

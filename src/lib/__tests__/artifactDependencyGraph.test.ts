@@ -79,6 +79,8 @@ function healthyInput(): DependencyEvaluationInput {
             spineRef(SPINE_V1),
             artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
             artifactRef('art-data_model', 'ver-data_model-1'),
+            // Recorded since the plan gained the user_flows dep (W2).
+            artifactRef('art-user_flows', 'ver-user_flows-1'),
         ],
     });
     snapshots.mockup = snapshot('mockup', {
@@ -119,6 +121,8 @@ describe('buildArtifactDependencyGraph', () => {
         expect(hard).toContain('screen_inventory->user_flows');
         expect(hard).toContain('screen_inventory->implementation_plan');
         expect(hard).toContain('data_model->implementation_plan');
+        // W2: the plan sources user_flows (alternate/error journeys).
+        expect(hard).toContain('user_flows->implementation_plan');
         expect(hard).toContain('screen_inventory->mockup');
         expect(hard).toContain('design_system->mockup');
     });
@@ -170,7 +174,10 @@ describe('dependency / impact resolution', () => {
         expect(indirect).toEqual([]);
     });
 
-    it('screen_inventory has only direct impacts today (no deeper chain)', () => {
+    it('screen_inventory impacts are all classified direct (the transitive path lands on a direct dependent)', () => {
+        // There IS a deeper chain since W2 (screen_inventory → user_flows →
+        // implementation_plan), but implementation_plan is also a direct
+        // dependent, so nothing is left for the indirect bucket.
         const { direct, indirect } = computeDownstreamImpacts(graph, 'screen_inventory');
         expect(direct.sort()).toEqual(['implementation_plan', 'mockup', 'user_flows']);
         expect(indirect).toEqual([]);
@@ -283,6 +290,25 @@ describe('evaluateDependencyGraph', () => {
         expect(statusOf(evals, 'data_model')).toBe('up_to_date');
     });
 
+    it('W2: a regenerated user_flows marks implementation_plan needs_update via the existing engine', () => {
+        // The plan sources flows (alternate/error journeys); a changed flows
+        // artifact must stale the plan through the ordinary dependency_changed
+        // path — no special-casing.
+        const input = healthyInput();
+        input.snapshots.user_flows = snapshot('user_flows', {
+            versionId: 'ver-user_flows-2', versionNumber: 2, createdAt: 2000,
+            sourceRefs: [spineRef(SPINE_V1), artifactRef('art-screen_inventory', 'ver-screen_inventory-1')],
+        });
+        const evals = evaluateDependencyGraph(graph, input);
+        const ev = evals.get('implementation_plan')!;
+        expect(ev.status).toBe('needs_update');
+        const reason = ev.reasons.find(r => r.kind === 'dependency_changed');
+        expect(reason?.dependencyId).toBe('user_flows');
+        expect(reason?.detail).toContain('Version 2');
+        // Other flows consumers don't exist; siblings stay clean.
+        expect(statusOf(evals, 'mockup')).toBe('up_to_date');
+    });
+
     it('legacy artifact without dependency refs falls back to the timestamp heuristic (advisory)', () => {
         const input = healthyInput();
         // Legacy user_flows: spine ref only, generated at t=1000.
@@ -365,6 +391,26 @@ describe('evaluateDependencyGraph', () => {
         // Nodes that don't consume the design system are untouched.
         expect(evals.get('user_flows')!.impactedBy).toEqual([]);
         expect(evals.get('implementation_plan')!.impactedBy).toEqual([]);
+    });
+
+    it('W2: a missing or errored user_flows leaves the plan up_to_date and surfaces only via impactedBy', () => {
+        // Deliberate engine semantics (rule 9 — do NOT "fix" this): a missing
+        // dep has nothing concrete to compare, so the plan's own status stays
+        // up_to_date; the trouble is reported through impactedBy, which W6's
+        // build-packet gate must read alongside status.
+        const missing = healthyInput();
+        delete missing.snapshots.user_flows;
+        const missingEvals = evaluateDependencyGraph(graph, missing);
+        expect(statusOf(missingEvals, 'user_flows')).toBe('missing');
+        expect(statusOf(missingEvals, 'implementation_plan')).toBe('up_to_date');
+        expect(missingEvals.get('implementation_plan')!.impactedBy).toContain('user_flows');
+
+        const errored = healthyInput();
+        errored.slotStatus = { user_flows: 'error' };
+        const erroredEvals = evaluateDependencyGraph(graph, errored);
+        expect(statusOf(erroredEvals, 'user_flows')).toBe('error');
+        expect(statusOf(erroredEvals, 'implementation_plan')).toBe('up_to_date');
+        expect(erroredEvals.get('implementation_plan')!.impactedBy).toContain('user_flows');
     });
 
     it('flags manual edits on artifacts and the PRD', () => {

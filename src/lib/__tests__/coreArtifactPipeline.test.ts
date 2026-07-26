@@ -6,6 +6,7 @@ import {
     buildDependencyLayers,
     expandWithHiddenDependencyClosure,
     getArtifactMeta,
+    getRequiredDependencies,
     isHiddenArtifactSubtype,
     isRetiredArtifactSubtype,
 } from '../coreArtifactPipeline';
@@ -48,9 +49,32 @@ describe('coreArtifactPipeline', () => {
         expect(layers[0].length).toBeGreaterThanOrEqual(3);
     });
 
-    it('depth: <= 2 sequential layers so the worst-case waiter is one hop deep', () => {
+    it('depth: exactly 3 sequential layers — the accepted W2 shape', () => {
+        // The pipeline was deliberately deepened from 2 to 3 layers when
+        // implementation_plan gained the user_flows dep (W2,
+        // docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W2): flows carry the
+        // alternate/error journeys the plan must plan for, and the extra
+        // wall-clock (~one user_flows run before the plan) was accepted.
+        // This asserts EXACTLY 3 so both regressions are loud: a 4th layer is
+        // an unreviewed latency cost, and a return to 2 means someone
+        // "optimized" the flows edge back out and re-opened the audited
+        // defect (plan current while flows are stale/absent).
         const layers = buildDependencyLayers(ACTIVE_PIPELINE);
-        expect(layers.length).toBeLessThanOrEqual(2);
+        expect(layers.length).toBe(3);
+    });
+
+    it('implementation_plan sources user_flows as an optional dep (W2 decision)', () => {
+        // Option A from docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W2: the
+        // edge exists (flows reach the plan prompt, provenance, and the
+        // freshness engine)…
+        expect(getArtifactMeta('implementation_plan').dependsOn).toContain('user_flows');
+        // …but generation is NOT blocked on flows: missing/errored flows mean
+        // degraded context (surfaced via the graph's impactedBy), never a
+        // DependencyInsufficiencyError.
+        expect(getRequiredDependencies('implementation_plan')).toEqual([
+            'screen_inventory',
+            'data_model',
+        ]);
     });
 
     it('hidden artifacts are still in the pipeline so they keep generating', () => {

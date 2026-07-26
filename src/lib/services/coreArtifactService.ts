@@ -182,7 +182,7 @@ Per milestone:
 - priority: "critical" | "high" | "medium" | "low" — by position on the critical path.
 - estimatedEffort: short effort estimate (e.g. "2-3 days").
 - dependencies: array of OTHER milestone ids that must complete first. Empty array if none.
-- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD. Link only what this milestone directly implements; do not invent names.
+- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD (userFlows: flow names from the user_flows dependency context). Link only what this milestone directly implements; do not invent names.
 - tasks: 3-8 atomic, executable tasks.
 - promptPacks: 1-3 copy-ready coding-agent prompts (shape below) that implement this milestone. Every milestone MUST have at least one.
 - qualityGates: 2-4 milestone-specific quality gates.
@@ -226,6 +226,7 @@ Rules:
 - All ids in dependencies must reference ids in the same plan.
 - Quality gate shape: { id, title, description?, category, required } with category one of design_fidelity | functional | data_integrity | integration | accessibility | performance | testing | regression.
 - Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
+- Plan the full journeys, not just happy paths: the user_flows dependency context defines each flow's steps plus its Decision branches, Error Paths, and Edge Cases. That alternate/error handling is concrete engineering work — cover it in milestone tasks (and reflect it in acceptance criteria) rather than dropping it.
 - Tasks should read as atomic engineering work, not as themes.
 - Favor safe implementation: small milestones, frequent commits, explicit non-goals, validation after every milestone, no broad rewrites.`,
         userPrefix: 'Create a consolidated Implementation Plan (milestones + prompt packs + quality gates) from this PRD:',

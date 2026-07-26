@@ -1224,6 +1224,8 @@ export interface ImplementationTraceabilityItem {
     screens: string[];
     dataModels: string[];
     components: string[];
+    /** Flow names linked from the user_flows dependency (W2 — plan sources flows). */
+    userFlows: string[];
     promptPackIds: string[];
     qualityGateIds: string[];
 }

@@ -28,7 +28,7 @@ const NATIVE_PLAN: StructuredImplementationPlan = {
             priority: 'critical',
             estimatedEffort: '2 days',
             dependencies: [],
-            linkedArtifacts: { screens: ['Landing'], dataModels: ['User'] },
+            linkedArtifacts: { screens: ['Landing'], dataModels: ['User'], userFlows: ['First-time Onboarding'] },
             tasks: [{ id: 't1', title: 'Initialize Vite app', status: 'todo' }],
             promptPacks: [
                 {
@@ -141,11 +141,13 @@ describe('buildConsolidatedPlan', () => {
         expect(plan!.milestones[0].promptPacks?.[0].id).toBe('pp_setup');
         expect(plan!.summary.buildStrategy).toBe('Ship a walking skeleton first, then layer features.');
         expect(plan!.globalQualityGates.map(g => g.id)).toEqual(['g1']);
-        // Traceability derives from milestone + task links.
+        // Traceability derives from milestone + task links (userFlows are
+        // milestone-level links — recorded since the plan sources flows, W2).
         expect(plan!.traceability[0]).toMatchObject({
             milestoneId: 'm_setup',
             screens: ['Landing'],
             dataModels: ['User'],
+            userFlows: ['First-time Onboarding'],
             promptPackIds: ['pp_setup'],
             qualityGateIds: ['qg1'],
         });

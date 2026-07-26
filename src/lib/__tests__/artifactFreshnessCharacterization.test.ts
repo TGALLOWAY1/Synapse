@@ -81,6 +81,8 @@ function healthyInput(): DependencyEvaluationInput {
             spineRef(SPINE_V1),
             artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
             artifactRef('art-data_model', 'ver-data_model-1'),
+            // Recorded since the plan gained the user_flows dep (W2).
+            artifactRef('art-user_flows', 'ver-user_flows-1'),
         ],
     });
     snapshots.mockup = snapshot('mockup', {
