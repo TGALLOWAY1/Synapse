@@ -39,6 +39,19 @@
 //  - FAIL CLOSED. An input that cannot be verified (absent freshness, an
 //    unverifiable readiness commitment, a commitment bound to a different
 //    spine) blocks rather than passing silently.
+//  - SELF-REPORTED PROGRESS IS NEVER EVIDENCE (plan §W8). Nothing in this
+//    module may read a task's progress state: not `ImplementationPlanTask
+//    .status`, not the persisted `ProjectTask.status` the Implementation
+//    progress checklist ticks, and not the `planProgress` overlay. Synapse
+//    never runs a build, a test, or a command, so "implemented" is a user
+//    claim (see `lib/taskProgressLanguage.ts`) — treating it as evidence would
+//    let a project tick its way to a green packet. Plan tasks are read for
+//    their STRUCTURE only: ids, titles, descriptions, `linkedArtifacts`,
+//    `dependencies`, and the verification texts around them (definition of
+//    done, quality gates, prompt-pack acceptance criteria).
+//    `BuildPacketReadinessInput` deliberately has no tasks/progress field.
+//    Locked by `__tests__/buildPacketReadiness.test.ts` →
+//    "self-reported task progress is never evidence".
 //
 // Every criterion carries evidence and a navigable action target so §W7's
 // Final Review can render "Resolve N blockers" with somewhere to send the user.
@@ -417,6 +430,14 @@ export function resolveInScopeRequirements(
 
 // --- Plan projection ----------------------------------------------------------
 
+/**
+ * A plan task, projected to exactly the fields this evaluator is allowed to
+ * read. `task.status` is carried on the underlying `ImplementationPlanTask`
+ * but is deliberately NOT projected and must not be consulted here: it is
+ * self-reported progress, not evidence (see the §W8 rule in the module
+ * header). If you need to know whether something is *verifiable*, look at the
+ * verification texts on `PlanMilestoneEntry`, not at what someone ticked.
+ */
 interface PlanTaskEntry {
     task: ImplementationPlanTask;
     milestoneId: string;
@@ -1081,7 +1102,7 @@ export function deriveBuildPacketReadiness(
             if (declaredCriteria.length === 0) {
                 coverageBlockerIds.push(addBlocker(collector, 'requirement_coverage', 'no_criterion', feature.id, {
                     title: `"${feature.name}" declares no acceptance criterion`,
-                    consequence: 'A requirement with no acceptance criterion cannot be verified as built — the task can be "done" with nothing to check it against.',
+                    consequence: 'A requirement with no acceptance criterion cannot be verified as built — the task can be marked implemented with nothing to check it against.',
                     remedy: 'Add acceptance criteria to this feature in the PRD.',
                     evidenceQuality: 'incomplete',
                     actionTarget: { kind: 'feature', featureId: feature.id },

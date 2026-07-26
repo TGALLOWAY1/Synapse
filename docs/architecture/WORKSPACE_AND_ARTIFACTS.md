@@ -225,11 +225,13 @@ Convert-to-Tasks all keep working). See
   defect §W7 fixed. User progress (copied packs only) persists as the
   **`planProgress` metadata overlay** on the implementation_plan
   ArtifactVersion (`readPlanProgress`; same per-version pattern as
-  screenEdits/promptEdits — regeneration starts clean; written silently via
-  `updateArtifactVersionMetadata`, no history event). Saved
-  `ProjectTask`s are threaded in as `savedTasks` so structured-plan task ids
-  (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs merely
-  planned. Fence-less, milestone-less content falls back to the old timeline
+  screenEdits/promptEdits — regeneration starts clean; written through
+  `updateArtifactOverlay` like every other user overlay, cross-cutting rule
+  12). Saved `ProjectTask`s are threaded in as `savedTasks` so structured-plan
+  task ids (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs
+  merely planned, and any self-reported progress on them is named per
+  "Task progress is SELF-REPORTED" below.
+  Fence-less, milestone-less content falls back to the old timeline
   / plain markdown. `ArtifactWorkspace` threads the legacy standalone
   prompt_pack artifact's preferred content in as `promptPackContent`, plus
   `sourceVersions` (core_artifact sourceRefs resolved to "Data Model v2"
@@ -539,9 +541,52 @@ call) from the plan's structured JSON or legacy markdown. `ConvertToTasksModal`
   the created issue refs to the matching persisted tasks.
 
 `TaskChecklist` (`src/components/tasks/`) renders above the Implementation Plan
-content when saved tasks exist: a progress bar (`done / total`), a status
-toggle per row cycling todo → in_progress → done, expandable acceptance
-criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
-button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
-`sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
-up in `deleteProject`.
+content when saved tasks exist: a progress bar, a status toggle per row,
+expandable acceptance criteria, and a link to any exported GitHub issue. The
+"Convert to Tasks" button becomes "Manage Tasks (N)" once tasks are saved.
+Tasks capture `sourceSpineVersionId` for future staleness hints. Persisted
+tasks are cleaned up in `deleteProject`.
+
+#### Task progress is SELF-REPORTED, and says so (plan §W8)
+
+Synapse ends at the plan + prompts handoff — it never runs a build, a test, or
+a command — so it holds **no evidence** that a task was implemented. Every
+progress state is something the user ticked, and the vocabulary says that out
+loud: **planned → started → implemented (self-reported)**.
+
+- **`src/lib/taskProgressLanguage.ts` is the single source of those words.**
+  `taskProgressCopy(status)` maps a *stored* value to `{ label, longLabel,
+  nextAction }`; `TASK_PROGRESS_SELF_REPORTED_NOTE` is the one line that states
+  Synapse does not verify execution. Don't inline a status label at a surface.
+- **Presentation only — the persisted vocabulary is unchanged.** `TaskStatus`
+  is still `todo | in_progress | done | blocked`, so older projects, snapshots,
+  sync, exports and the plan-markdown round-trip keep working; §W8 renamed
+  nothing on disk and migrated nothing. Mapping: `todo` → Planned,
+  `in_progress` → Started, `done` → **Implemented (self-reported)**, `blocked`
+  → Blocked (import-only; no UI writes it). An unrecognized stored value reads
+  as Planned — never as implemented (cross-cutting rule 3's spirit).
+- **Where it renders.** `TaskChecklist` (the only surface that writes progress):
+  the toggle's accessible name/tooltip is `"<longLabel> — click to
+  <nextAction>"`, the header count reads `"N of M marked implemented · K
+  started"`, the bar is `aria-label`led "Self-reported implementation
+  progress", and the note renders **once** under the bar. `MilestoneCard`
+  build-task rows (read-only reflections of either a converted `ProjectTask` or
+  a legacy `- [x]` markdown deliverable) name any non-planned state in a small
+  chip with `longLabel` as its `title`, and the milestone's tracked count is
+  suffixed `· self-reported`. **One line per surface, never a per-row banner or
+  a modal.**
+- **Build-packet readiness must never count it as evidence.**
+  `buildPacketReadiness.ts` (§W6) reads plan tasks for their *structure* only —
+  ids, titles, descriptions, `linkedArtifacts`, `dependencies`, and the
+  verification texts around them. It does not read a plan task's `status`, the
+  persisted `ProjectTask.status`, or the `planProgress` overlay, and
+  `BuildPacketReadinessInput` deliberately has no field for them; otherwise a
+  project could tick its way to a green packet. Locked by
+  `buildPacketReadiness.test.ts` → "self-reported task progress is never
+  evidence" (flipping every stored status must not change the evaluation).
+- **Deliberately not built:** CI/command evidence ingestion. §6 of
+  docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md defers it (it needs an evidence
+  transport, a trust model, and staleness rules); honest labelling removes the
+  misleading signal at a fraction of the cost. Do not add a verified-state
+  lifecycle here without that plan — §W8 exists partly to hold the line against
+  Synapse drifting into a project-management tool.

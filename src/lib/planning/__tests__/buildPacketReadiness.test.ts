@@ -5,6 +5,7 @@ import type {
     Feature,
     PlanMeasurementSection,
     StructuredPRD,
+    TaskStatus,
 } from '../../../types';
 import type { DependencyNodeEvaluation, DependencyNodeId } from '../../artifactDependencyGraph';
 import type { ApiEndpointLike } from '../../apiContractCompleteness';
@@ -302,6 +303,88 @@ describe('deriveBuildPacketReadiness — separation from planning readiness', ()
         const second = deriveBuildPacketReadiness(input);
 
         expect(second.blockers.map(item => item.id)).toEqual(first.blockers.map(item => item.id));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §W8 — self-reported task progress is NEVER evidence.
+//
+// Synapse never runs a build, a test, or a command, so a task's progress state
+// is a user claim (see `lib/taskProgressLanguage.ts`). If this evaluator ever
+// started reading it, a project could tick its way to a green packet. These
+// tests lock the module header's §W8 rule: flipping every task's stored status
+// must change NOTHING about the evaluation.
+// ---------------------------------------------------------------------------
+
+describe('deriveBuildPacketReadiness — self-reported task progress is never evidence', () => {
+    const withEveryTaskStatus = (
+        planInput: BuildPacketPlanInput,
+        status: TaskStatus,
+    ): BuildPacketPlanInput => ({
+        ...planInput,
+        milestones: (planInput.milestones ?? []).map(milestone => ({
+            ...milestone,
+            tasks: (milestone.tasks ?? []).map(task => ({ ...task, status })),
+        })),
+    });
+
+    // Every stored value, including the import-only legacy `blocked`.
+    const statuses: TaskStatus[] = ['todo', 'in_progress', 'done', 'blocked'];
+
+    it.each(statuses)(
+        'a well-formed packet evaluates identically with every task stored as %s',
+        (status) => {
+            const baseline = deriveBuildPacketReadiness(wellFormedInput());
+            const reported = deriveBuildPacketReadiness(wellFormedInput({
+                plan: withEveryTaskStatus(plan(), status),
+            }));
+
+            expect(reported).toEqual(baseline);
+        },
+    );
+
+    it('does not clear a blocker when every task is marked implemented', () => {
+        // An in-scope requirement with no acceptance criterion — a genuine
+        // coverage blocker that ticking tasks must not resolve.
+        const input = (status: TaskStatus): BuildPacketReadinessInput => wellFormedInput({
+            prd: prd({
+                features: [
+                    feature({ id: 'f1', name: 'Mood capture', acceptanceCriteria: [F1_CRITERION] }),
+                    feature({ id: 'f2', name: 'Resonance playlist', acceptanceCriteria: [] }),
+                ],
+            }),
+            plan: withEveryTaskStatus(plan(), status),
+        });
+
+        const planned = deriveBuildPacketReadiness(input('todo'));
+        const implemented = deriveBuildPacketReadiness(input('done'));
+
+        expect(planned.isPacketComplete).toBe(false);
+        expect(implemented.isPacketComplete).toBe(false);
+        expect(implemented.blockers).toEqual(planned.blockers);
+        expect(criterion(implemented, 'requirement_coverage').status).toBe('attention');
+    });
+
+    it('cites no task progress in its evidence, whatever the stored statuses say', () => {
+        const result = deriveBuildPacketReadiness(wellFormedInput({
+            plan: withEveryTaskStatus(plan(), 'done'),
+        }));
+        const summaries = result.criteria.flatMap(item => item.evidence.map(e => e.summary));
+
+        expect(summaries.length).toBeGreaterThan(0);
+        for (const summary of summaries) {
+            expect(summary).not.toMatch(/self-reported|marked implemented|in_progress|\bticked\b/i);
+        }
+    });
+
+    it('accepts no tasks or progress field on its input contract', () => {
+        // The transport itself is the guardrail: adding a progress input would
+        // have to change this list, which is the review moment §W8 wants.
+        const input = wellFormedInput() as unknown as Record<string, unknown>;
+
+        for (const key of Object.keys(input)) {
+            expect(key).not.toMatch(/task|progress|checkbox|checklist/i);
+        }
     });
 });
 

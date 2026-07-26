@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ImplementationPlanRenderer } from '../renderers/ImplementationPlanRenderer';
-import type { StructuredImplementationPlan } from '../../types';
+import type { ProjectTask, StructuredImplementationPlan, TaskStatus } from '../../types';
 import {
     implementationPlanAnchor,
     type ImplementationPlanNavigationTarget,
@@ -253,5 +253,85 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         render(<ImplementationPlanRenderer content={malformed} />);
         // Falls through to plain markdown rendering of the body.
         expect(screen.queryByRole('button', { name: /Coverage/ })).not.toBeInTheDocument();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Plan §W8 — a milestone's build-task rows carry SELF-REPORTED progress, from
+// either a converted ProjectTask the user ticked or a legacy `- [x]` markdown
+// deliverable. Neither is a Synapse verification, so the row names the state
+// instead of leaving a bare green check to imply one.
+// ---------------------------------------------------------------------------
+
+describe('ImplementationPlanRenderer — self-reported task progress on milestone rows', () => {
+    const savedTask = (id: string, status: TaskStatus): ProjectTask => ({
+        id,
+        projectId: 'p1',
+        sourceArtifactId: 'artifact-plan',
+        title: `Saved ${id}`,
+        summary: 'summary',
+        acceptanceCriteria: [],
+        status,
+        createdAt: 1,
+        updatedAt: 1,
+    });
+
+    const openRoadmap = () => fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }));
+
+    it('names a converted task marked implemented, and says the milestone count is self-reported', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'done')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByText(/1 of 1 tracked in Implementation progress · self-reported/)).toBeInTheDocument();
+        const chip = screen.getByTitle('Implemented (self-reported)');
+        expect(chip).toHaveTextContent('implemented');
+    });
+
+    it('names a converted task marked started', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'in_progress')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByTitle('Started')).toHaveTextContent('started');
+    });
+
+    it('keeps the neutral "tracked" chip for a converted task with no progress yet', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'todo')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByTitle('Tracked in Implementation progress')).toHaveTextContent('tracked');
+        expect(screen.queryByText('implemented')).not.toBeInTheDocument();
+    });
+
+    it('shows no progress chip for an unconverted plan task', () => {
+        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
+        openRoadmap();
+
+        expect(screen.getByText('Initialize Vite app')).toBeInTheDocument();
+        expect(screen.queryByTitle(/Implemented|Started|Tracked/)).not.toBeInTheDocument();
+        expect(screen.getByText(/Planned steps — use Convert to tasks/)).toBeInTheDocument();
+    });
+
+    it('labels a legacy checked markdown deliverable as self-reported, not as a bare check', () => {
+        const checkedLegacy = LEGACY_MARKDOWN.replace('- [ ] Initialize repository', '- [x] Initialize repository');
+        render(<ImplementationPlanRenderer content={checkedLegacy} />);
+        openRoadmap();
+
+        expect(screen.getByText('Initialize repository')).toBeInTheDocument();
+        expect(screen.getByTitle('Implemented (self-reported)')).toHaveTextContent('implemented');
     });
 });
