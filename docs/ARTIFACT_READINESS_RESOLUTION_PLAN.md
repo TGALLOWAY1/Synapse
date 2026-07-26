@@ -6,7 +6,13 @@
 *"produces a packet whose readiness signal is backed by the evidence it claims,"*
 and then update the audit to reflect what actually shipped.
 
-This document is a **plan**, not a change. Nothing here has been implemented.
+**Status (updated 2026-07-26).** Workstreams **W1–W8 have shipped** in PR #334
+(`3395eaa`…`4317eb3`); the designs below describe implemented behavior, not
+intent. What remains is the §5 **closing** update — re-running the audit's six
+scenarios against the shipped product and rewriting its verdict — which plan §5
+gates on a manual QA pass and an `/e2e` run, plus the §6 deferrals. Where an
+implementation deviated from the design here, the deviation is recorded in the
+landing commit's message and in the topic doc named by the workstream.
 
 ---
 
