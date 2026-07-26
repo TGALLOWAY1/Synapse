@@ -98,6 +98,36 @@ banner with Regenerate and, only when policy permits, rationale-backed
 acceptance. Keep the blocker list conservative — advisory warnings stay
 non-blocking and appear in checkpoint summaries.
 
+### API-contract completeness — advisory (`src/lib/apiContractCompleteness.ts`)
+
+A pure, **derived-on-read, advisory-only** check over the Data Model's API
+endpoints (W3 of the artifact-readiness plan). Each endpoint is scored against
+the contract field set on `ApiEndpointContract` (auth.authentication /
+auth.authorization / requestSchema / responseSchema / errors as **core**
+implementability fields; pagination / idempotency / rateLimit / requirementIds
+/ tests as **supplementary**):
+
+- **`complete`** — every core AND supplementary field present (non-blank,
+  non-empty arrays).
+- **`partial`** — some contract fields present, some missing; the result
+  names the **specific missing fields** per endpoint (`missingFields`, plus
+  the `missingCoreFields` subset).
+- **`stub`** — no contract field present at all: the legacy
+  method/path/description/entity-only shape. This is an honest "no contract
+  details" state, **never an error** — legacy persisted data models read as
+  stubs without any regeneration pressure beyond the advisory copy.
+
+`evaluateApiContractCompleteness` rolls the per-endpoint scores into a
+section-level status (`empty | complete | partial | stub`) that drives the
+API Contract review section's chip in `DataModelRenderer` (which segments the
+data model into Schema → API Contract → Privacy & Security review sections).
+Nothing here gates rendering, generation, or validation, and
+`artifactBlockingValidation.ts` is deliberately untouched (its data_model
+check remains the coarse "has an API surface at all" blocker). **Blocking
+arrives with W6**: the build-packet readiness evaluator will consume this
+module for endpoints reachable from the first slice — it must reuse this
+module's field set rather than re-deriving its own.
+
 **Automatic traceability repair — never surface a "no traceability" blocker
 before attempting repair** (`src/lib/artifactTraceabilityRepair.ts`, pure).
 Blocker (3) — missing PRD-feature traceability — is often a false positive: an

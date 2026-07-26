@@ -706,6 +706,36 @@
     (the `prdVersionLabel` prop is passed only to `implementation_plan` now). Do
     **not** change `dataModelMarkdown.ts`'s parser output shape without
     re-checking `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
+    - **API endpoints are full contracts (W3, 2026-07), declared in three
+      layers that must move together:** the `dataModelSchema.apiEndpoints`
+      response schema (`schemas/artifactSchemas.ts`), the exported
+      `ApiEndpointContract` type (`src/types/index.ts` —
+      `DataModelContent.apiEndpoints`), and `ParsedApiEndpoint` +
+      emitter/parser in `services/dataModelMarkdown.ts`. Beyond the original
+      required `method`/`path`/`description`/`entity`, each endpoint carries
+      **optional** contract fields: `auth` ({authentication, authorization}),
+      `requestSchema`, `responseSchema`, `errors`, `pagination`,
+      `idempotency`, `rateLimit`, `requirementIds` (canonical PRD `Feature`
+      ids — plain strings, same vocabulary as entity `featureRefs`), and
+      `tests`. They are non-required in the Gemini schema and optional in the
+      domain type (cross-cutting rule 3) so a model that omits one still
+      produces a parseable artifact and legacy persisted data models render
+      unchanged. The prompt requirement text is the shared fragment
+      **`API_ENDPOINT_CONTRACT_SPEC`** (`prompts/artifactPromptFragments.ts`),
+      composed into the `data_model` system prompt — edit it there, never
+      inline, and update the `promptSurfaces` snapshot in the same change.
+      **Markdown form:** the emitter writes a per-endpoint **block**
+      (`### METHOD /path` + labeled `- **Label:** …` bullets, list bullets for
+      Errors/Tests) under `## API Endpoints` instead of the old 3–4 column
+      table, so schemas and error lists survive the markdown round-trip; the
+      parser reads the block form first and **falls back to the legacy table
+      parser** for pre-contract persisted documents. The `DataModelRenderer`
+      presents the artifact as three explicit review sections — **Schema →
+      API Contract → Privacy & Security** — with per-section derived
+      completeness chips; the API section scores each endpoint
+      `complete | partial | stub` via `src/lib/apiContractCompleteness.ts`
+      (advisory-only; see SAFETY_AND_VALIDATION.md). Endpoints with no
+      contract fields (legacy) read as neutral "stub", never as errors.
     `component_inventory` (UI Components) is a **hidden artifact** (see
     "Post-finalization transition" below) with no reachable render UI — the
     old mobile-first searchable component-library renderer (sticky search +
@@ -781,7 +811,9 @@
 - **Shared prompt fragments & snapshot net.**
   `prompts/artifactPromptFragments.ts` holds the artifact-prompt sentences that
   used to be copy-pasted across `CORE_ARTIFACT_PROMPTS` subtypes
-  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`);
+  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`, and
+  `API_ENDPOINT_CONTRACT_SPEC` — the data_model endpoint-contract requirement
+  text, mirrored by `apiContractCompleteness.ts` on the read side);
   `prompts/imagePromptFragments.ts` holds the image-prompt strings shared by
   the internal gpt-image-2 builder and the external copy prompt
   (`IMAGE_PLATFORM_HINTS`, `IMAGE_CLOSING_RULES`, and `fidelityStyleHint(fidelity,

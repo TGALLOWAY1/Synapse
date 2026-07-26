@@ -1856,7 +1856,18 @@ For each entity, populate:
 - privacyRules: separate from constraints. Privacy/safety rules like "raw_input must be null when source = FACE_SCAN", "PII fields must be encrypted at rest", "soft-delete only — never hard delete". Use this for anything safety, privacy, or compliance related.
 - exampleRecord: optional. For the FIRST userFacing entity (and others only when illustrative), provide a compact example record as a JSON-encoded STRING (e.g., "{\\"joy_score\\": 0.7, \\"energy_level\\": 0.6, \\"vibe_title\\": \\"Warm Sunset Drift\\"}"). 4-8 fields max; keep it illustrative, not exhaustive.
 
-Top-level apiEndpoints: existing array of { method, path, description, entity }. Required.
+Top-level apiEndpoints: REQUIRED. Each endpoint is a full, implementable API contract — not a bare route listing. Per endpoint:
+
+- method, path, description, entity: existing fields. entity MUST name one of the entities defined above.
+- auth: { authentication, authorization }. authentication states how the caller is identified (e.g. "Bearer JWT required", "none (public)"); authorization states WHO may call it and the ownership/role rule enforced (e.g. "Playlist owner only", "Any authenticated user").
+- requestSchema: compact single-line shape of the request body/query using the entity's exact field names (e.g. "{ joy_score: Float, energy_level: Float }"); use "none" when the endpoint takes no input beyond the path.
+- responseSchema: compact single-line shape of the success response body using entity field names; use "none" for empty (204) responses.
+- errors: the realistic failure cases as "STATUS — when it occurs" strings (e.g. "404 — snapshot does not exist", "422 — scores outside 0-1"). Include auth and not-found/validation cases where applicable.
+- pagination: the pagination contract for list endpoints (e.g. "cursor-based, limit max 100"); "none" for single-resource endpoints.
+- idempotency: whether/how repeat calls are safe (e.g. "safe (GET)", "idempotent (PUT by id)", "not idempotent — creates a new record per call").
+- rateLimit: an appropriate limit for the endpoint's sensitivity (e.g. "60/min per user").
+- requirementIds: the canonical PRD feature ids (e.g. "f1", "f3") this endpoint serves, drawn from the Canonical Feature Glossary in the user prompt — the same id vocabulary as entity featureRefs. Use ONLY ids that appear in the glossary; never invent one. Every endpoint must serve at least one feature.
+- tests: 2-4 concrete acceptance checks a developer can turn into integration tests (happy path plus the most important error case).
 
 Top-level productMapping: an array of { field, uiBehavior } mapping the most product-relevant fields to visible UI behavior (e.g., { field: "vibe_title", uiBehavior: "Appears as the generated playlist name" }, { field: "energy_level", uiBehavior: "Affects track intensity" }). Aim for 5-10 entries covering the fields that most directly shape the user experience.
 

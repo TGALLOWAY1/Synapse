@@ -247,6 +247,129 @@ A patient record.
     });
 });
 
+describe('API endpoint contract block form', () => {
+    const contractModel: DataModelContent = {
+        entities: fullModel.entities,
+        apiEndpoints: [
+            {
+                method: 'POST',
+                path: '/api/snapshots',
+                description: 'Create a snapshot',
+                entity: 'MoodSnapshot',
+                auth: { authentication: 'Bearer JWT required', authorization: 'Any authenticated user' },
+                requestSchema: '{ joy_score: Float, energy_level: Float }',
+                responseSchema: '{ id: UUID, joy_score: Float }',
+                errors: ['401 — missing or invalid token', '422 — scores outside 0-1'],
+                pagination: 'none',
+                idempotency: 'not idempotent — creates a new record per call',
+                rateLimit: '60/min per user',
+                requirementIds: ['f1', 'f3'],
+                tests: ['Creates a snapshot for a valid payload', 'Rejects out-of-range scores with 422'],
+            },
+            // Legacy-shaped endpoint mixed in: only the original four fields.
+            { method: 'GET', path: '/api/playlists/:id', description: 'Fetch a playlist', entity: 'ResonancePlaylist' },
+        ],
+    };
+
+    it('emits one ### METHOD /path block per endpoint under the API Endpoints heading', () => {
+        const md = dataModelToMarkdown(contractModel);
+        expect(md).toContain('## API Endpoints');
+        expect(md).toContain('### POST /api/snapshots');
+        expect(md).toContain('### GET /api/playlists/:id');
+        expect(md).toContain('- **Entity:** MoodSnapshot');
+        expect(md).toContain('- **Authentication:** Bearer JWT required');
+        expect(md).toContain('- **Authorization:** Any authenticated user');
+        expect(md).toContain('- **Request:** { joy_score: Float, energy_level: Float }');
+        expect(md).toContain('- **Response:** { id: UUID, joy_score: Float }');
+        expect(md).toContain('- **Errors:**\n  - 401 — missing or invalid token\n  - 422 — scores outside 0-1');
+        expect(md).toContain('- **Pagination:** none');
+        expect(md).toContain('- **Idempotency:** not idempotent — creates a new record per call');
+        expect(md).toContain('- **Rate limit:** 60/min per user');
+        expect(md).toContain('- **Requirements:** f1, f3');
+        expect(md).toContain('- **Tests:**\n  - Creates a snapshot for a valid payload');
+        // No legacy table emitted any more.
+        expect(md).not.toContain('| Method | Path |');
+    });
+
+    it('round-trips every contract field through emit → parse', () => {
+        const parsed = parseDataModelMarkdown(dataModelToMarkdown(contractModel));
+        expect(parsed).not.toBeNull();
+        expect(parsed!.apiEndpoints).toHaveLength(2);
+
+        const [full, legacy] = parsed!.apiEndpoints;
+        expect(full).toEqual({
+            method: 'POST',
+            path: '/api/snapshots',
+            description: 'Create a snapshot',
+            entity: 'MoodSnapshot',
+            auth: { authentication: 'Bearer JWT required', authorization: 'Any authenticated user' },
+            requestSchema: '{ joy_score: Float, energy_level: Float }',
+            responseSchema: '{ id: UUID, joy_score: Float }',
+            errors: ['401 — missing or invalid token', '422 — scores outside 0-1'],
+            pagination: 'none',
+            idempotency: 'not idempotent — creates a new record per call',
+            rateLimit: '60/min per user',
+            requirementIds: ['f1', 'f3'],
+            tests: ['Creates a snapshot for a valid payload', 'Rejects out-of-range scores with 422'],
+        });
+
+        // A legacy-shaped endpoint round-trips as exactly the original four
+        // fields — no contract fields invented.
+        expect(legacy).toEqual({
+            method: 'GET',
+            path: '/api/playlists/:id',
+            description: 'Fetch a playlist',
+            entity: 'ResonancePlaylist',
+        });
+    });
+
+    it('still parses the legacy table form as a fallback', () => {
+        const legacyDoc = `# Data Model
+
+## Order
+
+A purchase.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+
+## API Endpoints
+
+| Method | Path | Description | Entity |
+|--------|------|-------------|--------|
+| GET | /api/orders | List orders | Order |
+| POST | /api/orders | Create an order | Order |
+`;
+        const parsed = parseDataModelMarkdown(legacyDoc);
+        expect(parsed).not.toBeNull();
+        expect(parsed!.apiEndpoints).toHaveLength(2);
+        expect(parsed!.apiEndpoints[0]).toMatchObject({
+            method: 'GET',
+            path: '/api/orders',
+            description: 'List orders',
+            entity: 'Order',
+        });
+        expect(parsed!.apiEndpoints[0].auth).toBeUndefined();
+        expect(parsed!.apiEndpoints[0].errors).toBeUndefined();
+    });
+
+    it('collapses multi-line contract values onto one line so the bullets stay parseable', () => {
+        const model: DataModelContent = {
+            entities: fullModel.entities,
+            apiEndpoints: [{
+                method: 'POST',
+                path: '/api/things',
+                description: 'Make a thing',
+                entity: 'MoodSnapshot',
+                requestSchema: '{\n  name: String,\n  size: Integer\n}',
+            }],
+        };
+        const parsed = parseDataModelMarkdown(dataModelToMarkdown(model));
+        expect(parsed!.apiEndpoints[0].requestSchema).toBe('{ name: String, size: Integer }');
+    });
+});
+
 describe('applyFieldGroupHeuristic', () => {
     const entity: DataEntity = {
         name: 'Order',

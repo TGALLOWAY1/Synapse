@@ -193,6 +193,12 @@ export const dataModelSchema = {
                 required: ["name", "description", "fields", "relationships"],
             },
         },
+        // Each endpoint is a full API contract, not a route listing. The four
+        // original fields stay required; every contract field added by the
+        // API-contract workstream is deliberately NON-required so a model
+        // that omits one still produces a parseable artifact (completeness is
+        // scored advisorily on read — src/lib/apiContractCompleteness.ts).
+        // Mirrors `ApiEndpointContract` in src/types/index.ts.
         apiEndpoints: {
             type: "ARRAY",
             items: {
@@ -202,6 +208,34 @@ export const dataModelSchema = {
                     path: { type: "STRING" },
                     description: { type: "STRING" },
                     entity: { type: "STRING" },
+                    auth: {
+                        type: "OBJECT",
+                        properties: {
+                            authentication: { type: "STRING", description: "How the caller is identified, e.g. 'Bearer JWT required' or 'none (public)'." },
+                            authorization: { type: "STRING", description: "Who may call this endpoint and the ownership/role rule enforced, e.g. 'Playlist owner only'." },
+                        },
+                        required: ["authentication", "authorization"],
+                    },
+                    requestSchema: { type: "STRING", description: "Compact single-line shape of the request body/query using the entity's exact field names; 'none' when the endpoint takes no input beyond the path." },
+                    responseSchema: { type: "STRING", description: "Compact single-line shape of the success response body using entity field names; 'none' for empty (204) responses." },
+                    errors: {
+                        type: "ARRAY",
+                        description: "Realistic failure cases as 'STATUS — when it occurs' strings, e.g. '404 — snapshot does not exist'.",
+                        items: { type: "STRING" },
+                    },
+                    pagination: { type: "STRING", description: "Pagination contract for list endpoints; 'none' for single-resource endpoints." },
+                    idempotency: { type: "STRING", description: "Whether/how repeat calls are safe, e.g. 'safe (GET)' or 'not idempotent — creates a new record per call'." },
+                    rateLimit: { type: "STRING", description: "An appropriate rate limit for the endpoint's sensitivity, e.g. '60/min per user'." },
+                    requirementIds: {
+                        type: "ARRAY",
+                        description: "Canonical PRD feature ids this endpoint serves, drawn from the Canonical Feature Glossary. Do not invent ids.",
+                        items: { type: "STRING" },
+                    },
+                    tests: {
+                        type: "ARRAY",
+                        description: "2-4 concrete acceptance checks a developer can turn into integration tests.",
+                        items: { type: "STRING" },
+                    },
                 },
                 required: ["method", "path", "description", "entity"],
             },

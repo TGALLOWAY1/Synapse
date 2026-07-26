@@ -959,9 +959,59 @@ export interface ProductMappingEntry {
     uiBehavior: string;
 }
 
+/**
+ * Authentication + authorization rule for an API endpoint. Both halves are
+ * optional on read — partial legacy data must never fail to parse — but the
+ * generation schema asks for both whenever `auth` is emitted.
+ */
+export interface ApiEndpointAuth {
+    /** How the caller is identified (e.g. "Bearer JWT required", "none (public)"). */
+    authentication?: string;
+    /** Who may call the endpoint and the ownership/role rule enforced. */
+    authorization?: string;
+}
+
+/**
+ * A single API endpoint contract on the Data Model artifact. The original
+ * four fields (method/path/description/entity) are required — every
+ * generation has always emitted them. Every contract field added by the
+ * API-contract workstream (auth, request/response schemas, errors,
+ * pagination, idempotency, rate limit, requirement ids, tests) is OPTIONAL:
+ * legacy persisted data models lack them and must render unchanged.
+ * Completeness over these fields is derived on read (advisory) by
+ * `src/lib/apiContractCompleteness.ts` — never persisted.
+ */
+export interface ApiEndpointContract {
+    method: string;
+    path: string;
+    description: string;
+    entity: string;
+    /** Authn + authz rule. */
+    auth?: ApiEndpointAuth;
+    /** Compact request body/query shape using entity field names ("none" when body-less). */
+    requestSchema?: string;
+    /** Compact success-response shape using entity field names. */
+    responseSchema?: string;
+    /** Failure cases as "STATUS — when it occurs" strings. */
+    errors?: string[];
+    /** Pagination contract for list endpoints ("none" for single-resource). */
+    pagination?: string;
+    /** Whether/how repeat calls are safe. */
+    idempotency?: string;
+    /** Appropriate rate limit for the endpoint's sensitivity. */
+    rateLimit?: string;
+    /**
+     * Canonical PRD Feature ids this endpoint serves (plain ids from
+     * `prd.features` — same vocabulary as `DataEntity.featureRefs`).
+     */
+    requirementIds?: string[];
+    /** Concrete acceptance checks a developer can turn into integration tests. */
+    tests?: string[];
+}
+
 export interface DataModelContent {
     entities: DataEntity[];
-    apiEndpoints?: { method: string; path: string; description: string; entity: string }[];
+    apiEndpoints?: ApiEndpointContract[];
     overview?: DataModelOverview;
     productMapping?: ProductMappingEntry[];
 }

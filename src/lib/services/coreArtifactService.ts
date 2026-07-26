@@ -12,7 +12,7 @@ import { callGeminiStream } from '../geminiClient';
 import type { ProviderOptions, GeminiTokenUsage } from '../geminiClient';
 import { repairTruncatedJson } from '../jsonRepair';
 import type { LlmTraceMeta } from '../trace/traceTypes';
-import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE } from '../prompts/artifactPromptFragments';
+import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE, API_ENDPOINT_CONTRACT_SPEC } from '../prompts/artifactPromptFragments';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
@@ -259,7 +259,7 @@ For each entity, populate:
 - privacyRules: separate from constraints. Privacy/safety rules like "raw_input must be null when source = FACE_SCAN", "PII fields must be encrypted at rest", "soft-delete only — never hard delete". Use this for anything safety, privacy, or compliance related.
 - exampleRecord: optional. For the FIRST userFacing entity (and others only when illustrative), provide a compact example record as a JSON-encoded STRING (e.g., "{\\"joy_score\\": 0.7, \\"energy_level\\": 0.6, \\"vibe_title\\": \\"Warm Sunset Drift\\"}"). 4-8 fields max; keep it illustrative, not exhaustive.
 
-Top-level apiEndpoints: existing array of { method, path, description, entity }. Required.
+${API_ENDPOINT_CONTRACT_SPEC}
 
 Top-level productMapping: an array of { field, uiBehavior } mapping the most product-relevant fields to visible UI behavior (e.g., { field: "vibe_title", uiBehavior: "Appears as the generated playlist name" }, { field: "energy_level", uiBehavior: "Affects track intensity" }). Aim for 5-10 entries covering the fields that most directly shape the user experience.
 

@@ -1,4 +1,5 @@
 import type {
+    ApiEndpointContract,
     DataEntity,
     DataField,
     DataModelContent,
@@ -64,10 +65,13 @@ export interface ParsedEntity {
     groupsAutoDetected: boolean;
 }
 
-export interface ParsedApiEndpoint {
-    method: string;
-    path: string;
-    description: string;
+/**
+ * Parsed endpoint — mirrors `ApiEndpointContract` (src/types) except that
+ * `entity` is optional here: legacy 3-column tables carry no entity cell.
+ * All contract fields (auth/request/response/errors/…) are optional — legacy
+ * table-form documents lack them entirely and must keep parsing.
+ */
+export interface ParsedApiEndpoint extends Omit<ApiEndpointContract, 'entity'> {
     entity?: string;
 }
 
@@ -383,16 +387,61 @@ export function dataModelToMarkdown(model: DataModelContent): string {
     if (model.apiEndpoints?.length) {
         lines.push('## API Endpoints');
         lines.push('');
-        lines.push('| Method | Path | Description | Entity |');
-        lines.push('|--------|------|-------------|--------|');
         for (const ep of model.apiEndpoints) {
-            const desc = (ep.description || '').replace(/\|/g, '\\|');
-            lines.push(`| ${ep.method} | ${ep.path} | ${desc} | ${ep.entity} |`);
+            emitApiEndpointBlock(lines, ep);
         }
-        lines.push('');
     }
 
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+
+/** Collapse a value onto one line so it survives the bullet round-trip. */
+function singleLine(value: string | undefined): string | undefined {
+    const v = value?.replace(/\s*\n\s*/g, ' ').trim();
+    return v || undefined;
+}
+
+/**
+ * Per-endpoint BLOCK form (replaced the legacy 3–4 column table, which could
+ * not carry schemas/error lists through markdown). One `### METHOD /path`
+ * sub-heading per endpoint, then labeled bullets for each contract field —
+ * only fields that are actually present are emitted, so a legacy
+ * method/path/description/entity endpoint round-trips as exactly that.
+ * `parseApiEndpointBlocks` reads this shape back; the old table parser stays
+ * as the fallback for legacy persisted documents.
+ */
+function emitApiEndpointBlock(lines: string[], ep: ApiEndpointContract): void {
+    lines.push(`### ${ep.method.toUpperCase()} ${ep.path}`);
+    lines.push('');
+    const desc = singleLine(ep.description);
+    if (desc) {
+        lines.push(desc);
+        lines.push('');
+    }
+    const bullet = (label: string, value: string | undefined) => {
+        const v = singleLine(value);
+        if (v) lines.push(`- **${label}:** ${v}`);
+    };
+    const bulletList = (label: string, values: string[] | undefined) => {
+        const items = (values ?? [])
+            .map(v => singleLine(v))
+            .filter((v): v is string => Boolean(v));
+        if (items.length === 0) return;
+        lines.push(`- **${label}:**`);
+        for (const item of items) lines.push(`  - ${item}`);
+    };
+    bullet('Entity', ep.entity);
+    bullet('Authentication', ep.auth?.authentication);
+    bullet('Authorization', ep.auth?.authorization);
+    bullet('Request', ep.requestSchema);
+    bullet('Response', ep.responseSchema);
+    bulletList('Errors', ep.errors);
+    bullet('Pagination', ep.pagination);
+    bullet('Idempotency', ep.idempotency);
+    bullet('Rate limit', ep.rateLimit);
+    bullet('Requirements', ep.requirementIds?.length ? ep.requirementIds.join(', ') : undefined);
+    bulletList('Tests', ep.tests);
+    lines.push('');
 }
 
 function prettyJson(raw: string): string {
@@ -721,6 +770,124 @@ function parseOverview(body: string[]): ParsedDataModel['overview'] | undefined 
     return { summary, dataFlow, productOutcome };
 }
 
+/**
+ * Parse the per-endpoint BLOCK form emitted by `emitApiEndpointBlock`
+ * (`### METHOD /path` + labeled bullets). Returns [] when the body carries no
+ * endpoint blocks, in which case `parseApiEndpoints` falls back to the legacy
+ * table parser. Unknown bullet labels are ignored (forward-compatible).
+ */
+function parseApiEndpointBlocks(body: string[]): ParsedApiEndpoint[] {
+    const out: ParsedApiEndpoint[] = [];
+    let current: ParsedApiEndpoint | null = null;
+    let descLines: string[] = [];
+    let seenBullet = false;
+    let activeList: string[] | null = null;
+
+    const flushDescription = () => {
+        if (current && descLines.length > 0) {
+            current.description = descLines.join('\n').trim();
+            descLines = [];
+        }
+    };
+
+    for (const raw of body) {
+        const headerM = raw.match(/^###\s+(\S+)\s+(.+?)\s*$/);
+        if (headerM) {
+            flushDescription();
+            activeList = null;
+            seenBullet = false;
+            current = { method: headerM[1], path: headerM[2], description: '' };
+            out.push(current);
+            continue;
+        }
+        if (!current) continue;
+
+        // Indented sub-bullet feeding an open Errors/Tests list.
+        const subM = raw.match(/^\s+-\s+(.+?)\s*$/);
+        if (subM && activeList) {
+            activeList.push(subM[1]);
+            continue;
+        }
+
+        const bulletM = raw.match(/^-\s+\*\*([^:*]+):\*\*\s*(.*)$/);
+        if (bulletM) {
+            flushDescription();
+            activeList = null;
+            seenBullet = true;
+            const label = bulletM[1].trim().toLowerCase();
+            const value = bulletM[2].trim();
+            switch (label) {
+                case 'entity':
+                    if (value) current.entity = value;
+                    break;
+                case 'authentication':
+                    if (value) current.auth = { ...current.auth, authentication: value };
+                    break;
+                case 'authorization':
+                    if (value) current.auth = { ...current.auth, authorization: value };
+                    break;
+                case 'request':
+                    if (value) current.requestSchema = value;
+                    break;
+                case 'response':
+                    if (value) current.responseSchema = value;
+                    break;
+                case 'errors':
+                    current.errors = current.errors ?? [];
+                    if (value) current.errors.push(value);
+                    activeList = current.errors;
+                    break;
+                case 'pagination':
+                    if (value) current.pagination = value;
+                    break;
+                case 'idempotency':
+                    if (value) current.idempotency = value;
+                    break;
+                case 'rate limit':
+                    if (value) current.rateLimit = value;
+                    break;
+                case 'requirements':
+                    if (value) current.requirementIds = value.split(',').map(s => s.trim()).filter(Boolean);
+                    break;
+                case 'tests':
+                    current.tests = current.tests ?? [];
+                    if (value) current.tests.push(value);
+                    activeList = current.tests;
+                    break;
+                default:
+                    // Unknown label — ignore, stay forward-compatible.
+                    break;
+            }
+            continue;
+        }
+
+        // Plain prose between the heading and the first bullet → description.
+        // Prose after the bullets started is ignored (the emitter never
+        // produces it; the description always precedes the bullets).
+        if (raw.trim() !== '' && !seenBullet) {
+            descLines.push(raw);
+        }
+    }
+    flushDescription();
+
+    // Drop empty error/test arrays created by a bare label with no items.
+    for (const ep of out) {
+        if (ep.errors && ep.errors.length === 0) delete ep.errors;
+        if (ep.tests && ep.tests.length === 0) delete ep.tests;
+    }
+    return out;
+}
+
+/**
+ * Endpoint section dispatcher: prefer the block form; fall back to the legacy
+ * `| Method | Path | … |` table for persisted pre-contract documents.
+ */
+function parseApiEndpoints(body: string[]): ParsedApiEndpoint[] {
+    const blocks = parseApiEndpointBlocks(body);
+    if (blocks.length > 0) return blocks;
+    return parseApiEndpointsTable(body);
+}
+
 function parseApiEndpointsTable(body: string[]): ParsedApiEndpoint[] {
     const out: ParsedApiEndpoint[] = [];
     let i = 0;
@@ -810,7 +977,7 @@ export function parseDataModelMarkdown(markdown: string): ParsedDataModel | null
             continue;
         }
         if (heading === 'API Endpoints') {
-            result.apiEndpoints = parseApiEndpointsTable(section.body);
+            result.apiEndpoints = parseApiEndpoints(section.body);
             continue;
         }
         if (heading === 'How This Appears in the Product') {
