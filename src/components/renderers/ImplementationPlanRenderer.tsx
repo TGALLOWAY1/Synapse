@@ -10,6 +10,7 @@ import {
     type ImplementationPlanProgress,
 } from '../../lib/services/implementationPlanInsights';
 import { ConsolidatedPlanView } from './implementationPlan/ConsolidatedPlanView';
+import type { PlanFinalReviewContext } from './implementationPlan/FinalReviewCard';
 import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 
 // Render an `implementation_plan` artifact.
@@ -51,6 +52,8 @@ interface Props {
     initialMilestoneId?: string;
     /** Opens an exact architecture or delivery-plan region when it can be resolved safely. */
     initialNavigationTarget?: ImplementationPlanNavigationTarget;
+    /** Build-packet context for the Final Review surface (plan §W7). */
+    finalReview?: PlanFinalReviewContext;
 }
 
 // Minimal fallback for content the consolidated adapter can't build (malformed
@@ -95,6 +98,7 @@ export function ImplementationPlanRenderer({
     onUpdatePlanProgress,
     initialMilestoneId,
     initialNavigationTarget,
+    finalReview,
 }: Props) {
     const consolidated = useMemo(
         () => {
@@ -123,6 +127,7 @@ export function ImplementationPlanRenderer({
                 onUpdateProgress={onUpdatePlanProgress}
                 initialMilestoneId={initialMilestoneId}
                 initialNavigationTarget={initialNavigationTarget}
+                finalReview={finalReview}
             />
         );
     }

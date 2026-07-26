@@ -13,6 +13,7 @@ import { DataModelRenderer } from './DataModelRenderer';
 import { DesignSystemRenderer } from './DesignSystemRenderer';
 import { UserFlowsRenderer } from './UserFlowsRenderer';
 import { ImplementationPlanRenderer } from './ImplementationPlanRenderer';
+import type { PlanFinalReviewContext } from './implementationPlan/FinalReviewCard';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -83,6 +84,9 @@ interface DispatchProps {
      * duplicate of the page-level provenance/freshness strip.
      */
     staleness?: DependencyNodeStatus;
+    /** Only consumed by `implementation_plan`: build-packet context for the
+     * Final Review decision surface (plan §W7). */
+    planFinalReview?: PlanFinalReviewContext;
 }
 
 /**
@@ -151,6 +155,7 @@ export function ArtifactContentRenderer({
     sourceVersions,
     prdVersionLabel,
     staleness,
+    planFinalReview,
 }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
@@ -212,6 +217,7 @@ export function ArtifactContentRenderer({
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
                 initialNavigationTarget={initialImplementationTarget}
+                finalReview={planFinalReview}
             />
         );
     }

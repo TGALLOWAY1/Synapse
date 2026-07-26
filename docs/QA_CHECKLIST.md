@@ -213,10 +213,19 @@ Then check each output is usable:
       they serve.
 - [ ] **Data Model** — entities, fields and relationships; the entities named
       in the plan actually appear here.
-- [ ] **Implementation Plan** — the four tabs **Build Brief / Roadmap / Prompts
-      / Coverage** all render with content.
-- [ ] **Coverage** actually links work back to features and screens; it is not
-      empty.
+- [ ] **Implementation Plan** — the **Final Review** card renders above the tab
+      strip with **exactly one** primary action, and the three tabs **Build
+      Brief / Roadmap / Prompts** all render with content.
+- [ ] **Final Review's** primary action matches the state: *Resolve N blockers*
+      (expands the ordered blocker list, each entry navigating somewhere real),
+      *Approve build packet*, or *Copy first implementation prompt* once
+      approved. Copy plan / Review prompts / Convert to tasks stay inside
+      **More actions** in all three states.
+- [ ] **Artifact versions this approval covers** lists every output; after
+      regenerating one, that row reads *Changed since approval* and the CTA asks
+      to re-approve.
+- [ ] **Traceability matrix** (inside Final Review) actually links work back to
+      features and screens; it is not empty.
 - [ ] Tasks state objective completion conditions. Flag vague ones — *"improve
       the page"*, *"build the backend"*, *"make it intuitive"*.
 - [ ] **Dependency Graph** renders and shows the relationships between outputs.

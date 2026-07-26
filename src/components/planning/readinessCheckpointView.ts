@@ -1,4 +1,9 @@
 import type { ArtifactSlotKey, ReadinessActionTarget, ReadinessCommitmentEvent, ReadinessReview } from '../../types';
+import {
+    buildPacketSlotTitle,
+    type BuildPacketActionTarget,
+    type BuildPacketArtifactSection,
+} from '../../lib/planning/buildPacketReadiness';
 import type {
     ReadinessReviewCurrentness,
     ReadinessReviewCurrentnessReason,
@@ -81,6 +86,67 @@ export function readinessNavigationDestination(target: ReadinessActionTarget): R
         ? 'prd-coreProblem'
         : target.section === 'user' ? 'prd-targetUsers' : 'prd-successMetrics';
     return { stage: 'prd', anchorId };
+}
+
+// ---------------------------------------------------------------------------
+// Build-packet action targets (plan §W7).
+//
+// `BuildPacketActionTarget` is `ReadinessActionTarget` PLUS two destinations the
+// packet needs: an artifact SLOT that may not have an artifact id yet, and the
+// readiness checkpoint. Everything else routes through the EXISTING readiness
+// router (`readinessNavigationDestination` → `navigateReadinessTarget`) — §W7
+// adds no second router.
+// ---------------------------------------------------------------------------
+
+/** True for the target kinds the readiness router already handles. */
+export function isReadinessActionTarget(
+    target: BuildPacketActionTarget,
+): target is ReadinessActionTarget {
+    return target.kind !== 'artifact_slot' && target.kind !== 'readiness_commitment';
+}
+
+export type BuildPacketNavigationDestination =
+    | {
+        stage: 'artifact_slot';
+        nodeId: ArtifactSlotKey;
+        artifactId?: string;
+        section?: BuildPacketArtifactSection;
+        milestoneId?: string;
+    }
+    | { stage: 'readiness_commitment' }
+    | ({ stage: 'readiness_target' } & { target: ReadinessActionTarget });
+
+export function buildPacketNavigationDestination(
+    target: BuildPacketActionTarget,
+): BuildPacketNavigationDestination {
+    if (target.kind === 'artifact_slot') {
+        return {
+            stage: 'artifact_slot',
+            nodeId: target.nodeId,
+            ...(target.artifactId ? { artifactId: target.artifactId } : {}),
+            ...(target.section ? { section: target.section } : {}),
+            ...(target.milestoneId ? { milestoneId: target.milestoneId } : {}),
+        };
+    }
+    if (target.kind === 'readiness_commitment') return { stage: 'readiness_commitment' };
+    return { stage: 'readiness_target', target };
+}
+
+const SECTION_LABEL: Record<BuildPacketArtifactSection, string> = {
+    api_contract: 'Open the API contract',
+    coverage: 'Open plan coverage',
+    first_milestone: 'Open the first milestone',
+};
+
+/** The button label for a blocker's action target. */
+export function buildPacketActionLabel(target: BuildPacketActionTarget): string {
+    if (target.kind === 'readiness_commitment') return 'Open Review readiness';
+    if (target.kind === 'artifact_slot') {
+        return target.section
+            ? SECTION_LABEL[target.section]
+            : `Open ${buildPacketSlotTitle(target.nodeId)}`;
+    }
+    return readinessActionLabel(target);
 }
 
 function commitmentView(

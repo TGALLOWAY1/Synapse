@@ -25,10 +25,12 @@ import { parseDataModelMarkdown } from '../lib/services/dataModelMarkdown';
 import { buildConsolidatedPlan } from '../lib/services/implementationPlanAdapter';
 import {
     buildPacketRequiredSlots,
+    buildPacketSlotTitle,
     type BuildPacketArtifactState,
     type BuildPacketFreshnessInput,
     type BuildPacketPlanInput,
 } from '../lib/planning/buildPacketReadiness';
+import type { BuildPacketManifestEntry } from '../lib/planning/buildPacketApproval';
 import type { ApiEndpointLike } from '../lib/apiContractCompleteness';
 import type { Artifact, ArtifactSlotKey, ArtifactVersion, DataModelContent } from '../types';
 
@@ -48,6 +50,14 @@ export interface BuildPacketStoreInputs {
      */
     apiEndpoints: ApiEndpointLike[];
     plan: BuildPacketPlanInput | null;
+    /**
+     * The CURRENT artifact-version manifest — §W7's "which version of each
+     * artifact does this approval cover?" Built in the SAME slot → artifact →
+     * preferred-version loop as `artifacts` above, deliberately, so the gate's
+     * evidence and the manifest the user signs can never describe different
+     * versions. `deriveBuildPacketReadiness` ignores the extra key.
+     */
+    manifest: BuildPacketManifestEntry[];
 }
 
 const EMPTY_ENDPOINTS: ApiEndpointLike[] = [];
@@ -88,6 +98,7 @@ export function useBuildPacketInputs(projectId: string): BuildPacketStoreInputs 
             allVersions.find(version => version.artifactId === artifactId && version.isPreferred);
 
         const states: BuildPacketArtifactState[] = [];
+        const manifest: BuildPacketManifestEntry[] = [];
         const contentBySlot = new Map<ArtifactSlotKey, string>();
         for (const slot of buildPacketRequiredSlots()) {
             const artifact = artifactFor(slot);
@@ -100,6 +111,12 @@ export function useBuildPacketInputs(projectId: string): BuildPacketStoreInputs 
                 versionId: preferred?.id,
                 errored: slotStatus === 'error' || slotStatus === 'interrupted',
                 validation: readArtifactValidationDisposition(preferred?.metadata),
+            });
+            manifest.push({
+                nodeId: slot,
+                title: artifact?.title ?? buildPacketSlotTitle(slot),
+                ...(artifact ? { artifactId: artifact.id } : {}),
+                ...(preferred ? { versionId: preferred.id, versionLabel: `v${preferred.versionNumber}` } : {}),
             });
         }
 
@@ -124,6 +141,7 @@ export function useBuildPacketInputs(projectId: string): BuildPacketStoreInputs 
             dataModel: resolveDataModelForTrace(dataModelContent),
             apiEndpoints: resolveApiEndpoints(dataModelContent),
             plan: buildConsolidatedPlan({ planContent, promptPackContent }),
+            manifest,
         };
     }, [artifacts, artifactVersions, job, freshnessResult]);
 }

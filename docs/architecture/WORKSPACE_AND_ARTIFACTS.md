@@ -199,17 +199,18 @@ Convert-to-Tasks all keep working). See
 - **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
   `renderers/implementationPlan/ConsolidatedPlanView.tsx` — a guided build
   launcher, not a report. Tab **ids** keep the internal vocabulary
-  (`overview`/`milestones`/`prompt_packs`/`traceability`) and the **labels**
-  are Build Brief / Roadmap / Prompts / Coverage. **Synapse ends at the
-  plan + prompts handoff** — see the "Removed: validation surface" note
-  below. An executive `PlanHeader` sits above the tabs: readiness pill, scope
-  counts, generated-from PRD version + staleness (threaded like data_model's
-  `prdVersionLabel`/`staleness` props), a primary **Copy next prompt** CTA,
-  and the **Convert to tasks** entry point (moved out of `ArtifactWorkspace`'s
-  floating row; the legacy markdown fallback renders its own
-  Convert-to-Tasks row so the modal stays reachable either way, and the
-  outer white prose card is skipped for `implementation_plan` since the view
-  brings its own cards). Decision-surface data is derived by the pure,
+  (`overview`/`milestones`/`prompt_packs`) and the **labels** are Build Brief /
+  Roadmap / Prompts. **Synapse ends at the plan + prompts handoff** — see the
+  "Removed: validation surface" note below. Above the tabs sit two cards, in
+  order: `PlanHeader` (an **identity strip only** — title, the adapter's
+  plan-shape readiness pill, scope counts, generated-from PRD version +
+  staleness, threaded like data_model's `prdVersionLabel`/`staleness` props),
+  then **`FinalReviewCard` — the plan's one decision surface** (see "Final
+  Review" below, which owns every action including Convert to tasks). The
+  legacy markdown fallback renders its own Convert-to-Tasks row so the modal
+  stays reachable either way, and the outer white prose card is skipped for
+  `implementation_plan` since the view brings its own cards.
+  Decision-surface data is derived by the pure,
   unit-tested **`src/lib/services/implementationPlanInsights.ts`**:
   prompt-pack build order + next-pack resolution, the coverage matrix (cells
   are explicitly `covered`/`missing`/`not_tracked` — `missing` only when the
@@ -217,7 +218,11 @@ Convert-to-Tasks all keep working). See
   over-reported), change-impact scoping per upstream artifact, and structured
   prompt previews. The **Build Brief** tab's Build Timeline is the single
   milestone-sequencing view (the redundant Critical Path chip row was
-  removed). User progress (copied packs only) persists as the
+  removed). The **Coverage tab is gone** (plan §W7): its gap summary is folded
+  into Final Review and the full matrix survives there as an expandable
+  detail via `CoverageTab showSummary={false}`, mounted only when opened. Do
+  not re-add a Coverage tab — a second top-level integrity surface is the
+  defect §W7 fixed. User progress (copied packs only) persists as the
   **`planProgress` metadata overlay** on the implementation_plan
   ArtifactVersion (`readPlanProgress`; same per-version pattern as
   screenEdits/promptEdits — regeneration starts clean; written silently via
@@ -285,13 +290,99 @@ Convert-to-Tasks all keep working). See
   `resolveCriterionRefs` with an explicit
   `exact | normalized | fuzzy | unmatched` confidence, and `unmatched` is
   reported, never dropped. The layer is derived and advisory only
-  (cross-cutting rule 10); consumer wiring lands with the
+  (cross-cutting rule 10); it is consumed by the
   ARTIFACT_READINESS_RESOLUTION_PLAN workstreams (W3/W6/W7).
 - The demo project is a **cloud snapshot** and carries the legacy
   two-artifact shape until the owner re-pins a regenerated snapshot; the
   adapter is what keeps it rendering consolidated in the meantime. Do not add
   persisted state for the consolidated view.
 
+
+### Final Review — one blocker list, one CTA (plan §W7)
+
+`renderers/implementationPlan/FinalReviewCard.tsx` is the Implementation
+Plan's **decision surface**. It replaced the old executive header, which
+rendered **four competing actions** with "Copy next prompt" styled primary
+regardless of blockers, while plan integrity was summarized in four places
+(workspace status, Dependency Graph, Coverage tab, readiness) with no single
+authority.
+
+- **Exactly one primary action, always.** The pure, unit-tested state machine
+  `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`) returns one
+  `primary` plus a `secondary` list, in four states:
+
+  | State | Primary label | Source of the label |
+  |---|---|---|
+  | `resolve_blockers` (`!packet.isPacketComplete`) | **Resolve N blockers** | `N = packet.blockers.length` from §W6's `deriveBuildPacketReadiness` |
+  | `approve` (complete, no covering approval) | **Approve build packet** / **Re-approve build packet** | fixed copy; "Re-" when a recorded approval no longer covers the current versions |
+  | `start_build` (complete + covering approval) | **Copy first / next implementation prompt**, else **Start first slice** | the plan's own next-uncopied prompt pack (`findNextPromptPack`) |
+  | `unavailable` (no `packet` — isolated renders only) | **Check build readiness**, disabled | fixed copy |
+
+  **Blockers dominate:** a packet that regressed after approval returns to
+  `resolve_blockers`, and a prior approval never promotes a build action.
+  `resolve_blockers` toggles the ordered blocker list open; each entry shows
+  `title`, `consequence`, `remedy` and a navigable action target.
+- **Copy plan / Review prompts / Convert to tasks are secondary at ALL times**,
+  including when the packet is ready — they live in a demoted "More actions"
+  menu. Copying a prompt before approval stays possible, only never as the
+  primary: every prompt-copy button on the surface (`PromptPackCard`, the
+  Prompts tab's copy-next/copy-all, "Copy milestone prompts") is permanently
+  `variant="secondary"` — approved or not — so `FinalReviewCard` holds the only
+  filled button on any tab. **Prompt review and task conversion are not
+  approvals** — do not wire either to the approval state.
+- **The blocker list and the Dependency Graph can never disagree.** Both derive
+  from the same engines: §W6 consumes `evaluateProjectFreshness` (rule 9) and
+  the graph *is* that engine's output. §W7 introduces no third integrity
+  source, and the Dependency Graph stays a **diagnostics** view.
+- **Navigation reuses the readiness router.** `BuildPacketActionTarget` is
+  `ReadinessActionTarget` plus `artifact_slot` and `readiness_commitment`.
+  `isReadinessActionTarget` / `buildPacketNavigationDestination` /
+  `buildPacketActionLabel` (`components/planning/readinessCheckpointView.ts`)
+  split them, and `ProjectWorkspace.navigateBuildPacketTarget` **delegates every
+  shared kind to `navigateReadinessTarget`**. Do not add a second router.
+- **The pinned artifact-version manifest.** `useBuildPacketInputs` returns a
+  `manifest: BuildPacketManifestEntry[]` built in the **same** slot → artifact →
+  preferred-version loop as the evaluator's per-slot state, so the gate's
+  evidence and the manifest the user signs can never describe different
+  versions. `reconcileBuildPacketManifest` compares the pinned versions against
+  the current ones and labels each row `match` / `changed` / `added` /
+  `removed` / `unpinned`; any drift marks the approval **superseded** and the
+  CTA asks to re-approve. The approval is never rewritten to "catch up" — that
+  would silently re-sign work the user never saw. **One row is exempt from
+  version comparison:** the slot hosting the overlay
+  (`BUILD_PACKET_APPROVAL_HOST_SLOT` = `implementation_plan`). Recording the
+  approval appends a content-identical clone, so the plan's own preferred version
+  id moves as a *side effect of approving*; comparing it would mark every fresh
+  approval superseded on the next render. The host row needs no comparison —
+  the overlay living on that version IS the pin, and a regenerated plan yields a
+  version with no overlay, which reads back as "not approved".
+- **How the approval persists — a versioned user overlay, no new collection.**
+  `metadata.buildPacketApproval` on the implementation_plan ArtifactVersion,
+  listed in `OVERLAY_METADATA_KEYS` and written **only** through
+  `updateArtifactOverlay` (cross-cutting rule 12), never
+  `updateArtifactVersionMetadata`. `buildPacketApprovalPatch` merges from the
+  stored value so unknown keys survive, and re-approval is destructive under
+  `patchDestroysOverlayWork`, so it **appends** and the earlier sign-off stays
+  restorable. Because `artifactVersions` is already a persisted collection, the
+  approval travels through snapshots, sync, and the recovery bundle for free —
+  **no `ALL_PROJECT_COLLECTIONS` entry** (rule 6). It is deliberately **not**
+  the readiness commitment (`readinessCommitment.ts`), which approves the
+  product *reasoning*: reusing that would conflate the two evaluators §W6 keeps
+  apart, and it cannot pin artifact versions. Regenerating the plan starts a
+  fresh version with no approval — correct, since that is a different packet.
+- **Capability.** The approval respects one policy: `ArtifactWorkspace` gates
+  `onApprove` on `capabilities.canPersistWorkflowState`
+  (`useProjectCapabilities`), the store action re-checks through
+  `guardProjectStoreActions`, and the CTA renders disabled with a stated reason
+  in a read-only project. No raw demo-id check (rule 5).
+- **§W5's cross-cutting obligations card lives here**, passed in as
+  `obligations`, instead of floating above the plan as a sibling in
+  `ArtifactWorkspace` — next to the `cross_cutting` blocker it corresponds to,
+  so plan integrity has one home. Consequence, accepted: the **legacy markdown
+  fallback** (content `buildConsolidatedPlan` cannot parse) no longer shows the
+  obligations card, since it renders no Final Review. Stating a cross-cutting
+  verdict over content Synapse could not read as a plan would be a guess; the
+  §W6 gate still blocks on it either way.
 
 ### Artifact Dependency Graph (Project Map) — read-side integrity view
 
@@ -424,9 +515,13 @@ here is how it sits on the workspace:
   (`displaysCurrentCommitment`), and its hover copy states the packet state
   separately. `PlanningStateBar` renders an "Implementation packet" block with
   its own "Packet checks" disclosure next to the "Product-reasoning checks"
-  one. The single-primary-action Final Review surface on the Implementation Plan
-  page is plan §W7 and is not built yet — until then, the Coverage tab and the
-  Dependency Graph remain the detailed views.
+  one. The Implementation Plan page's **Final Review** surface (plan §W7 — see
+  "Final Review" above) is the plan-side authority: `ProjectWorkspace` computes
+  the packet **once** and passes it to both `PlanningStateBar` and
+  `ArtifactWorkspace` (`buildPacket` / `buildPacketManifest` /
+  `onNavigateBuildPacketTarget`), so the two surfaces never evaluate
+  independently. `PlanningStateBar` stays the *plan-stage* summary; Final Review
+  owns the CTA and the blocker list, and the Dependency Graph stays diagnostics.
 
 ### Implementation tasks (plan → tracked checklist)
 

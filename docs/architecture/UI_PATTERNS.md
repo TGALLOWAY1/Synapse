@@ -251,6 +251,42 @@ echo; local surfaces use exact action labels instead of repeating counts.
 Cards and modal disclosures must retain keyboard reachability, visible focus,
 dialog labelling, Escape handling, focus restoration, and 44px mobile targets.
 
+### One-primary-action CTA hierarchy (Final Review, plan §W7)
+
+The Implementation Plan surface is the reference implementation of a rule worth
+copying: **a decision surface promotes exactly one primary action, and its label
+states the actual next step.**
+
+- The state machine is a **pure function**, not JSX branching:
+  `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`) returns one
+  `primary: FinalReviewAction` plus a `secondary: FinalReviewAction[]`, and the
+  component only renders what it is handed. That is what makes "exactly one
+  primary in every state" a unit test rather than a code review.
+- The label is **derived, never hardcoded per branch**: N in "Resolve N
+  blockers" comes from the evaluator's blocker list, so the count can never
+  disagree with the list underneath it.
+- **Demotion is permanent, not conditional.** Copy plan / Review prompts /
+  Convert to tasks are `kind: 'secondary'` in *all* states, including the ready
+  one, and sit behind a "More actions" disclosure. The prior design styled
+  "Copy next prompt" primary regardless of blockers — a filled CTA inviting a
+  user to start building from an incomplete packet.
+- **A secondary path is still a real path.** Copying a prompt before approval
+  remains possible — from a demoted control. Every prompt-copy button on the
+  surface (`PromptPackCard`, the Prompts tab's "Copy next prompt", "Copy all
+  prompt packs", "Copy milestone prompts") is permanently `variant="secondary"`,
+  *including after approval*, so no tab ever shows a second filled button. When
+  the packet is approved the primary in Final Review already offers that copy;
+  a duplicate filled button would just re-state it.
+- **An unavailable state is honest, not empty.** With no evaluator result the
+  primary renders disabled with a stated reason rather than falling back to
+  whichever action happens to be wireable.
+- **Blocking beats history.** A recorded approval never promotes a build action
+  while blockers exist; the approval is reported as *superseded* instead.
+- Disclosures that must be driven by tests or lazily mounted use a
+  **button + `aria-expanded` + conditional render**, not `<details>` — jsdom
+  does not toggle `<details>` on a summary click, and the collapsed content of a
+  `<details>` is still in the accessibility tree and the DOM.
+
 ### Interactive product tour (`src/components/tour/`)
 
 "Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with

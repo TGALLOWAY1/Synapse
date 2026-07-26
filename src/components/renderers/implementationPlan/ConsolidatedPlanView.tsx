@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ClipboardList } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import type { ConsolidatedImplementationPlan, ProjectTask } from '../../../types';
 import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 import {
@@ -23,9 +23,14 @@ import { MilestoneCard } from './MilestoneCard';
 import { PromptPackCard } from './PromptPackCard';
 import { PlanHeader } from './PlanHeader';
 import { OverviewTab } from './OverviewTab';
-import { CoverageTab } from './CoverageTab';
+import { FinalReviewCard, type PlanFinalReviewContext } from './FinalReviewCard';
+import { deriveFinalReviewCta } from '../../../lib/planning/buildPacketApproval';
 
-type TabId = 'overview' | 'milestones' | 'prompt_packs' | 'traceability';
+// The 'traceability' (Coverage) tab was removed by plan §W7: its gap summary is
+// folded into Final Review and the full matrix survives there as an expandable
+// detail. A second top-level integrity surface is exactly the "summarized in
+// four places, no single authority" defect §W7 fixed — do not re-add it.
+type TabId = 'overview' | 'milestones' | 'prompt_packs';
 
 interface Props {
     plan: ConsolidatedImplementationPlan;
@@ -43,17 +48,26 @@ interface Props {
     onUpdateProgress?: (next: ImplementationPlanProgress) => void;
     initialMilestoneId?: string;
     initialNavigationTarget?: ImplementationPlanNavigationTarget;
+    /**
+     * Build-packet context for the Final Review surface (plan §W7). Absent in
+     * isolated renders (previews, unit tests) — Final Review then reports the
+     * readiness as unavailable rather than promoting a build action.
+     */
+    finalReview?: PlanFinalReviewContext;
 }
 
 /**
  * The consolidated Implementation Plan view — a guided build launcher, not a
- * generated report: executive header (status, scope, copy-next-prompt),
- * Build Brief / Roadmap / Prompts / Coverage tabs, and coverage/impact
- * analysis. Synapse ends at the plan + prompts handoff, so there is no
- * validation/quality-gate tracking surface.
+ * generated report: an identity strip, the **Final Review** decision surface
+ * (plan §W7 — exactly one primary action, the one blocker list, the pinned
+ * artifact-version manifest, the traceability matrix), then Build Brief /
+ * Roadmap / Prompts tabs. Synapse ends at the plan + prompts handoff, so there
+ * is no validation/quality-gate tracking surface.
  *
- * Tabs scroll horizontally on mobile; the coverage matrix renders as a table
- * on desktop and stacked cards on small screens.
+ * ONE PRIMARY ACTION, ALWAYS. Final Review renders above the tabs so its single
+ * primary is on screen whichever tab is open, and no tab may introduce a second
+ * primary: the Prompts tab's copy buttons stay secondary until the packet is
+ * approved. Tabs scroll horizontally on mobile.
  */
 export function ConsolidatedPlanView({
     plan,
@@ -66,6 +80,7 @@ export function ConsolidatedPlanView({
     onUpdateProgress,
     initialMilestoneId,
     initialNavigationTarget,
+    finalReview,
 }: Props) {
     const legacyMilestoneTarget = initialMilestoneId ? {
         tab: 'milestones' as const,
@@ -135,22 +150,45 @@ export function ConsolidatedPlanView({
         { id: 'overview', label: 'Build Brief' },
         { id: 'milestones', label: 'Roadmap', count: plan.milestones.length },
         { id: 'prompt_packs', label: 'Prompts', count: allPacks.length },
-        { id: 'traceability', label: 'Coverage' },
     ];
+
+    // ONE derivation of the plan surface's single primary action (plan §W7).
+    // Both the Final Review card and the prompt-copy emphasis below read it, so
+    // they can never disagree about whether the packet is approved.
+    const cta = deriveFinalReviewCta({
+        packet: finalReview?.packet,
+        approval: finalReview?.approval,
+        manifest: finalReview?.manifest,
+        canApprove: finalReview?.canApprove === true && Boolean(finalReview?.onApprove),
+        canConvertTasks: Boolean(onConvertToTasks),
+        hasNextPrompt: Boolean(nextPack),
+        hasCopiedPrompt: progress.copiedPacks.length > 0,
+        savedTaskCount: savedTasks?.length ?? 0,
+    });
 
     return (
         <div className="space-y-4 not-prose">
             <PlanHeader
                 plan={plan}
                 scope={scope}
-                nextPack={nextPack}
-                onNextPackCopied={markPackCopied}
                 prdVersionLabel={prdVersionLabel}
                 staleness={staleness}
+            />
+
+            <FinalReviewCard
+                plan={plan}
+                context={finalReview}
+                cta={cta}
+                prdVersionLabel={prdVersionLabel}
+                staleness={staleness}
+                sourceVersions={sourceVersions}
                 planMarkdown={planMarkdown}
-                savedTaskCount={savedTasks?.length ?? 0}
-                onConvertToTasks={onConvertToTasks}
+                nextPack={nextPack}
+                onNextPackCopied={markPackCopied}
                 onOpenPrompts={() => setTab('prompt_packs')}
+                onConvertToTasks={onConvertToTasks}
+                onOpenMilestone={openMilestone}
+                onOpenRoadmap={() => setTab('milestones')}
             />
 
             {/* --- Tab nav (scrolls horizontally on mobile; right-edge fade
@@ -262,6 +300,7 @@ export function ConsolidatedPlanView({
                                             <CopyTextButton
                                                 text={promptPackToClipboardText(nextPack.pack)}
                                                 label="Copy next prompt"
+                                                variant="secondary"
                                                 onCopied={() => markPackCopied(nextPack.pack.id)}
                                             />
                                         )}
@@ -333,24 +372,9 @@ export function ConsolidatedPlanView({
                 </div>
             )}
 
-            {tab === 'traceability' && (
-                <CoverageTab
-                    plan={plan}
-                    prdVersionLabel={prdVersionLabel}
-                    staleness={staleness}
-                    sourceVersions={sourceVersions}
-                    onOpenMilestone={openMilestone}
-                />
-            )}
-
-            {/* --- Export / copy actions ------------------------------------- */}
-            {/* "Copy all prompt packs" lives only on the Prompts tab now — the
-                single home for prompts — so it isn't duplicated on every tab. */}
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
-                <ClipboardList size={15} className="text-neutral-400 shrink-0" aria-hidden="true" />
-                <p className="text-xs text-neutral-500 mr-auto">Take this plan to your coding agent:</p>
-                <CopyTextButton text={planMarkdown} label="Copy plan as markdown" variant="secondary" />
-            </div>
+            {/* No trailing export row: "Copy plan as markdown" is one of Final
+                Review's secondary actions now (plan §W7), so a duplicate copy
+                affordance on every tab would re-fragment the CTA hierarchy. */}
         </div>
     );
 }

@@ -93,7 +93,17 @@ import {
     screenNotePlanningSourceScopeKey,
 } from '../lib/planning/flagToPlan';
 import { deriveCrossCuttingObligations } from '../lib/planning/crossCuttingObligations';
-import { CrossCuttingObligationsCard } from './artifacts/CrossCuttingObligationsCard';
+import type {
+    BuildPacketActionTarget,
+    BuildPacketReadiness,
+} from '../lib/planning/buildPacketReadiness';
+import {
+    BUILD_PACKET_APPROVAL_KEY,
+    buildPacketApprovalPatch,
+    readBuildPacketApproval,
+    type BuildPacketManifestEntry,
+} from '../lib/planning/buildPacketApproval';
+import type { PlanFinalReviewContext } from './renderers/implementationPlan/FinalReviewCard';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import {
@@ -147,6 +157,16 @@ interface ArtifactWorkspaceProps {
     buildBlocked?: boolean;
     blockingPlanningItems?: Array<{ recordId: string; title: string }>;
     onResolveBuildBlockers?: () => void;
+    /**
+     * §W6's build-packet evaluation, computed once by `ProjectWorkspace` and
+     * passed down so the Final Review surface (§W7) and the planning state bar
+     * report the SAME packet — never a second evaluation.
+     */
+    buildPacket?: BuildPacketReadiness;
+    /** The current artifact-version manifest from `useBuildPacketInputs`. */
+    buildPacketManifest?: BuildPacketManifestEntry[];
+    /** Routes a build-packet blocker's action target (readiness router + slots). */
+    onNavigateBuildPacketTarget?: (target: BuildPacketActionTarget) => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -339,7 +359,7 @@ export function ArtifactWorkspace({
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
     initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
     onOpenPlanningRecord, onNavigatePlanning, buildBlocked, blockingPlanningItems,
-    onResolveBuildBlockers,
+    onResolveBuildBlockers, buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
 }: ArtifactWorkspaceProps) {
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
@@ -1992,6 +2012,49 @@ export function ArtifactWorkspace({
                     .filter((label): label is string => Boolean(label));
             })()
             : undefined;
+        // §W7 Final Review: the plan's ONE decision surface. The build-packet
+        // evaluation and the version manifest both arrive from ProjectWorkspace
+        // (one evaluation, one slot→version resolution — `useBuildPacketInputs`),
+        // so the blocker list, the Dependency Graph, and the manifest can never
+        // describe different versions.
+        //
+        // APPROVAL PERSISTENCE: a user overlay on THIS plan version's metadata,
+        // written only through `updateArtifactOverlay` (cross-cutting rule 12) and
+        // capability-gated exactly like the plan-progress overlay above. No new
+        // persisted collection (rule 6) — `artifactVersions` already travels
+        // through snapshots, sync, and the recovery bundle.
+        const planPrdVersionLabel = subtype === 'implementation_plan'
+            ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
+            : undefined;
+        const planFinalReview: PlanFinalReviewContext | undefined = subtype === 'implementation_plan'
+            ? {
+                packet: buildPacket,
+                manifest: buildPacketManifest,
+                approval: readBuildPacketApproval(preferred.metadata),
+                canApprove: capabilities.canPersistWorkflowState,
+                obligations: planObligations,
+                spineVersionId,
+                ...(onNavigateBuildPacketTarget ? { onNavigateTarget: onNavigateBuildPacketTarget } : {}),
+                ...(capabilities.canPersistWorkflowState ? {
+                    onApprove: () => {
+                        updateArtifactOverlay(
+                            projectId,
+                            artifact.id,
+                            {
+                                [BUILD_PACKET_APPROVAL_KEY]: buildPacketApprovalPatch(preferred.metadata, {
+                                    manifest: buildPacketManifest ?? [],
+                                    approvedAt: Date.now(),
+                                    spineVersionId,
+                                    ...(planPrdVersionLabel ? { prdVersionLabel: planPrdVersionLabel } : {}),
+                                    acknowledgedWarningIds: (buildPacket?.warnings ?? []).map(w => w.id),
+                                }),
+                            },
+                            { historyDescription: 'Build packet approved' },
+                        );
+                    },
+                } : {}),
+            }
+            : undefined;
         const validationDisposition = readArtifactValidationDisposition(preferred.metadata);
         // Small advisory note when a clean artifact was auto-enriched with PRD
         // traceability (repair succeeded → no blocking banner, just a note).
@@ -2020,13 +2083,10 @@ export function ArtifactWorkspace({
                         onChangeDirection={() => setShowDirectionPicker(true)}
                     />
                 )}
-                {subtype === 'implementation_plan' && (
-                    <CrossCuttingObligationsCard
-                        report={planObligations}
-                        securityPrivacy={tracePlan?.securityPrivacy}
-                        measurement={tracePlan?.measurement}
-                    />
-                )}
+                {/* §W5's cross-cutting obligations card no longer renders here as
+                    a sibling: §W7 folds it INTO Final Review, next to the
+                    `cross_cutting` blocker it corresponds to, so plan integrity
+                    has one home. It is passed through `planFinalReview`. */}
                 {subtype === 'implementation_plan' && (
                     <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} readOnly={!capabilities.canPersistWorkflowState} />
                 )}
@@ -2077,13 +2137,12 @@ export function ArtifactWorkspace({
                         onConvertToTasks={handleConvertToTasks}
                         onUpdatePlanProgress={handleUpdatePlanProgress}
                         sourceVersions={planSourceVersions}
+                        planFinalReview={planFinalReview}
                         prdVersionLabel={
                             // Data Model shows provenance once at the page level
                             // (the version-controls strip above), so only the plan
                             // consumes this in-content label.
-                            subtype === 'implementation_plan'
-                                ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
-                                : undefined
+                            planPrdVersionLabel
                         }
                         staleness={
                             subtype === 'data_model' || subtype === 'implementation_plan'

@@ -117,6 +117,31 @@ describe('useBuildPacketInputs', () => {
         expect(result.current.freshness.evaluations.get('data_model')?.status).toBe('up_to_date');
     });
 
+    it('builds the artifact-version manifest from the same slot/version resolution', () => {
+        const { projectId } = seedProject();
+        const { result } = renderHook(() => useBuildPacketInputs(projectId));
+
+        // §W7's pinned manifest and §W6's per-slot evidence must never describe
+        // different versions, so both come out of one loop.
+        expect(result.current.manifest.map(entry => entry.nodeId))
+            .toEqual(result.current.artifacts.map(state => state.nodeId));
+        for (const entry of result.current.manifest) {
+            const state = result.current.artifacts.find(item => item.nodeId === entry.nodeId)!;
+            expect(entry.versionId).toBe(state.versionId);
+            expect(entry.artifactId).toBe(state.artifactId);
+        }
+
+        const dataModelEntry = result.current.manifest.find(entry => entry.nodeId === 'data_model')!;
+        expect(dataModelEntry.title).toBe('Data Model');
+        expect(dataModelEntry.versionLabel).toBe('v1');
+
+        // A slot with no output is still listed, with no version to pin.
+        const mockupEntry = result.current.manifest.find(entry => entry.nodeId === 'mockup')!;
+        expect(mockupEntry.versionId).toBeUndefined();
+        expect(mockupEntry.versionLabel).toBeUndefined();
+        expect(mockupEntry.title).toBe('Mockups');
+    });
+
     it('feeds the evaluator, which then reports the un-generated outputs as blockers', () => {
         const { projectId } = seedProject();
         const { result } = renderHook(() => useBuildPacketInputs(projectId));

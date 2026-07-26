@@ -88,17 +88,24 @@ Set up the repository foundation and initialize the project.
 describe('ImplementationPlanRenderer (consolidated view)', () => {
     it('renders the header and tabbed consolidated view for a native plan', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        // Tabs (no Validation tab — Synapse ends at plan + prompts handoff).
+        // Tabs. No Validation tab (Synapse ends at plan + prompts handoff) and
+        // no Coverage tab — plan §W7 folded it into Final Review.
         expect(screen.getByRole('button', { name: /^Build Brief$/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Roadmap/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Prompts/ })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /Coverage/ })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Validation/ })).not.toBeInTheDocument();
-        // Header: readiness, scope counts (no gate count), primary CTA.
+        expect(screen.queryByRole('button', { name: /^Coverage$/ })).not.toBeInTheDocument();
+        // Identity strip: plan-shape readiness + scope counts (no gate count).
         expect(screen.getByText('Plan complete')).toBeInTheDocument();
         expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack/)).toBeInTheDocument();
         expect(screen.queryByText(/quality gate/)).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
+        // §W7: the header no longer owns a copy action; the plan surface has
+        // exactly one primary, and with no build-packet context it is the
+        // honest "readiness unavailable" state — never a copy CTA.
+        expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
+        const primary = screen.getByTestId('final-review-primary');
+        expect(primary).toHaveAttribute('data-cta-state', 'unavailable');
+        expect(primary).toBeDisabled();
         // Overview content: strategy, stack, risks with handling.
         expect(screen.getByText('Walking skeleton first.')).toBeInTheDocument();
         expect(screen.getByText('React + Vite')).toBeInTheDocument();
@@ -123,7 +130,7 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.queryByText('Lint passes clean')).not.toBeInTheDocument();
         expect(screen.getByText('Done when')).toBeInTheDocument();
         expect(screen.getByText('CI green on main')).toBeInTheDocument();
-        expect(screen.getByText(/Landing Page/)).toBeInTheDocument();
+        expect(screen.getAllByText(/Landing Page/).length).toBeGreaterThan(0);
         // Plan tasks are labeled as planned until converted.
         expect(screen.getByText(/Planned steps — use Convert to tasks/)).toBeInTheDocument();
     });
@@ -183,17 +190,20 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
     it('marks every pack copied after "Copy all prompt packs" so next-prompt advances', async () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
         fireEvent.click(screen.getByRole('button', { name: /Prompts/ }));
+        expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
         fireEvent.click(screen.getAllByRole('button', { name: /Copy all prompt packs/ })[0]);
         await vi.waitFor(() => {
-            // The only pack is now copied → the header CTA flips off "next".
-            expect(screen.getByText(/All prompt packs copied/)).toBeInTheDocument();
+            // The only pack is now copied → the next-prompt pointer advances off
+            // the end, so the per-tab "next" affordance disappears.
+            expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
         });
-        expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
     });
 
-    it('renders the coverage matrix with explicit cell states', () => {
+    it('renders the coverage matrix inside Final Review with explicit cell states', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        fireEvent.click(screen.getByRole('button', { name: /Coverage/ }));
+        // §W7: the full traceability matrix survives as an expandable detail on
+        // the Final Review surface rather than a top-level Coverage tab.
+        fireEvent.click(screen.getByTestId('final-review-coverage-toggle'));
         // Desktop table + mobile cards both render (visibility is CSS-only in
         // jsdom), so covered items appear at least once.
         expect(screen.getAllByText(/Landing Page/).length).toBeGreaterThan(0);

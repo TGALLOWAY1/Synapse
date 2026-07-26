@@ -78,7 +78,10 @@ import {
     projectDecision,
     type PlanningAttentionItem,
 } from '../lib/planning';
-import { deriveBuildPacketReadiness } from '../lib/planning/buildPacketReadiness';
+import {
+    deriveBuildPacketReadiness,
+    type BuildPacketActionTarget,
+} from '../lib/planning/buildPacketReadiness';
 import { useBuildPacketInputs } from '../hooks/useBuildPacketInputs';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
@@ -87,7 +90,11 @@ import { AssumptionArrivalCard } from './planning/AssumptionArrivalCard';
 import { useDecisionImpactActions } from './review/useDecisionImpactActions';
 import { useBatchVerdictCoordinator } from './review/useBatchVerdictCoordinator';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
-import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
+import {
+    buildReadinessCheckpointView,
+    isReadinessActionTarget,
+    readinessNavigationDestination,
+} from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
@@ -1752,6 +1759,28 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         });
     };
 
+    // §W7: route a build-packet blocker's action target. `BuildPacketActionTarget`
+    // is `ReadinessActionTarget` plus an artifact SLOT (which may have no artifact
+    // id yet) and the readiness checkpoint — so everything the readiness router
+    // already handles is DELEGATED to it. No second router.
+    const navigateBuildPacketTarget = (target: BuildPacketActionTarget) => {
+        if (isReadinessActionTarget(target)) return navigateReadinessTarget(target);
+        if (target.kind === 'readiness_commitment') return openCurrentReadinessCheckpoint();
+        setFinalizeAutoOpen(false);
+        setWorkspaceInitialNode(target.nodeId);
+        setWorkspaceInitialArtifactId(target.artifactId);
+        setWorkspaceInitialUpdatePlanId(undefined);
+        setWorkspaceInitialUpdatePlanItemId(undefined);
+        writePlanningIntent({
+            destination: {
+                kind: 'artifact',
+                nodeId: target.nodeId,
+                ...(target.artifactId ? { artifactId: target.artifactId } : {}),
+            },
+        });
+        setPipelineStage('workspace');
+    };
+
     const handleReadinessConcern = (concernId: string) => {
         const concern = selectedReadinessReview?.concerns.find(item => item.id === concernId);
         if (concern) navigateReadinessTarget(concern.actionTarget, concernId);
@@ -2331,6 +2360,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             buildBlocked={!buildMaterialityGate.canProceed}
                             blockingPlanningItems={materialityGateSnapshot?.blockingRecords}
                             onResolveBuildBlockers={openCurrentReadinessCheckpoint}
+                            buildPacket={buildPacketReadiness}
+                            buildPacketManifest={buildPacketInputs.manifest}
+                            onNavigateBuildPacketTarget={navigateBuildPacketTarget}
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);

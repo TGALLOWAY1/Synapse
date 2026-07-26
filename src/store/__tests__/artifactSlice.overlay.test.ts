@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import type { SourceRef } from '../../types';
 import { effectiveImageVersionId } from '../../lib/artifactImageVersion';
+import { DEMO_PROJECT_ID } from '../../data/demoProject';
+import {
+    BUILD_PACKET_APPROVAL_KEY,
+    readBuildPacketApproval,
+} from '../../lib/planning/buildPacketApproval';
 
 beforeEach(() => {
     useProjectStore.setState({
@@ -247,5 +252,103 @@ describe('revertArtifactToVersion overlay policy', () => {
         store.revertArtifactToVersion(projectId, artifactId, oldVersionId, { restoreOverlays: true });
 
         expect(preferredFor(projectId, artifactId).metadata.screenEdits).toEqual({ a: { name: 'Old' } });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The build-packet approval (plan §W7) rides the SAME overlay mechanism —
+// deliberately, so it needs no new persisted collection (cross-cutting rule 6)
+// and cannot be written through `updateArtifactVersionMetadata` (rule 12).
+// ---------------------------------------------------------------------------
+
+describe('build-packet approval persistence', () => {
+    const approval = (approvedAt: number, versionId: string) => ({
+        approvedAt,
+        spineVersionId: 'spine-1',
+        manifest: [{ nodeId: 'data_model', title: 'Data Model', versionId, versionLabel: 'v1' }],
+    });
+
+    it('appends a user_edit version carrying the approval, leaving the generated one clean', () => {
+        const { projectId, artifactId, generatedVersionId } = setup();
+
+        useProjectStore.getState().updateArtifactOverlay(
+            projectId, artifactId,
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(1_000, 'v-dm') },
+            { historyDescription: 'Build packet approved' },
+        );
+
+        const versions = versionsFor(projectId, artifactId);
+        expect(versions).toHaveLength(2);
+        expect(versions[0].id).toBe(generatedVersionId);
+        expect(versions[0].metadata[BUILD_PACKET_APPROVAL_KEY]).toBeUndefined();
+
+        const preferred = preferredFor(projectId, artifactId);
+        expect(readBuildPacketApproval(preferred.metadata)?.approvedAt).toBe(1_000);
+        expect(preferred.provenance?.changeSource).toBe('user_edit');
+        expect(preferred.content).toBe('generated content');
+    });
+
+    it('records an Edited history event so the sign-off is auditable', () => {
+        const { projectId, artifactId } = setup();
+        useProjectStore.getState().updateArtifactOverlay(
+            projectId, artifactId,
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(1_000, 'v-dm') },
+            { historyDescription: 'Build packet approved' },
+        );
+        const descriptions = useProjectStore.getState().historyEvents[projectId]
+            .filter(event => event.type === 'Edited')
+            .map(event => event.description);
+        expect(descriptions).toContain('Build packet approved');
+    });
+
+    it('APPENDS on re-approval rather than overwriting the previous sign-off', () => {
+        const { projectId, artifactId } = setup();
+        const store = useProjectStore.getState();
+        store.updateArtifactOverlay(
+            projectId, artifactId,
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(1_000, 'v-dm') },
+            { historyDescription: 'Build packet approved' },
+        );
+        const firstApprovalVersionId = preferredFor(projectId, artifactId).id;
+
+        store.updateArtifactOverlay(
+            projectId, artifactId,
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(2_000, 'v-dm-2') },
+            { historyDescription: 'Build packet approved' },
+        );
+
+        const versions = versionsFor(projectId, artifactId);
+        expect(versions).toHaveLength(3);
+        // The earlier approval is still restorable, pinning its own manifest.
+        const first = versions.find(version => version.id === firstApprovalVersionId)!;
+        expect(readBuildPacketApproval(first.metadata)?.approvedAt).toBe(1_000);
+        expect(readBuildPacketApproval(preferredFor(projectId, artifactId).metadata)?.approvedAt).toBe(2_000);
+    });
+
+    it('keeps unrelated overlays on the version when an approval lands', () => {
+        const { projectId, artifactId } = setup();
+        const store = useProjectStore.getState();
+        store.updateArtifactOverlay(projectId, artifactId, { planProgress: { t1: true } }, {
+            historyDescription: 'progress',
+        });
+        store.updateArtifactOverlay(
+            projectId, artifactId,
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(1_000, 'v-dm') },
+            { historyDescription: 'Build packet approved' },
+        );
+        const preferred = preferredFor(projectId, artifactId);
+        expect(preferred.metadata.planProgress).toEqual({ t1: true });
+        expect(readBuildPacketApproval(preferred.metadata)).not.toBeNull();
+    });
+
+    it('cannot be recorded on the read-only example project', () => {
+        // One capability policy, enforced at the store boundary — no raw demo-id
+        // check at the call site (cross-cutting rule 5).
+        expect(() => useProjectStore.getState().updateArtifactOverlay(
+            DEMO_PROJECT_ID, 'demo-plan',
+            { [BUILD_PACKET_APPROVAL_KEY]: approval(1_000, 'v-dm') },
+            { historyDescription: 'Build packet approved' },
+        )).toThrow('read-only');
+        expect(useProjectStore.getState().artifactVersions[DEMO_PROJECT_ID]).toBeUndefined();
     });
 });
