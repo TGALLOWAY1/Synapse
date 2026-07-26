@@ -293,9 +293,25 @@ generated/stored/rendered.
 
 ---
 
-## 6. UI Components artifact (hidden from the assets list — revisit)
+## 6. UI Components artifact (hidden from the assets list — RESOLVED)
 
-**Decision (2026-07-02):** The **UI Components** artifact (`component_inventory`)
+**RESOLVED (W4, docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md):** the hide decision
+below has been reversed. `component_inventory` is **no longer hidden** —
+`HIDDEN_ARTIFACT_SUBTYPES` is now empty. The 2026-07 artifacts/build-readiness
+audit found that a hidden artifact feeding every mockup was a truth-in-signalling
+defect: it shaped the product and could not be inspected. It now renders through
+`ComponentInventoryRenderer` as the **Components section inside the Screens
+experience** (`ScreenComponentsSection`), with derived screen back-references and
+advisory component/screen contradictions — and that section is where its slot
+status and Retry live. Because it is visible, it now legitimately gates
+`assetsReady` and is auto-resumed by `resumeIfNeeded`. It still has **no sidebar
+row** (absent from `ARTIFACT_GROUPS`, like `screen_inventory`/`mockup`) — a layout
+choice, not a visibility contract. See
+`docs/architecture/WORKSPACE_AND_ARTIFACTS.md` and
+`docs/architecture/SCREENS_EXPERIENCE.md`. The original decision is kept below for
+history.
+
+**Original decision (2026-07-02):** The **UI Components** artifact (`component_inventory`)
 was **hidden from the assets list** because it has no hard dependents and isn't
 useful to surface directly right now.
 
@@ -324,11 +340,9 @@ useful to surface directly right now.
 
 ### Revisit checklist
 
-- [ ] **Decide the artifact's future.** Options: (a) re-expose it if a hard
-  dependent or clear user value emerges; (b) fully remove it — drop it from
-  `CORE_ARTIFACT_PIPELINE` **and** `MOCKUP_DEPENDENCIES`/`generateMockup`,
-  accepting that mockup prompts lose per-screen component tagging; (c) keep the
-  current hidden-but-generated state.
+- [x] **Decide the artifact's future.** Option (a) was taken: it is re-exposed as
+  a reviewable surface inside the Screens experience. Options (b) full removal and
+  (c) stay hidden are both closed.
 - [ ] **If fully removing:** also prune the renderer wiring
   (`ComponentInventoryRenderer` + `src/components/renderers/componentInventory/`),
   the schema (`componentInventorySchema`), the parser (`componentInventoryParse.ts`),
@@ -336,10 +350,13 @@ useful to surface directly right now.
   (The Design System renderer's old "Downstream Usage Status" section — which
   referenced `component_inventory` — has already been removed; that surface is
   now covered by the Dependency Graph artifact.)
-- [ ] **If re-exposing:** remove `'component_inventory'` from
-  `HIDDEN_ARTIFACT_SUBTYPES` (it already sits in `ARTIFACT_GROUPS`, so the row,
-  readiness gate, and auto-resume all come back automatically) and re-add the
-  README assets bullet + mermaid node.
+- [x] **Re-exposed (W4).** `'component_inventory'` was removed from
+  `HIDDEN_ARTIFACT_SUBTYPES` **after** the renderer landed (renderer first, then
+  unhide — never the reverse). Note the old wording here was wrong: it does *not*
+  sit in `ARTIFACT_GROUPS`, so unhiding produced no sidebar row; the Components
+  section in the Screens view is the surface. The readiness gate
+  (`assetsReady`) and auto-resume did come back automatically and are now
+  intentional + tested. README beat 6 mentions the component inventory.
 
 ---
 

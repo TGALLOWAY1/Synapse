@@ -74,6 +74,12 @@ function healthyInput(): DependencyEvaluationInput {
     snapshots.user_flows = snapshot('user_flows', {
         sourceRefs: [spineRef(SPINE_V1), artifactRef('art-screen_inventory', 'ver-screen_inventory-1')],
     });
+    // component_inventory became a real graph node when W4 unhid it — it is a
+    // screen_inventory dependent and a mockup input, so the healthy fixture has
+    // to generate it or every downstream node reads "missing".
+    snapshots.component_inventory = snapshot('component_inventory', {
+        sourceRefs: [spineRef(SPINE_V1), artifactRef('art-screen_inventory', 'ver-screen_inventory-1')],
+    });
     snapshots.implementation_plan = snapshot('implementation_plan', {
         sourceRefs: [
             spineRef(SPINE_V1),
@@ -87,6 +93,7 @@ function healthyInput(): DependencyEvaluationInput {
         sourceRefs: [
             spineRef(SPINE_V1),
             artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
+            artifactRef('art-component_inventory', 'ver-component_inventory-1'),
             artifactRef('art-design_system', 'ver-design_system-1', 'hash-a'),
         ],
     });
@@ -128,9 +135,11 @@ describe('buildArtifactDependencyGraph', () => {
     });
 
     it('collapses hidden subtypes transitively instead of surfacing them', () => {
-        // mockup ← component_inventory (hidden) ← screen_inventory collapses
-        // to mockup ← screen_inventory, which already exists — and no edge may
-        // reference a hidden/retired node.
+        // No edge may reference a hidden/retired node — a hidden subtype's
+        // dependents inherit its dependencies instead. HIDDEN_ARTIFACT_SUBTYPES
+        // is empty since W4 unhid component_inventory (so this currently proves
+        // only the retired half), but the invariant must hold for whatever is
+        // hidden next.
         for (const e of graph.edges) {
             for (const end of [e.from, e.to]) {
                 if (end === 'prd' || end === 'mockup') continue;
@@ -155,13 +164,17 @@ describe('buildArtifactDependencyGraph', () => {
 describe('dependency / impact resolution', () => {
     it('resolves direct dependencies including the PRD foundation', () => {
         expect(getDirectDependencies(graph, 'user_flows').sort()).toEqual(['prd', 'screen_inventory']);
-        expect(getDirectDependencies(graph, 'mockup').sort()).toEqual(['design_system', 'prd', 'screen_inventory']);
+        // component_inventory is a real mockup input since W4 unhid it (it used
+        // to collapse into screen_inventory).
+        expect(getDirectDependencies(graph, 'mockup').sort()).toEqual([
+            'component_inventory', 'design_system', 'prd', 'screen_inventory',
+        ]);
     });
 
     it('resolves direct dependents', () => {
         expect(getDirectDependents(graph, 'design_system')).toEqual(['mockup']);
         expect(getDirectDependents(graph, 'screen_inventory').sort()).toEqual([
-            'implementation_plan', 'mockup', 'user_flows',
+            'component_inventory', 'implementation_plan', 'mockup', 'user_flows',
         ]);
     });
 
@@ -179,7 +192,9 @@ describe('dependency / impact resolution', () => {
         // implementation_plan), but implementation_plan is also a direct
         // dependent, so nothing is left for the indirect bucket.
         const { direct, indirect } = computeDownstreamImpacts(graph, 'screen_inventory');
-        expect(direct.sort()).toEqual(['implementation_plan', 'mockup', 'user_flows']);
+        expect(direct.sort()).toEqual([
+            'component_inventory', 'implementation_plan', 'mockup', 'user_flows',
+        ]);
         expect(indirect).toEqual([]);
     });
 });

@@ -5,9 +5,13 @@
 // The graph is DERIVED from the real generation pipeline
 // (CORE_ARTIFACT_PIPELINE.dependsOn + MOCKUP_DEPENDENCIES), never hand-drawn:
 // if the pipeline gains/loses an edge, the graph follows automatically.
-// Hidden subtypes (e.g. component_inventory) still generate but have no UI
-// row, so they are collapsed transitively — their dependents inherit their
-// dependencies. Retired subtypes (prompt_pack) are excluded entirely.
+// Hidden subtypes (HIDDEN_ARTIFACT_SUBTYPES — currently empty) still generate
+// but are surfaced nowhere, so they are collapsed transitively: their dependents
+// inherit their dependencies. Retired subtypes (prompt_pack) are excluded
+// entirely. `component_inventory` was the last hidden subtype and W4 unhid it,
+// so it is now a real node here (the mockup's dependency on it is an explicit
+// edge instead of a collapsed one); "Open artifact" routes it into the Screens
+// view, where it has no row of its own but does have a Components section.
 //
 // Staleness is deterministic and metadata-driven — no LLM calls, no semantic
 // diffing:

@@ -119,12 +119,13 @@ describe('DependencyGraphView', () => {
         // All visible nodes render.
         for (const title of [
             'PRD', 'Screen Inventory', 'User Flows', 'Design System', 'Data Model',
-            'Implementation Plan', 'Mockups',
+            // W4 unhid component_inventory, so "UI Components" is now a node too.
+            'UI Components', 'Implementation Plan', 'Mockups',
         ]) {
             expect(screen.getAllByText(title).length).toBeGreaterThan(0);
         }
         expect(screen.getAllByText('Not generated').length).toBeGreaterThan(0);
-        expect(screen.getByText(/6 not generated/)).toBeTruthy();
+        expect(screen.getByText(/7 not generated/)).toBeTruthy();
         expect(screen.queryByRole('button', { name: /Generate 6 outputs/i })).toBeNull();
     });
 

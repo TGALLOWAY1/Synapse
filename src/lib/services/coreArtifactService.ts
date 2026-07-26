@@ -12,7 +12,13 @@ import { callGeminiStream } from '../geminiClient';
 import type { ProviderOptions, GeminiTokenUsage } from '../geminiClient';
 import { repairTruncatedJson } from '../jsonRepair';
 import type { LlmTraceMeta } from '../trace/traceTypes';
-import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE, API_ENDPOINT_CONTRACT_SPEC } from '../prompts/artifactPromptFragments';
+import {
+    artifactRole,
+    AGENT_AGNOSTIC_RULE,
+    ANTI_PREAMBLE_RULE,
+    API_ENDPOINT_CONTRACT_SPEC,
+    PLAN_CONDITIONAL_SECTIONS_SPEC,
+} from '../prompts/artifactPromptFragments';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
@@ -169,6 +175,7 @@ Top-level shape:
   - teamAssumption: who this plan assumes is building (e.g. "One developer pairing with a coding agent").
 - milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep. Keep milestones SMALL — each should be independently shippable and verifiable.
 - globalQualityGates: 3-6 project-wide quality gates (shape below) that apply to every milestone.
+- securityPrivacy, measurement: CONDITIONAL sections — see "Conditional sections" below for when to include each. Omit entirely when the condition does not hold.
 - architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
 - risks: top-level array of { description, mitigation } items spanning the project.
 - definitionOfDone: top-level array of project-wide acceptance criteria.
@@ -220,6 +227,8 @@ Per prompt pack:
 - scope: { include, exclude } — bulleted scope boundaries; exclude MUST list explicit non-goals.
 - acceptanceCriteria: 3-6 specific, testable criteria.
 - recommendedCommitMessage: a conventional, imperative commit message for the resulting change.
+
+${PLAN_CONDITIONAL_SECTIONS_SPEC}
 
 Rules:
 - Task, milestone, prompt-pack, and quality-gate ids must be unique across the entire plan.
@@ -476,6 +485,43 @@ function implementationPlanToMarkdown(plan: StructuredImplementationPlan): strin
         plan.risks.forEach(r => {
             lines.push(`- **${r.description}**${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`);
         });
+        lines.push('');
+    }
+    // Conditional cross-cutting sections. Emitted into the readable body only
+    // when the plan actually carries them — an absent section is meaningful
+    // (see crossCuttingObligations.ts), so never write an empty heading.
+    if (plan.securityPrivacy) {
+        const sp = plan.securityPrivacy;
+        lines.push('## Security & Privacy Obligations');
+        if (sp.summary) lines.push(sp.summary, '');
+        sp.controls?.forEach(c => {
+            lines.push(`- **${c.title}**${c.obligation ? ` — ${c.obligation}` : ''}`);
+            if (c.implementation) lines.push(`  - Implementation: ${c.implementation}`);
+            if (c.requirementIds?.length) lines.push(`  - Requirements: ${c.requirementIds.join(', ')}`);
+            if (c.taskIds?.length) lines.push(`  - Tasks: ${c.taskIds.join(', ')}`);
+            if (c.tests?.length) lines.push(`  - Verification: ${c.tests.join('; ')}`);
+        });
+        if (sp.openQuestions?.length) {
+            lines.push('**Open Questions:**');
+            sp.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
+        lines.push('');
+    }
+    if (plan.measurement) {
+        const mm = plan.measurement;
+        lines.push('## Measurement');
+        if (mm.summary) lines.push(mm.summary, '');
+        mm.metrics?.forEach(m => {
+            lines.push(`- **${m.metric}**${m.eventName ? ` → \`${m.eventName}\`` : ''}`);
+            if (m.properties?.length) lines.push(`  - Properties: ${m.properties.join(', ')}`);
+            if (m.trigger) lines.push(`  - Trigger: ${m.trigger}`);
+            if (m.validation) lines.push(`  - Validation: ${m.validation}`);
+            if (m.taskIds?.length) lines.push(`  - Tasks: ${m.taskIds.join(', ')}`);
+        });
+        if (mm.openQuestions?.length) {
+            lines.push('**Open Questions:**');
+            mm.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
         lines.push('');
     }
     if (plan.definitionOfDone?.length) {

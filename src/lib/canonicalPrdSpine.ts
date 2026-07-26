@@ -106,7 +106,18 @@ const slugId = (prefix: string, name: string, used: Set<string>): string => {
     return id;
 };
 
-const PRIVACY_RE = /privacy|security|compliance|gdpr|hipaa|ccpa|pii|encrypt|consent|audit|retention|data protection|soc\s?2/i;
+/**
+ * Privacy / security / compliance signal in free-form PRD prose. Exported as
+ * the single source for this vocabulary: the spine uses it to split constraints
+ * into `privacySecurityCompliance`, and
+ * `src/lib/planning/crossCuttingObligations.ts` uses the same test to decide
+ * whether the plan owes a Security & Privacy section. Keep them identical —
+ * two different vocabularies would let the gate ask for a section the
+ * generator was never told to produce.
+ */
+export const PRIVACY_SIGNAL_RE = /privacy|security|compliance|gdpr|hipaa|ccpa|pii|encrypt|consent|audit|retention|data protection|soc\s?2/i;
+
+const PRIVACY_RE = PRIVACY_SIGNAL_RE;
 
 /** Match canonical feature ids for entities/screens by conservative name mention. */
 const relatedFeatureIds = (prd: StructuredPRD, ...needles: (string | undefined)[]): string[] => {

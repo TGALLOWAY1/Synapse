@@ -1197,6 +1197,67 @@ export interface ImplementationReadiness {
     recommendedNextStep?: string;
 }
 
+// --- Conditional cross-cutting plan sections (W5) -----------------------------
+//
+// Two sections the plan emits ONLY when the product triggers them:
+// Security & Privacy obligations (PRD safety context / privacy requirements or
+// risks / privacy-classified data-model field groups) and Measurement
+// (non-empty `prd.successMetrics`). Whether a section is *required* is never
+// stored — it is derived on read by
+// `src/lib/planning/crossCuttingObligations.ts`, the single contract shared by
+// the generator (plan prompt) and the build-packet gate. Every field here is
+// optional (cross-cutting rule 3): legacy plans carry neither section, and a
+// partially emitted control/metric must still parse so the derived report can
+// name exactly what is missing.
+
+/** One security or privacy control the plan commits to implementing. */
+export interface PlanSecurityControl {
+    id: string;
+    title: string;
+    /** The obligation this control discharges (the rule/risk it answers to). */
+    obligation?: string;
+    /** How it is implemented, concretely. */
+    implementation?: string;
+    /** Canonical PRD `Feature` ids this control protects (plain ids). */
+    requirementIds?: string[];
+    /** Plan task ids that implement it. */
+    taskIds?: string[];
+    /** Concrete checks that verify the control holds. */
+    tests?: string[];
+}
+
+export interface PlanSecurityPrivacySection {
+    /** One or two sentences on the security/privacy posture of this build. */
+    summary?: string;
+    controls?: PlanSecurityControl[];
+    /** Obligations the plan cannot yet discharge — stated, never invented away. */
+    openQuestions?: string[];
+}
+
+/** One PRD success metric mapped to an implementable measurement contract. */
+export interface PlanMeasurementMetric {
+    id: string;
+    /** The PRD success-metric name this maps to, verbatim where possible. */
+    metric: string;
+    /** Analytics event name, e.g. "playlist_generated". */
+    eventName?: string;
+    /** Properties carried with the event. */
+    properties?: string[];
+    /** The concrete user/system action that fires the event. */
+    trigger?: string;
+    /** How the instrumentation is verified before launch. */
+    validation?: string;
+    /** Plan task ids that implement the instrumentation. */
+    taskIds?: string[];
+}
+
+export interface PlanMeasurementSection {
+    summary?: string;
+    metrics?: PlanMeasurementMetric[];
+    /** Metrics the plan cannot yet instrument — stated, never invented away. */
+    openQuestions?: string[];
+}
+
 export interface StructuredImplementationPlan {
     overview?: {
         summary?: string;
@@ -1210,6 +1271,9 @@ export interface StructuredImplementationPlan {
     // --- Consolidated-plan fields (all optional; legacy plans lack them) ---
     summary?: ImplementationPlanSummary;
     globalQualityGates?: ImplementationQualityGate[];
+    // --- Conditional cross-cutting sections (absent unless triggered) ---
+    securityPrivacy?: PlanSecurityPrivacySection;
+    measurement?: PlanMeasurementSection;
 }
 
 // --- Consolidated Implementation Plan (render-time view model) ---
@@ -1241,6 +1305,14 @@ export interface ConsolidatedImplementationPlan {
     traceability: ImplementationTraceabilityItem[];
     risks: RiskItem[];
     architecture: string[];
+    /**
+     * Conditional cross-cutting sections, passed through from the plan when it
+     * carries them. Absence is meaningful — whether it is an *unresolved
+     * obligation* or simply not applicable is decided by
+     * `deriveCrossCuttingObligations` (never by this view model).
+     */
+    securityPrivacy?: PlanSecurityPrivacySection;
+    measurement?: PlanMeasurementSection;
     /** Unrecognized appendix prose from a legacy markdown plan — preserved
      * verbatim so switching to the consolidated view never loses content. */
     appendixNotes?: string;

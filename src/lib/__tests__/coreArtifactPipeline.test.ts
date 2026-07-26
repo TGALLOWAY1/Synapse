@@ -9,6 +9,7 @@ import {
     getRequiredDependencies,
     isHiddenArtifactSubtype,
     isRetiredArtifactSubtype,
+    visibleCoreSubtypes,
 } from '../coreArtifactPipeline';
 
 // Retired subtypes never generate, so the parallelism/depth UX properties
@@ -78,20 +79,46 @@ describe('coreArtifactPipeline', () => {
     });
 
     it('hidden artifacts are still in the pipeline so they keep generating', () => {
-        // The whole point of "hidden" is display-only: component_inventory is
-        // hidden from the assets list but MUST remain generated (mockups consume
-        // it). If a hidden subtype ever leaves the pipeline, mockup component
-        // tagging silently breaks — catch that here.
+        // The whole point of "hidden" is display-only: a hidden subtype MUST
+        // remain generated (e.g. mockups consume component_inventory). If a
+        // hidden subtype ever leaves the pipeline, its consumers silently break
+        // — catch that here. Vacuous while the set is empty, kept as the guard
+        // for whatever is hidden next.
         const subtypes = new Set(CORE_ARTIFACT_PIPELINE.map(m => m.subtype));
         for (const hidden of HIDDEN_ARTIFACT_SUBTYPES) {
             expect(subtypes.has(hidden)).toBe(true);
         }
     });
 
-    it('isHiddenArtifactSubtype hides component_inventory and nothing else visible', () => {
-        expect(isHiddenArtifactSubtype('component_inventory')).toBe(true);
+    it('nothing is hidden today — component_inventory was unhidden by W4', () => {
+        // W4 (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md): component_inventory
+        // feeds every mockup through MOCKUP_DEPENDENCIES, so an invisible
+        // failure silently degraded the product. It is now reviewable in the
+        // Screens view's Components section, which means it legitimately gates
+        // `assetsReady` and is auto-resumed. Re-hiding it would re-open the
+        // audited defect — and per the HIDDEN_ARTIFACT_SUBTYPES rule, anything
+        // hidden must be excluded from readiness gating and auto-resume.
+        expect(HIDDEN_ARTIFACT_SUBTYPES.size).toBe(0);
+        expect(isHiddenArtifactSubtype('component_inventory')).toBe(false);
         expect(isHiddenArtifactSubtype('screen_inventory')).toBe(false);
         expect(isHiddenArtifactSubtype('design_system')).toBe(false);
+    });
+
+    it('visibleCoreSubtypes gates output readiness on component_inventory, never on prompt_pack', () => {
+        // This is the set `ProjectWorkspace.assetsReady` iterates: every entry
+        // must have a generated version before the user is told their outputs
+        // are ready. component_inventory joining it is the intended W4 behavior
+        // change (its status + Retry live in the Screens Components section);
+        // the retired prompt_pack never generates, so it must stay out.
+        const gating = visibleCoreSubtypes();
+        expect(gating).toContain('component_inventory');
+        expect(gating).toContain('screen_inventory');
+        expect(gating).toContain('implementation_plan');
+        expect(gating).not.toContain('prompt_pack');
+        // No hidden subtype may ever gate readiness.
+        for (const subtype of gating) {
+            expect(isHiddenArtifactSubtype(subtype)).toBe(false);
+        }
     });
 
     it('retired artifacts stay in the pipeline so legacy data keeps its meta', () => {
@@ -156,39 +183,60 @@ describe('coreArtifactPipeline', () => {
 describe('expandWithHiddenDependencyClosure', () => {
     const allDone = () => true;
     const noneDone = () => false;
+    // HIDDEN_ARTIFACT_SUBTYPES is empty since W4, so the closure is currently an
+    // identity function in production. The MECHANISM is retained (a hidden
+    // subtype must not be dropped from a graph-driven batch — the graph never
+    // names it, and resumeIfNeeded never wakes for it), so it is exercised here
+    // with an injected hidden set: component_inventory stands in as the hidden
+    // subtype it used to be, keeping the original scenarios verifiable.
+    const hiddenComponentInventory = (subtype: string) => subtype === 'component_inventory';
 
-    it('pulls component_inventory into a batch that regenerates screen_inventory and the mockup', () => {
+    it('is an identity function while nothing is hidden (the current production shape)', () => {
+        const slots = ['screen_inventory', 'user_flows', 'implementation_plan', 'mockup'] as const;
+        expect(expandWithHiddenDependencyClosure([...slots], noneDone)).toEqual([...slots]);
+    });
+
+    it('pulls a hidden dependency into a batch that regenerates its input and its consumer', () => {
         // The dependency-graph batch after screen_inventory drift: the mockup
-        // consumes component_inventory (hidden), which itself consumes the
+        // consumes the hidden subtype, which itself consumes the
         // screen_inventory being regenerated — it must ride along or the new
-        // mockup is built from a component inventory of the OLD screens.
+        // mockup is built from a hidden input derived from the OLD screens.
         const expanded = expandWithHiddenDependencyClosure(
             ['screen_inventory', 'user_flows', 'implementation_plan', 'mockup'],
             allDone,
+            hiddenComponentInventory,
         );
         expect(expanded).toContain('component_inventory');
     });
 
     it('leaves a fresh hidden dependency alone when its own inputs are untouched', () => {
-        // Design-tokens drift batch: mockup consumes component_inventory, but
+        // Design-tokens drift batch: the mockup consumes the hidden subtype, but
         // screen_inventory is not being regenerated and the hidden slot is
         // done — regenerating it would be a wasted API call.
-        const expanded = expandWithHiddenDependencyClosure(['design_system', 'mockup'], allDone);
+        const expanded = expandWithHiddenDependencyClosure(
+            ['design_system', 'mockup'],
+            allDone,
+            hiddenComponentInventory,
+        );
         expect(expanded).not.toContain('component_inventory');
     });
 
     it('heals a missing/errored hidden dependency when a consumer is in the batch', () => {
-        const expanded = expandWithHiddenDependencyClosure(['mockup'], noneDone);
+        const expanded = expandWithHiddenDependencyClosure(['mockup'], noneDone, hiddenComponentInventory);
         expect(expanded).toContain('component_inventory');
     });
 
     it('never adds a hidden subtype nothing in the batch consumes', () => {
-        const expanded = expandWithHiddenDependencyClosure(['data_model'], noneDone);
+        const expanded = expandWithHiddenDependencyClosure(['data_model'], noneDone, hiddenComponentInventory);
         expect(expanded).toEqual(['data_model']);
     });
 
     it('preserves the caller order and appends additions', () => {
-        const expanded = expandWithHiddenDependencyClosure(['screen_inventory', 'mockup'], allDone);
+        const expanded = expandWithHiddenDependencyClosure(
+            ['screen_inventory', 'mockup'],
+            allDone,
+            hiddenComponentInventory,
+        );
         expect(expanded.slice(0, 2)).toEqual(['screen_inventory', 'mockup']);
         expect(expanded[2]).toBe('component_inventory');
     });

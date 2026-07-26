@@ -571,6 +571,91 @@ export const implementationPlanSchema = {
             },
         },
         globalQualityGates: { type: "ARRAY", items: implementationQualityGateSchema },
+        // ── Conditional cross-cutting sections (plan §W5) ──────────────────
+        // Emitted ONLY when the trigger condition holds; omitted entirely
+        // otherwise (the prompt fragment PLAN_CONDITIONAL_SECTIONS_SPEC states
+        // the conditions, and `src/lib/planning/crossCuttingObligations.ts`
+        // derives the same conditions on read so the generator and the
+        // build-packet gate agree). Both are NON-required at the top level —
+        // that is what makes them conditional — and every linking field inside
+        // is non-required too, so a partial emit still parses and the derived
+        // report can name exactly which link is missing.
+        securityPrivacy: {
+            type: "OBJECT",
+            description: "Security & Privacy obligations. Include ONLY when the product carries safety restrictions, privacy/security/compliance requirements or risks, or privacy-classified data-model fields.",
+            properties: {
+                summary: { type: "STRING", description: "One or two sentences on the security/privacy posture of this build." },
+                controls: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            id: { type: "STRING", description: "Stable lower-snake-case id, unique across the plan (e.g. \"sec_encrypt_pii_at_rest\")." },
+                            title: { type: "STRING" },
+                            obligation: { type: "STRING", description: "The rule, risk, or restriction this control discharges." },
+                            implementation: { type: "STRING", description: "How the control is implemented, concretely." },
+                            requirementIds: {
+                                type: "ARRAY",
+                                description: "Canonical PRD feature ids this control protects, drawn from the Canonical Feature Glossary. Do not invent ids.",
+                                items: { type: "STRING" },
+                            },
+                            taskIds: {
+                                type: "ARRAY",
+                                description: "Ids of tasks in THIS plan that implement the control.",
+                                items: { type: "STRING" },
+                            },
+                            tests: {
+                                type: "ARRAY",
+                                description: "Concrete checks that verify the control holds.",
+                                items: { type: "STRING" },
+                            },
+                        },
+                        required: ["id", "title"],
+                    },
+                },
+                openQuestions: {
+                    type: "ARRAY",
+                    description: "Obligations this plan cannot yet discharge. State them instead of inventing a control.",
+                    items: { type: "STRING" },
+                },
+            },
+        },
+        measurement: {
+            type: "OBJECT",
+            description: "Measurement contract. Include ONLY when the PRD declares success metrics; one entry per declared metric.",
+            properties: {
+                summary: { type: "STRING", description: "One or two sentences on how this product is measured." },
+                metrics: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            id: { type: "STRING", description: "Stable lower-snake-case id, unique across the plan (e.g. \"mm_weekly_active_creators\")." },
+                            metric: { type: "STRING", description: "The PRD success-metric name, verbatim." },
+                            eventName: { type: "STRING", description: "Analytics event name in snake_case (e.g. \"playlist_generated\")." },
+                            properties: {
+                                type: "ARRAY",
+                                description: "Event properties, as \"name: type\" strings.",
+                                items: { type: "STRING" },
+                            },
+                            trigger: { type: "STRING", description: "The concrete user or system action that fires the event." },
+                            validation: { type: "STRING", description: "How the instrumentation is verified before launch." },
+                            taskIds: {
+                                type: "ARRAY",
+                                description: "Ids of tasks in THIS plan that implement the instrumentation.",
+                                items: { type: "STRING" },
+                            },
+                        },
+                        required: ["id", "metric"],
+                    },
+                },
+                openQuestions: {
+                    type: "ARRAY",
+                    description: "Metrics this plan cannot yet instrument. State them instead of inventing an event.",
+                    items: { type: "STRING" },
+                },
+            },
+        },
         architecture: { type: "ARRAY", items: { type: "STRING" } },
         risks: {
             type: "ARRAY",

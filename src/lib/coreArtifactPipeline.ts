@@ -138,16 +138,37 @@ export const MOCKUP_DEPENDENCIES: CoreArtifactSubtype[] = [
 
 // Subtypes that are still *generated* (they remain in CORE_ARTIFACT_PIPELINE and
 // MOCKUP_DEPENDENCIES so downstream consumers like mockups keep working) but are
-// **hidden from the assets list** — no hard dependents, not useful to surface
-// directly right now. This is the single source of truth for "hidden": it drives
-// the sidebar omission (ArtifactWorkspace.buildSlotMetas), the finalize readiness
-// gate (ProjectWorkspace.assetsReady), and the auto-resume decision
-// (artifactJobController.resumeIfNeeded). A hidden artifact must never gate
-// user-facing readiness or trigger an invisible retry loop, since the user has no
-// row to see its status or retry it. See docs/backlog/BACKLOG.md §6.
-export const HIDDEN_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArtifactSubtype>([
-    'component_inventory',
-]);
+// **hidden from every user-facing surface**. This is the single source of truth
+// for "hidden": it drives the sidebar omission (ArtifactWorkspace.buildSlotMetas),
+// the output-completion signal (ProjectWorkspace.assetsReady), the export list
+// (ExportModal), the dependency graph's visible nodes
+// (artifactDependencyGraph.isVisibleSubtype), and the auto-resume decision
+// (artifactJobController.resumeIfNeeded).
+//
+// LOAD-BEARING RULE (unchanged, and it is why the set is empty today): **a
+// hidden artifact must never gate user-facing readiness or trigger an invisible
+// retry loop**, because the user has no surface on which to see its status or
+// retry it. If you hide a subtype, the readiness/auto-resume filters above must
+// keep excluding it.
+//
+// **The set is currently EMPTY.** `component_inventory` was the last member and
+// was unhidden by W4 of docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md: it feeds
+// every mockup through MOCKUP_DEPENDENCIES, so an invisible failure silently
+// degraded the product. It now renders through
+// `ComponentInventoryRenderer` inside the **Components section of the Screens
+// experience** (`ScreenComponentsSection`) — which is also where its slot status
+// and Retry live. It is deliberately NOT in `ARTIFACT_GROUPS`, so it still has
+// no sidebar row of its own (same treatment as `screen_inventory`/`mockup`);
+// "no row" is a layout choice, "hidden" is a visibility contract — do not
+// conflate them. Two consequences of unhiding are intentional and tested: the
+// slot now gates `assetsReady`, and `resumeIfNeeded` will auto-wake for it.
+//
+// The mechanism is retained (empty, not deleted) so a future subtype can be
+// hidden without re-deriving the rule — `expandWithHiddenDependencyClosure`
+// below stays as the closure guard hidden subtypes require, and takes an
+// injectable predicate so it remains directly testable while the set is empty.
+export const HIDDEN_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> =
+    new Set<CoreArtifactSubtype>([]);
 
 export const isHiddenArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
     HIDDEN_ARTIFACT_SUBTYPES.has(subtype);
@@ -167,15 +188,30 @@ export const isRetiredArtifactSubtype = (subtype: CoreArtifactSubtype): boolean 
     RETIRED_ARTIFACT_SUBTYPES.has(subtype);
 
 /**
+ * Core subtypes that are user-visible: neither hidden nor retired. The shared
+ * definition behind the output-completion signal
+ * (`ProjectWorkspace.assetsReady`) — so "which outputs must exist before we tell
+ * the user their outputs are ready" has exactly one answer, and unhiding a
+ * subtype changes that gate in one place. In display order.
+ *
+ * Note `component_inventory` IS in this list since W4 — the gate is intentional
+ * and only safe because the Components section in the Screens experience gives
+ * the slot a visible status and a Retry (see HIDDEN_ARTIFACT_SUBTYPES above).
+ */
+export function visibleCoreSubtypes(): CoreArtifactSubtype[] {
+    return CORE_ARTIFACT_DISPLAY_ORDER
+        .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
+        .map(meta => meta.subtype);
+}
+
+/**
  * Expand an explicit regeneration batch with the hidden-subtype dependency
- * closure. Hidden subtypes (e.g. component_inventory) still generate and feed
- * visible dependents — the mockup consumes component_inventory via
- * MOCKUP_DEPENDENCIES — but the dependency graph collapses them out of the UI,
- * so a graph-driven batch never names them. Without this expansion, a batch
- * like [screen_inventory, …, mockup] would rebuild the mockup against a
- * component inventory generated from the OLD screen inventory (or none at
- * all), and resumeIfNeeded deliberately never wakes a hidden-only pending
- * slot afterwards.
+ * closure. Hidden subtypes still generate and feed visible dependents, but the
+ * dependency graph collapses them out of the UI, so a graph-driven batch never
+ * names them. Without this expansion, a batch like [screen_inventory, …,
+ * mockup] would rebuild the mockup against a hidden input generated from the
+ * OLD screen inventory (or none at all), and resumeIfNeeded deliberately never
+ * wakes a hidden-only pending slot afterwards.
  *
  * A hidden subtype is added when some requested slot consumes it (directly)
  * AND either (a) one of its own inputs is also being regenerated — it will be
@@ -183,17 +219,24 @@ export const isRetiredArtifactSubtype = (subtype: CoreArtifactSubtype): boolean 
  * spine (missing/errored), per the `isSlotDone` callback. Runs to a fixed
  * point so hidden-on-hidden chains close too. Pure: the controller supplies
  * the store-backed `isSlotDone`.
+ *
+ * **`HIDDEN_ARTIFACT_SUBTYPES` is empty today** (W4 unhid `component_inventory`),
+ * so in production this is currently an identity function — a graph batch now
+ * names every input directly. The mechanism is retained because the rule it
+ * enforces returns the moment anything is hidden again; `isHidden` is injectable
+ * purely so that behavior stays unit-testable with a synthetic hidden set.
  */
 export function expandWithHiddenDependencyClosure(
     slots: ArtifactSlotKey[],
     isSlotDone: (subtype: CoreArtifactSubtype) => boolean,
+    isHidden: (subtype: CoreArtifactSubtype) => boolean = isHiddenArtifactSubtype,
 ): ArtifactSlotKey[] {
     const requested = new Set<ArtifactSlotKey>(slots);
     let changed = true;
     while (changed) {
         changed = false;
         for (const meta of CORE_ARTIFACT_PIPELINE) {
-            if (!isHiddenArtifactSubtype(meta.subtype) || requested.has(meta.subtype)) continue;
+            if (!isHidden(meta.subtype) || requested.has(meta.subtype)) continue;
             const consumers: ArtifactSlotKey[] = [
                 ...CORE_ARTIFACT_PIPELINE
                     .filter(m => !isRetiredArtifactSubtype(m.subtype) && m.dependsOn.includes(meta.subtype))
@@ -229,8 +272,9 @@ export interface RetryPlan {
 /**
  * Plan a single-slot retry so it never regenerates against missing/errored/
  * stale/needs-review upstream dependencies. Walks the slot's dependency
- * closure (including hidden deps like component_inventory that the mockup
- * consumes) and, for any dependency the caller reports as unhealthy, pulls it
+ * closure (including deps with no sidebar row of their own, like the
+ * component_inventory the mockup consumes) and, for any dependency the caller
+ * reports as unhealthy, pulls it
  * (and transitively its own unhealthy inputs) into the batch so it regenerates
  * BEFORE the target slot. When every dependency is healthy, returns just the
  * target slot (a plain retry). Pure: the caller supplies `isHealthy`.

@@ -736,6 +736,38 @@
       `complete | partial | stub` via `src/lib/apiContractCompleteness.ts`
       (advisory-only; see SAFETY_AND_VALIDATION.md). Endpoints with no
       contract fields (legacy) read as neutral "stub", never as errors.
+    - **The implementation_plan prompt carries two CONDITIONAL sections (W5,
+      2026-07):** `securityPrivacy` (Security & Privacy obligations) and
+      `measurement`. They are **sections of the plan, not new artifact
+      subtypes** — a new subtype would cost a generation slot and re-fragment
+      review. Conditionality lives in the prompt: the shared fragment
+      **`PLAN_CONDITIONAL_SECTIONS_SPEC`**
+      (`prompts/artifactPromptFragments.ts`, composed into the
+      `implementation_plan` system prompt) tells the model to emit each section
+      only when its trigger condition holds and to **omit it entirely**
+      otherwise — never to emit it empty — and to park what it cannot
+      responsibly answer under that section's `openQuestions` instead of
+      inventing a control or an event. In `schemas/artifactSchemas.ts` both
+      objects are **non-required** on `implementationPlanSchema` (that is what
+      makes them conditional), and every linking field inside a control/metric
+      is non-required too, so a partial emit still parses and the read side can
+      name the exact missing link. The domain shapes
+      (`PlanSecurityPrivacySection` / `PlanSecurityControl`,
+      `PlanMeasurementSection` / `PlanMeasurementMetric`, `src/types/index.ts`)
+      are all-optional per rule 3, and `implementationPlanToMarkdown` +
+      `consolidatedPlanToMarkdown` write the readable `## Security & Privacy
+      Obligations` / `## Measurement` sections **only when the plan carries
+      them**. Whether a section is *required* is never stored: it is derived on
+      read by **`src/lib/planning/crossCuttingObligations.ts`**
+      (`deriveCrossCuttingObligations`) — the single contract shared by this
+      prompt and the build-packet readiness gate (plan §W6), which blocks on
+      `report.unresolved`. Its privacy vocabulary is the exported
+      `PRIVACY_SIGNAL_RE` from `canonicalPrdSpine.ts`, the same test the spine
+      uses to build `constraints.privacySecurityCompliance` — keep them
+      identical, or the gate will demand a section the prompt never asked for.
+      Any edit to the trigger wording in the fragment must move the predicate
+      (and the promptSurfaces snapshot) in the same change. See
+      `docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md`.
     `component_inventory` (UI Components) is a **hidden artifact** (see
     "Post-finalization transition" below) with no reachable render UI — the
     old mobile-first searchable component-library renderer (sticky search +
@@ -811,9 +843,12 @@
 - **Shared prompt fragments & snapshot net.**
   `prompts/artifactPromptFragments.ts` holds the artifact-prompt sentences that
   used to be copy-pasted across `CORE_ARTIFACT_PROMPTS` subtypes
-  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`, and
+  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`,
   `API_ENDPOINT_CONTRACT_SPEC` — the data_model endpoint-contract requirement
-  text, mirrored by `apiContractCompleteness.ts` on the read side);
+  text, mirrored by `apiContractCompleteness.ts` on the read side — and
+  `PLAN_CONDITIONAL_SECTIONS_SPEC` — the implementation_plan conditional
+  security/privacy + measurement sections, mirrored by
+  `planning/crossCuttingObligations.ts` on the read side);
   `prompts/imagePromptFragments.ts` holds the image-prompt strings shared by
   the internal gpt-image-2 builder and the external copy prompt
   (`IMAGE_PLATFORM_HINTS`, `IMAGE_CLOSING_RULES`, and `fidelityStyleHint(fidelity,

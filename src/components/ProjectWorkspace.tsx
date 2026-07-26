@@ -31,7 +31,13 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
-import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
+import {
+    CORE_ARTIFACT_DISPLAY_ORDER,
+    getArtifactMeta,
+    isHiddenArtifactSubtype,
+    isRetiredArtifactSubtype,
+    visibleCoreSubtypes,
+} from '../lib/coreArtifactPipeline';
 import { HistoryPanel } from './HistoryPanel';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -1406,17 +1412,20 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // output-completion signal only; it is intentionally unrelated to planning
     // readiness.
     const assetsReady = !!activeSpine?.structuredPRD && (() => {
-        // Hidden artifacts (generated for downstream use but not surfaced in the
-        // assets list) must not gate readiness — the user has no row to see or
-        // retry them, so a hidden slot erroring would otherwise leave the
-        // output transition stuck reporting "outputs are being created".
-        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
-            // Retired subtypes (prompt_pack) no longer generate at all, so
-            // they must not gate readiness either.
-            .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
-            .every(meta =>
-                getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
-            );
+        // The gating set is `visibleCoreSubtypes()` (coreArtifactPipeline.ts):
+        // hidden artifacts must never gate this signal — the user would have no
+        // surface to see or retry them, so a hidden slot erroring would strand
+        // the output transition on "outputs are being created" — and retired
+        // subtypes (prompt_pack) no longer generate at all.
+        //
+        // Since W4 that set INCLUDES `component_inventory`, so an errored
+        // component inventory now legitimately holds this signal back. That is
+        // intentional: it feeds every mockup, and its status + Retry are visible
+        // in the Components section of the Screens experience.
+        const gatingSubtypes = visibleCoreSubtypes();
+        const coreReady = gatingSubtypes.every(subtype =>
+            getArtifacts(projectId, 'core_artifact').some(a => a.subtype === subtype && a.currentVersionId),
+        );
         const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
         return coreReady && mockupReady;
     })();

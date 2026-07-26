@@ -79,7 +79,7 @@ The Decision Center queues the assumptions and choices that actually move the pl
 <img width="100%" alt="Decision Center queue with a selected assumption and its impact" src="public/screenshots/app-decisions.png" />
 
 **6 · Fan out into every asset** 🎨
-Generate the design system, user flows, screens, data model, and implementation plan from the same source. Mockups take one more deliberate step: review the flows and approve which screens are worth rendering, then Synapse generates images only for the screens you picked — so the visuals follow an approved flow instead of appearing unbidden. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
+Generate the design system, user flows, screens, data model, and implementation plan from the same source. Mockups take one more deliberate step: review the flows and approve which screens are worth rendering, then Synapse generates images only for the screens you picked — so the visuals follow an approved flow instead of appearing unbidden. The Screens view also opens up the **reusable component inventory** your mockups are composed from — every component's props, accessibility contract, and the screens that use it — so nothing shaping the UI stays invisible. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
 
 <img width="100%" alt="Explore workspace showing generated artifacts and the design system" src="public/screenshots/app-artifacts.png" />
 

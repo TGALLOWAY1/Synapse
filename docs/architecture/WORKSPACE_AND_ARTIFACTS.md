@@ -14,23 +14,63 @@ workspace" below), **Architecture** (Data Model), and **Development**
 `CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
-per-artifact model overrides keep working. **`component_inventory` (UI Components)
-is a *hidden* artifact** — no hard dependents, not useful to surface directly
-right now, so it is hidden from the assets list but **still generates** (it stays
-in `CORE_ARTIFACT_PIPELINE` and `MOCKUP_DEPENDENCIES`; mockups softly consume it
-to tag per-screen `componentRefs`). **`HIDDEN_ARTIFACT_SUBTYPES` /
-`isHiddenArtifactSubtype` in `coreArtifactPipeline.ts` is the single source of
-truth for "hidden"** and drives three things: (1) `buildSlotMetas` drops it so it
-renders no sidebar/mobile-header/auto-open row (it may stay listed in
-`ARTIFACT_GROUPS.items`; the filter removes it); (2) `ProjectWorkspace.assetsReady`
-excludes hidden subtypes so a hidden slot erroring can't strand the finalize
-success modal on "assets are being created" (the user has no row to see/retry it);
-(3) `artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending
-slots so an errored hidden slot isn't retried invisibly on every remount — but
+per-artifact model overrides keep working.
+
+**`HIDDEN_ARTIFACT_SUBTYPES` / `isHiddenArtifactSubtype` in
+`coreArtifactPipeline.ts` is the single source of truth for "hidden"** — a
+subtype that still *generates* but is surfaced nowhere. It drives: (1)
+`buildSlotMetas` drops it so it renders no sidebar/mobile-header/auto-open row;
+(2) `ProjectWorkspace.assetsReady` excludes it (via `visibleCoreSubtypes()`) so a
+hidden slot erroring can't strand the finalize success modal on "assets are being
+created" — the user has no row to see/retry it; (3) `ExportModal` drops it from
+the export list; (4) `artifactDependencyGraph.isVisibleSubtype` excludes it as a
+node (dependents inherit its dependencies transitively, and
+`expandWithHiddenDependencyClosure` re-adds it to graph-driven batches); (5)
+`artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending slots
+so an errored hidden slot isn't retried invisibly on every remount — while
 `startAll` still includes hidden slots in its pending set, so they're best-effort
-generated alongside visible ones. A hidden artifact must never gate readiness or
-be the sole reason a run resumes. To re-expose one, remove it from
-`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6.
+generated alongside visible ones. **The load-bearing rule: a hidden artifact must
+never gate user-facing readiness or trigger an invisible retry loop.**
+
+**The hidden set is currently EMPTY.** `component_inventory` (UI Components) was
+its last member and was **unhidden by W4** of
+[docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md):
+it feeds every mockup through `MOCKUP_DEPENDENCIES` (`generateMockup` tags
+per-screen `componentRefs` from it, which reach the gpt-image prompts), so an
+invisible failure silently degraded the product. The mechanism above is retained
+(empty, not deleted) so a future subtype can be hidden without re-deriving the
+rule; `expandWithHiddenDependencyClosure` takes an injectable `isHidden`
+predicate so the closure behavior stays unit-testable while the set is empty.
+
+What unhiding `component_inventory` changed — all intentional and test-covered:
+
+- **It is reviewable.** `ComponentInventoryRenderer` (dispatched from
+  `ArtifactContentRenderer`) renders it as the **Components section inside the
+  Screens experience** (`ScreenComponentsSection`), with screen back-references
+  and advisory component/screen contradictions. See SCREENS_EXPERIENCE.md.
+- **It still has no sidebar row.** It is deliberately absent from
+  `ARTIFACT_GROUPS.items`, so `buildSlotMetas` never materializes a row —
+  the same treatment as `screen_inventory`/`mockup`. Deep links / graph nodes /
+  checkpoint destinations naming it route to the Screens view via
+  `SCREENS_HOSTED_SLOTS`. **"No row" ≠ "hidden"** — don't conflate the layout
+  choice with the visibility contract.
+- **It now GATES output readiness.** `ProjectWorkspace.assetsReady` iterates
+  `visibleCoreSubtypes()` (the shared "not hidden, not retired" list — use it
+  rather than re-filtering), which now includes `component_inventory`. An errored
+  component inventory legitimately holds the "outputs are ready" signal back.
+  That is only acceptable because the Components section shows its status and
+  offers Retry. Covered by `coreArtifactPipeline.test.ts`.
+- **It now AUTO-RETRIES.** `resumeIfNeeded` wakes a run for a pending
+  `component_inventory` slot instead of skipping it — no longer an invisible
+  retry, for the same reason. Covered by `src/lib/__tests__/artifactJobResume.test.ts`.
+- **It is a Dependency-Graph node and an export row.** The mockup's dependency on
+  it is now an explicit edge instead of a collapsed one, it appears in the
+  Sync-outputs row list (so it can be regenerated like any other output), and it
+  is included in exports.
+
+To hide a subtype again, add it back to `HIDDEN_ARTIFACT_SUBTYPES` — and re-check
+every consumer above against the load-bearing rule. `docs/backlog/BACKLOG.md` §6
+records the original hide decision and its resolution.
 **`prompt_pack` (Developer Prompts) is a *retired* artifact**
 (`RETIRED_ARTIFACT_SUBTYPES` / `isRetiredArtifactSubtype`, same module) —
 stronger than hidden: retired subtypes are excluded from new generation runs

@@ -737,11 +737,18 @@ function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
         && !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
 }
 
-// A slot is "hidden" when its subtype is hidden from the assets list. 'mockup'
-// is always visible. Hidden slots still generate (startAll includes them), but
-// they must never be the *reason* auto-resume wakes a run — the user has no row
-// to see or retry them, so retrying an errored hidden slot on every remount is
-// invisible churn. resumeIfNeeded therefore gates on visible pending slots only.
+// A slot is "hidden" when its subtype is hidden from every user-facing surface
+// (HIDDEN_ARTIFACT_SUBTYPES). 'mockup' is always visible. Hidden slots still
+// generate (startAll includes them), but they must never be the *reason*
+// auto-resume wakes a run — the user has no surface to see or retry them, so
+// retrying an errored hidden slot on every remount is invisible churn.
+// resumeIfNeeded therefore gates on visible pending slots only.
+//
+// The hidden set is EMPTY since W4 unhid `component_inventory`, so an errored
+// component inventory NOW auto-resumes like any other slot. That is intentional:
+// the Components section in the Screens experience shows its status and offers
+// Retry, so the retry is no longer invisible. Keep this predicate — the rule it
+// enforces applies to whatever is hidden next.
 const isHiddenSlot = (slot: ArtifactSlotKey): boolean =>
     slot !== 'mockup' && isHiddenArtifactSubtype(slot);
 

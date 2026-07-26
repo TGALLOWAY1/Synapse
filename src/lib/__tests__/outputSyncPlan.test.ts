@@ -101,7 +101,7 @@ describe('output sync planning', () => {
         expect(hasOutputSyncDrift(rows)).toBe(false);
     });
 
-    it('keeps graph order and distinguishes missing and failed outputs without inventing hidden rows', () => {
+    it('keeps graph order and distinguishes missing and failed outputs without inventing rows', () => {
         const rows = buildOutputSyncRows({
             graph,
             evaluations: evaluations({
@@ -130,7 +130,10 @@ describe('output sync planning', () => {
             defaultChoice: 'update',
             canMarkCurrent: false,
         });
-        expect(rows.map(row => row.id)).not.toContain('component_inventory');
+        // Rows come straight from the graph's visible nodes: `component_inventory`
+        // IS one since W4 unhid it (so it can be synced like any other output),
+        // while the retired `prompt_pack` never appears.
+        expect(rows.map(row => row.id)).toContain('component_inventory');
         expect(rows.map(row => row.id)).not.toContain('prompt_pack');
     });
 
