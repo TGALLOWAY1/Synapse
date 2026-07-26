@@ -19,7 +19,7 @@ export type CoerceOptions = {
     max?: number;
 };
 
-const SENTENCE_SPLIT = /(?<=[.!?])\s+|\s*\n+\s*|\s*•\s*|\s*•\s*|\s+[-–]\s+/;
+const SENTENCE_SPLIT = /(?<=[.!?])\s+|\s*\n+\s*|\s*•\s*|\s+[-–]\s+/;
 
 /**
  * Split the input on sentence-like boundaries, trim, drop empties, and
@@ -45,27 +45,57 @@ export function dedupeSentences(text: string, opts: CoerceOptions = {}): string[
     return out;
 }
 
+/** Shortest / longest repeating block length `collapseRepeats` considers. */
+const MIN_REPEAT_PERIOD = 30;
+const MAX_REPEAT_PERIOD = 300;
+
+/**
+ * Smallest period in `[MIN_REPEAT_PERIOD, maxLen]` whose block repeats three or
+ * more times back-to-back, or `null` when there is no such run.
+ *
+ * Exactly equivalent to testing `/(.{len})\1{2,}/s` for each `len` in ascending
+ * order: that pattern matches iff some position `i` has `text[j] === text[j+len]`
+ * for every `j` in `[i, i+2*len)`, i.e. a run of `2*len` consecutive matching
+ * offset pairs. Doing it as a character scan costs one comparison per
+ * (period, position) pair, where the regex form built and ran up to ~270
+ * separate regexes across the whole string.
+ *
+ * That difference is not academic: this runs synchronously on the render path
+ * (`PremiumSections` calls `looksDegenerate`/`coerceToBulletList` per state per
+ * mechanic), and the regex form measured ~2.5s on a 12KB field and ~10s on a
+ * 49KB one — a frozen tab on exactly the degenerate output this exists to clean
+ * up.
+ */
+function findRepeatPeriod(text: string, maxLen: number): number | null {
+    for (let len = MIN_REPEAT_PERIOD; len <= maxLen; len += 1) {
+        const needed = 2 * len;
+        let run = 0;
+        for (let j = 0; j + len < text.length; j += 1) {
+            if (text.charCodeAt(j) === text.charCodeAt(j + len)) {
+                run += 1;
+                if (run >= needed) return len;
+            } else {
+                run = 0;
+            }
+        }
+    }
+    return null;
+}
+
 /**
  * Collapse runs where a fixed-length substring repeats three or more
  * times back-to-back. Targets the "no-period" version of the degenerate
  * loop where dedupeSentences alone wouldn't help. Safe against
- * catastrophic backtracking because each backreference is fixed-length.
+ * catastrophic backtracking because the backreference is fixed-length.
  */
 export function collapseRepeats(text: string): string {
     if (!text || text.length < 90) return text;
-    // Try fixed-length backreferences (no catastrophic backtracking) of every
-    // length from 30 up to a third of the string. Step by 1 so we catch
-    // arbitrary period lengths; the regex engine is fast on fixed-length
-    // backrefs.
-    const maxLen = Math.min(300, Math.floor(text.length / 3));
-    for (let len = 30; len <= maxLen; len += 1) {
-        const re = new RegExp(`(.{${len}})\\1{2,}`, 's');
-        if (re.test(text)) {
-            const replaceRe = new RegExp(`(.{${len}})\\1{2,}`, 'gs');
-            return text.replace(replaceRe, '$1');
-        }
-    }
-    return text;
+    // Periods from 30 up to a third of the string, so an arbitrary loop length
+    // is caught; the shortest matching period wins (same order as before).
+    const maxLen = Math.min(MAX_REPEAT_PERIOD, Math.floor(text.length / 3));
+    const len = findRepeatPeriod(text, maxLen);
+    if (len === null) return text;
+    return text.replace(new RegExp(`(.{${len}})\\1{2,}`, 'gs'), '$1');
 }
 
 /**

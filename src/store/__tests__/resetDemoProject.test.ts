@@ -56,6 +56,8 @@ import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore
 import { useMockupImageStore } from '../mockupImageStore';
 import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
 import { useMockupVariantImageStore } from '../mockupVariantImageStore';
+import { ALL_PROJECT_COLLECTIONS } from '../../lib/projectBundle';
+import type { ProjectState } from '../types';
 
 const mockedPointer = vi.mocked(loadDemoSnapshotPointer);
 const mockedPublic = vi.mocked(loadDemoSnapshotPublic);
@@ -232,6 +234,85 @@ describe('resetDemoProject', () => {
         expect(mockedPublic).toHaveBeenCalledTimes(1);
         expect(mockedRestore).toHaveBeenCalledTimes(1);
         expect(state.projects[DEMO_PROJECT_ID]?.demoSourceSnapshotId).toBe('snap-new');
+    });
+
+    // Regression: the wipe used to spell out nine collection names by hand and
+    // had drifted — review, planning, readiness and downstream-update records
+    // survived a reset. Both the seed and the assertion are derived from
+    // ALL_PROJECT_COLLECTIONS so adding a persisted collection without wiring
+    // demo cleanup fails here instead of silently leaking (CLAUDE.md rule 6).
+    it('wipes EVERY project-keyed collection, not just the original nine', async () => {
+        seedCorruptedDemo();
+        // Seed a demo-keyed entry in every persisted collection, including the
+        // ones seedCorruptedDemo predates.
+        useProjectStore.setState((state) => {
+            const source = state as unknown as Record<string, Record<string, unknown>>;
+            const next: Record<string, unknown> = {};
+            for (const key of ALL_PROJECT_COLLECTIONS) {
+                next[key] = {
+                    ...source[key],
+                    [DEMO_PROJECT_ID]:
+                        key === 'projects'
+                            ? { id: DEMO_PROJECT_ID, name: 'Demo', createdAt: 0 }
+                            : [{ id: `stray-${key}` }],
+                };
+            }
+            return next as unknown as Partial<ProjectState>;
+        });
+
+        mockedPointer.mockResolvedValue({ snapshotId: 'snap-new', updatedAt: null });
+        mockedPublic.mockResolvedValue(fakePayload('snap-new'));
+
+        await useProjectStore.getState().resetDemoProject();
+
+        const after = useProjectStore.getState() as unknown as Record<
+            string,
+            Record<string, unknown>
+        >;
+        for (const key of ALL_PROJECT_COLLECTIONS) {
+            // `projects` is legitimately repopulated by the mocked restore.
+            if (key === 'projects') continue;
+            expect(`${key}:${after[key][DEMO_PROJECT_ID] === undefined}`).toBe(`${key}:true`);
+        }
+    });
+
+    // The wipe must be complete even when the reload can't finish: with the
+    // snapshot fetch failing there is no restore to overwrite the leftovers, so
+    // anything the wipe misses is orphaned under DEMO_PROJECT_ID in persisted
+    // storage with no project row that owns it.
+    it('leaves no orphaned demo state when the snapshot re-fetch fails', async () => {
+        seedCorruptedDemo();
+        useProjectStore.setState((state) => {
+            const source = state as unknown as Record<string, Record<string, unknown>>;
+            const next: Record<string, unknown> = {};
+            for (const key of ALL_PROJECT_COLLECTIONS) {
+                next[key] = {
+                    ...source[key],
+                    [DEMO_PROJECT_ID]:
+                        key === 'projects'
+                            ? { id: DEMO_PROJECT_ID, name: 'Demo', createdAt: 0 }
+                            : [{ id: `stray-${key}` }],
+                };
+            }
+            return next as unknown as Partial<ProjectState>;
+        });
+
+        mockedPointer.mockResolvedValue({ snapshotId: 'snap-new', updatedAt: null });
+        mockedPublic.mockRejectedValue(new Error('offline'));
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await useProjectStore.getState().resetDemoProject();
+
+        expect(result).toEqual({ projectId: DEMO_PROJECT_ID, available: false });
+        expect(mockedRestore).not.toHaveBeenCalled();
+
+        const after = useProjectStore.getState() as unknown as Record<
+            string,
+            Record<string, unknown>
+        >;
+        for (const key of ALL_PROJECT_COLLECTIONS) {
+            expect(`${key}:${after[key][DEMO_PROJECT_ID] === undefined}`).toBe(`${key}:true`);
+        }
     });
 
     it('resets cleanly when no demo project exists locally', async () => {

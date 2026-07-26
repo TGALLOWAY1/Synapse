@@ -18,8 +18,29 @@ import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore
 import { useMockupImageStore } from '../mockupImageStore';
 import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
 import { useMockupVariantImageStore } from '../mockupVariantImageStore';
+import { ALL_PROJECT_COLLECTIONS } from '../../lib/projectBundle';
 
 export const DEMO_CACHE_POLICY_VERSION = 1;
+
+/**
+ * Drop `DEMO_PROJECT_ID` from EVERY persisted project-keyed collection.
+ *
+ * Derived from `ALL_PROJECT_COLLECTIONS` (the single list the bundle, sync,
+ * recovery, namespace switch and legacy import all derive from) rather than a
+ * hand-written key list — see cross-cutting rule 6 in CLAUDE.md. Both demo
+ * wipes previously spelled the keys out by hand and `resetDemoProject`'s copy
+ * had drifted to nine of them, so a reset left the demo's review, planning,
+ * readiness and downstream-update records behind.
+ */
+function withoutDemoCollections(state: ProjectState): Partial<ProjectState> {
+    const next: Record<string, unknown> = {};
+    for (const key of ALL_PROJECT_COLLECTIONS) {
+        const copy = { ...(state[key] as Record<string, unknown>) };
+        delete copy[DEMO_PROJECT_ID];
+        next[key] = copy;
+    }
+    return next as Partial<ProjectState>;
+}
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -235,25 +256,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             deleteScreenImagesForArtifactVersion(version.id),
             deleteVariantImagesForVersion(version.id),
         ]));
-        set((state) => {
-            const keys = [
-                'projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts',
-                'artifactVersions', 'feedbackItems', 'reviewRuns', 'specialistRuns',
-                'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
-                'readinessReviews', 'readinessCommitmentEvents',
-                'downstreamUpdatePlans', 'downstreamUpdatePlanEvents',
-                'downstreamArtifactUpdateProposals', 'downstreamArtifactUpdateReviewEvents',
-                'downstreamArtifactUpdateApplications', 'downstreamArtifactUpdateVerifications',
-                'downstreamArtifactUpdateVerificationEvents',
-            ] as const;
-            const next: Record<string, unknown> = {};
-            for (const key of keys) {
-                const copy = { ...state[key] };
-                delete copy[DEMO_PROJECT_ID];
-                next[key] = copy;
-            }
-            return next as Partial<ProjectState>;
-        });
+        set((state) => withoutDemoCollections(state));
     },
 
     loadDemoProject: async ({ force = false } = {}) => {
@@ -347,8 +350,9 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     // (no projectId param).
     //
     // Sequence: wipe every piece of local state the demo namespace owns
-    // (the nine project-keyed store maps, the transient job/progress slices,
-    // and all three IDB image stores + their reactive Zustand caches), then
+    // (every project-keyed store map in ALL_PROJECT_COLLECTIONS, the transient
+    // job/progress slices, and all three IDB image stores + their reactive
+    // Zustand caches), then
     // fall through to `loadDemoProject()` for a full re-fetch + restore from
     // the pinned snapshot. Deleting `projects[DEMO_PROJECT_ID]` also removes
     // the `demoSourceSnapshotId` stamp, so the subsequent `loadDemoProject()`
@@ -386,24 +390,9 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         useMockupVariantImageStore.getState().clearVersions(versionIds);
 
         set((state) => {
-            const projects = { ...state.projects };
-            delete projects[DEMO_PROJECT_ID];
-            const spineVersions = { ...state.spineVersions };
-            delete spineVersions[DEMO_PROJECT_ID];
-            const historyEvents = { ...state.historyEvents };
-            delete historyEvents[DEMO_PROJECT_ID];
-            const branches = { ...state.branches };
-            delete branches[DEMO_PROJECT_ID];
-            const artifacts = { ...state.artifacts };
-            delete artifacts[DEMO_PROJECT_ID];
-            const artifactVersions = { ...state.artifactVersions };
-            delete artifactVersions[DEMO_PROJECT_ID];
-            const feedbackItems = { ...state.feedbackItems };
-            delete feedbackItems[DEMO_PROJECT_ID];
-            const tasks = { ...state.tasks };
-            delete tasks[DEMO_PROJECT_ID];
-            const workflowRuns = { ...state.workflowRuns };
-            delete workflowRuns[DEMO_PROJECT_ID];
+            // Every persisted project-keyed collection, plus the transient
+            // job/progress slices (which are NOT part of the persisted bundle
+            // and so are not covered by ALL_PROJECT_COLLECTIONS).
             const jobs = { ...state.jobs };
             delete jobs[DEMO_PROJECT_ID];
             const prdProgress = { ...state.prdProgress };
@@ -411,15 +400,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             const prdSectionStatus = { ...state.prdSectionStatus };
             delete prdSectionStatus[DEMO_PROJECT_ID];
             return {
-                projects,
-                spineVersions,
-                historyEvents,
-                branches,
-                artifacts,
-                artifactVersions,
-                feedbackItems,
-                tasks,
-                workflowRuns,
+                ...withoutDemoCollections(state),
                 jobs,
                 prdProgress,
                 prdSectionStatus,

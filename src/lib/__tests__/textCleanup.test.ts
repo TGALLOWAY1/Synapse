@@ -41,6 +41,57 @@ describe('collapseRepeats', () => {
         // After collapse, the chunk should still appear at least once.
         expect(out.includes(chunk)).toBe(true);
     });
+
+    it('leaves a string with no long repeat untouched', () => {
+        // Long enough to pass the 90-char floor, but no block of >= 30 chars
+        // repeats three times back-to-back.
+        const text = 'The quick brown fox jumps over the lazy dog while the cat naps '
+            + 'quietly beside a warm radiator in the corner of the room.';
+        expect(text.length).toBeGreaterThan(90);
+        expect(collapseRepeats(text)).toBe(text);
+    });
+
+    // Performance regression guard. This ran as ~270 separate whole-string
+    // regex passes and cost seconds on realistic degenerate input — and it is
+    // called synchronously from the render path, so "slow" meant a frozen tab.
+    // The character-scan form is ~100x faster; the generous bound below still
+    // fails loudly if the quadratic-ish behavior ever comes back.
+    it.each([12_000, 48_000])('stays fast on a %i-char degenerate string', (targetLen) => {
+        const phrase = "Shows 'Connect to collaborate' CTA on share sheet. "
+            + "Disables 'Save to Library' swipe right feature. "
+            + 'Hides collaborative features. ';
+        const repeats = Math.ceil(targetLen / phrase.length);
+        const degenerate = phrase.repeat(repeats);
+        expect(degenerate.length).toBeGreaterThanOrEqual(targetLen);
+
+        const started = performance.now();
+        const out = collapseRepeats(degenerate);
+        const elapsedMs = performance.now() - started;
+
+        expect(out.length).toBeLessThan(degenerate.length);
+        expect(elapsedMs).toBeLessThan(1000);
+    });
+
+    // The worst case for the scan is input with NO repeat at all: every period
+    // is checked across the whole string before giving up.
+    it('stays fast on a long string with no repeats', () => {
+        // Deterministic LCG filler — long period, so no 30+ char block repeats
+        // three times back-to-back and every period is scanned before giving up.
+        let seed = 1;
+        const chars: string[] = [];
+        for (let i = 0; i < 40_000; i += 1) {
+            seed = (seed * 1103515245 + 12345) % 2147483648;
+            chars.push(String.fromCharCode(33 + (seed % 90)));
+        }
+        const text = chars.join('');
+
+        const started = performance.now();
+        const out = collapseRepeats(text);
+        const elapsedMs = performance.now() - started;
+
+        expect(out === text).toBe(true);
+        expect(elapsedMs).toBeLessThan(1000);
+    });
 });
 
 describe('coerceToBulletList', () => {

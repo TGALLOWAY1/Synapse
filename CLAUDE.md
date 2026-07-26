@@ -123,8 +123,12 @@ check and blocks the PR** — even if the app code is fine.
   compile with the app, so a typing slip in a test (e.g. destructuring a Vitest
   `mock.calls[0]` tuple, or an over-narrow `as` cast) breaks the Vercel build
   exactly like app code. Keep test TS as strict as production TS. `api/`
-  serverless files are plain JS and aren't type-checked, but their tests still
-  run under `npm test`.
+  serverless files are plain JS and aren't type-checked, but they **are** linted
+  (`eslint.config.js` has a Node/JS block for `api/**/*.js`, JS-recommended
+  rules only) and their tests still run under `npm test`. `scripts/` is
+  deliberately outside the lint scope — those `.mjs` files embed browser-context
+  `page.evaluate` callbacks whose DOM globals read as `no-undef` under a Node
+  config.
 - ESLint has **no `_`-prefix unused-arg exemption** — don't add unused
   underscore-prefixed params to satisfy types; cast the access site instead.
 

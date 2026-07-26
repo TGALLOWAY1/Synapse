@@ -107,8 +107,14 @@ in snapshots.
   route/store-owned like `loadDemoProject` itself.** `projectSlice.resetDemoProject()`
   deliberately bypasses the read-only capability guards above rather than
   extending them (this is a session/route-level concern, not a durable project
-  mutation): it wipes all nine project-keyed store maps plus the transient
-  `jobs`/`prdProgress`/`prdSectionStatus` slices for `DEMO_PROJECT_ID`, deletes
+  mutation): it wipes **every** project-keyed store map — the wipe is derived
+  from `ALL_PROJECT_COLLECTIONS` (`src/lib/projectBundle.ts`) rather than a
+  hand-written key list, so a newly persisted collection is covered
+  automatically (cross-cutting rule 6); a hardcoded list had already drifted to
+  nine of them, leaving the demo's review/planning/readiness/downstream-update
+  records behind on reset — plus the transient
+  `jobs`/`prdProgress`/`prdSectionStatus` slices for `DEMO_PROJECT_ID` (those
+  are not in the persisted bundle, so they stay enumerated). It then deletes
   every mockup/screen-inventory/variant IDB image record for the demo's
   artifact version ids (`deleteImagesForVersion` / `deleteScreenImagesForArtifactVersion`
   / `deleteVariantImagesForVersion`, each best-effort/try-caught so one failed
