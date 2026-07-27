@@ -3,6 +3,22 @@ import type { ArtifactValidationDisposition } from '../types';
 
 export type WorkflowCheckpointContext = 'generation' | 'export';
 export type WorkflowCheckpointSeverity = 'attention' | 'advisory';
+/**
+ * How loudly the checkpoint should present, derived from what actually
+ * happened — never from "are there any notes at all":
+ *
+ * - `clean`     — nothing to report.
+ * - `advisory`  — the run succeeded; only advisory notes exist (validation
+ *                 notes, accepted validation issues, non-blocking alignment,
+ *                 deferrable critique). Presented as success, not caution.
+ * - `attention` — something actually needs the user: a failed/interrupted
+ *                 generation slot, a blocking validation issue, an alignment
+ *                 state that blocks build readiness, a critique issue to
+ *                 resolve before build — or a planning verdict the user
+ *                 committed with accepted risks (a knowingly-carried caution
+ *                 that must never read as clean).
+ */
+export type WorkflowCheckpointTone = 'clean' | 'advisory' | 'attention';
 export type WorkflowCheckpointSignalKind =
     | 'critique'
     | 'blocking_validation'
@@ -65,8 +81,11 @@ export type WorkflowCheckpointRow = {
 
 export type WorkflowCheckpointSummary = {
     context: WorkflowCheckpointContext;
+    tone: WorkflowCheckpointTone;
     headline: string;
     supportingText: string;
+    /** Label for the collapsed details disclosure, e.g. "1 note". */
+    detailsLabel: string;
     planningVerdict: WorkflowCheckpointPlanningVerdict;
     rows: WorkflowCheckpointRow[];
     counts: {
@@ -176,33 +195,61 @@ function critiqueSeverity(issue: WorkflowCheckpointCritiqueInput): WorkflowCheck
 function checkpointCopy(
     context: WorkflowCheckpointContext,
     counts: WorkflowCheckpointSummary['counts'],
-): Pick<WorkflowCheckpointSummary, 'headline' | 'supportingText'> {
+): Pick<WorkflowCheckpointSummary, 'headline' | 'supportingText' | 'detailsLabel'> {
+    const outputsReady = `${counts.readyArtifacts} of ${counts.totalArtifacts} output${
+        counts.totalArtifacts === 1 ? '' : 's'
+    } ready`;
+
     if (counts.rowCount === 0) {
+        const detailsLabel = 'Details';
         return context === 'generation'
             ? {
                 headline: 'Generation complete',
+                detailsLabel,
                 supportingText: `${counts.readyArtifacts} output${
                     counts.readyArtifacts === 1 ? '' : 's'
                 } ready. No current critique, validation, or alignment notes need your attention.`,
             }
             : {
                 headline: 'Ready to export',
+                detailsLabel,
                 supportingText: 'No current critique, validation, or alignment notes need your attention.',
             };
     }
 
-    const attention = counts.attentionSignals > 0
-        ? `${counts.attentionSignals} item${counts.attentionSignals === 1 ? '' : 's'} to review`
-        : `${counts.advisorySignals} advisory note${counts.advisorySignals === 1 ? '' : 's'}`;
+    // Advisory-only: the run succeeded. State the outcome first and keep the
+    // notes as notes — the count belongs on the disclosure, not in an alarm.
+    if (counts.attentionSignals === 0) {
+        const notes = `${counts.advisorySignals} note${counts.advisorySignals === 1 ? '' : 's'}`;
+        return context === 'generation'
+            ? {
+                headline: `Generation complete — ${outputsReady}`,
+                detailsLabel: notes,
+                supportingText: `Nothing failed. ${
+                    counts.advisorySignals === 1 ? 'One advisory note is' : `${counts.advisorySignals} advisory notes are`
+                } available below; your saved outputs remain usable.`,
+            }
+            : {
+                headline: 'Ready to export',
+                detailsLabel: notes,
+                supportingText: `Nothing needs resolving first — ${
+                    counts.advisorySignals === 1 ? 'one advisory note is' : `${counts.advisorySignals} advisory notes are`
+                } available below. Export preserves the current version and alignment context.`,
+            };
+    }
+
+    const attention = `${counts.attentionSignals} item${
+        counts.attentionSignals === 1 ? '' : 's'
+    } to review`;
     return context === 'generation'
         ? {
             headline: `Generation complete — ${attention}`,
-            supportingText: `${counts.readyArtifacts} of ${counts.totalArtifacts} output${
-                counts.totalArtifacts === 1 ? '' : 's'
-            } ready. Your saved outputs remain available; review the combined notes below before relying on them for implementation.`,
+            detailsLabel: attention,
+            supportingText: `${outputsReady}. Your saved outputs remain available; review the combined notes below before relying on them for implementation.`,
         }
         : {
             headline: `Export checkpoint — ${attention}`,
+            detailsLabel: attention,
             supportingText: 'Export remains available and will preserve the current version and alignment context.',
         };
 }
@@ -265,8 +312,18 @@ export function deriveWorkflowCheckpointSummary(
         attentionSignals: signals.filter(signal => signal.severity === 'attention').length,
         advisorySignals: signals.filter(signal => signal.severity === 'advisory').length,
     };
+    // Severity follows the OUTCOME, not the mere existence of notes. Amber is
+    // reserved for something the user actually has to act on; a run whose only
+    // signals are advisory is a success and must read like one.
+    const tone: WorkflowCheckpointTone =
+        counts.attentionSignals > 0 || nonEmptyStrings(input.planningVerdict.acceptedRisks).length > 0
+            ? 'attention'
+            : counts.rowCount > 0
+                ? 'advisory'
+                : 'clean';
     return {
         context: input.context,
+        tone,
         planningVerdict: input.planningVerdict,
         rows,
         counts,

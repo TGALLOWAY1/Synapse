@@ -128,7 +128,12 @@ describe('ProjectWorkspace orientation', () => {
         expect(effect).toContain('setCompletedGenerationJobKey(assetJobKey)');
         expect(summaryRender).toBeLessThan(artifactWorkspace);
         expect(workspace).toContain('assetJobKey === completedGenerationJobKey');
-        expect(workspace).toContain('assetJobKey !== dismissedGenerationJobKey');
+        // Dismissal is remembered per generation-job key (localStorage, not a
+        // persisted store collection) so a closed banner stays closed across a
+        // remount instead of resurfacing on the next visit.
+        expect(workspace).toContain('useGenerationCheckpointDismissal(projectId)');
+        expect(workspace).toContain('!generationCheckpointDismissal.isDismissed(assetJobKey)');
+        expect(workspace).toContain('generationCheckpointDismissal.dismiss(assetJobKey)');
     });
 
     it('passes one current checkpoint to export without a planning-ready shortcut', () => {

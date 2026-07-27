@@ -23,7 +23,7 @@
   partial body as transport-level "success", so every JSON-mode caller checks
   it — PRD sections and section retries throw `SectionTruncatedError` (the
   section lands in `failedSections` with the standard retry affordance; the
-  retry path re-runs with the larger `RETRY_SECTION_MAX_OUTPUT_TOKENS` cap),
+  retry path re-runs with a larger cap — see the per-section budgets below),
   the consistency review rejects the pass outright (`'truncated'`), and core
   artifacts stamp `metadata.truncated` which the job controller converts into
   a blocking-validation issue (slot reads `needs_review`, never `done`).
@@ -33,6 +33,24 @@
   before failing; a raw unparseable body is never stored as a completed
   artifact. Do not re-introduce a call site that ignores `finishReason` on a
   structured-output path.
+
+  **Per-section output budgets.** PRD sections do not share one flat cap.
+  `SECTION_MAX_OUTPUT_TOKENS` (8192) is the default; the two **wide** sections —
+  `features` (every feature with its acceptance criteria) and `ux_loops`
+  (`userLoops` + `uxPages` + `roles`) — declare
+  `maxOutputTokens: WIDE_SECTION_MAX_OUTPUT_TOKENS` (16384) on their
+  `PrdSectionTemplate`, because their length scales with the product's feature
+  count rather than being roughly fixed. A live run truncated `ux_loops` at the
+  flat default on a *four-feature* product, so the default was too tight for
+  those two specifically, not for the pipeline. A cap is not a reservation —
+  raising it costs nothing when a response finishes early — but only these two
+  are raised, so a runaway generation elsewhere still meets the tighter default.
+  Retry budgets are **derived**, not flat: `retrySectionMaxOutputTokens(id)` is
+  double the section's own cap (floored at `RETRY_SECTION_MAX_OUTPUT_TOKENS`),
+  which preserves the invariant the retry path depends on — a retry must never
+  be a guaranteed repeat of the same truncation. A flat retry constant would
+  hand a wide section zero headroom. When adding a section that emits several
+  collections in one response, give it the wide cap.
 
 - **LLM Trace Viewer (`src/lib/trace/`, `src/components/developer/`) — a
   developer-only debugging surface.** Every call through the geminiClient

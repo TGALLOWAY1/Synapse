@@ -148,6 +148,78 @@ describe('deriveWorkflowCheckpointSummary', () => {
         ]);
     });
 
+    it('tones a successful run with only advisory notes as success, not caution', () => {
+        const summary = deriveWorkflowCheckpointSummary(input({
+            artifacts: [artifact({ validationWarnings: ['One entity has no owner'] })],
+        }));
+
+        expect(summary.tone).toBe('advisory');
+        expect(summary.counts.attentionSignals).toBe(0);
+        expect(summary.counts.readyArtifacts).toBe(1);
+        // The headline states the OUTCOME; the note count belongs on the
+        // disclosure, not in an alarm.
+        expect(summary.headline).toBe('Generation complete — 1 of 1 output ready');
+        expect(summary.headline).not.toMatch(/to review/);
+        expect(summary.detailsLabel).toBe('1 note');
+        expect(summary.supportingText).toContain('Nothing failed');
+    });
+
+    it('pluralises the advisory disclosure label', () => {
+        const summary = deriveWorkflowCheckpointSummary(input({
+            artifacts: [artifact({
+                validationWarnings: ['One entity has no owner'],
+                alignment: {
+                    state: 'possibly_affected',
+                    summary: 'The target users changed.',
+                    blocksBuildReadiness: false,
+                },
+            })],
+        }));
+
+        expect(summary.tone).toBe('advisory');
+        expect(summary.detailsLabel).toBe('2 notes');
+    });
+
+    it('keeps a failed generation slot at attention tone', () => {
+        const summary = deriveWorkflowCheckpointSummary(input({
+            artifacts: [
+                artifact({ validationWarnings: ['One entity has no owner'] }),
+                artifact({
+                    artifactId: 'artifact-flows',
+                    label: 'User Flows',
+                    destination: { kind: 'artifact', artifactId: 'artifact-flows', nodeId: 'user_flows' },
+                    generationStatus: 'error',
+                    generationError: 'The model returned no content.',
+                }),
+            ],
+        }));
+
+        expect(summary.tone).toBe('attention');
+        expect(summary.headline).toBe('Generation complete — 1 item to review');
+        expect(summary.detailsLabel).toBe('1 item to review');
+        expect(summary.counts.readyArtifacts).toBe(1);
+        expect(summary.counts.totalArtifacts).toBe(2);
+    });
+
+    it('never tones an accepted-risk verdict as clean', () => {
+        const summary = deriveWorkflowCheckpointSummary(input({
+            planningVerdict: {
+                kind: 'finalized',
+                label: 'Proceeding with accepted risk',
+                acceptedRisks: ['Guest checkout remains deferred.'],
+            },
+        }));
+
+        expect(summary.rows).toHaveLength(0);
+        expect(summary.tone).toBe('attention');
+    });
+
+    it('tones a run with nothing to report as clean', () => {
+        expect(deriveWorkflowCheckpointSummary(input({
+            artifacts: [artifact({})],
+        })).tone).toBe('clean');
+    });
+
     it('uses neutral clean copy without turning a working plan into a final verdict', () => {
         const generation = deriveWorkflowCheckpointSummary(input());
         expect(generation.headline).toBe('Generation complete');

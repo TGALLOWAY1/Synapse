@@ -245,6 +245,38 @@ interruptions:
   Finalize verdict and accepted risks; absent a current commitment it says
   **Working plan** once.
 
+#### Checkpoint severity follows the outcome, not the note count
+
+`deriveWorkflowCheckpointSummary` returns a `tone` and the card renders nothing
+but that tone — **never** branch chrome on "are there rows at all":
+
+| tone | when | chrome |
+|---|---|---|
+| `clean` | no rows, no accepted risks | emerald, check mark |
+| `advisory` | `attentionSignals === 0` and rows exist | neutral/white, check mark |
+| `attention` | any attention signal (failed/interrupted slot, blocking validation, build-blocking alignment, blocker/resolve-before-build critique) **or** a verdict carrying accepted planning risks | amber, warning triangle |
+
+A run that produced every output and carries only advisory notes **succeeded**
+and must read like it — a validation note is not a reason to paint the
+workspace amber. The reverse rule is equally load-bearing: an errored slot
+never degrades to advisory, and accepted planning risks never read as clean.
+
+The card is **compact by default**: line one is the outcome headline plus the
+plan-verdict chip; supporting text, rationale/containment, accepted risks, and
+the per-row signals sit behind a disclosure labelled from
+`summary.detailsLabel` ("1 note" / "3 items to review"). The disclosure starts
+**open** for `attention` (a failure is never hidden) and **closed** otherwise;
+once the user toggles it, their choice wins. Rows keep their per-row `Review`
+action inside the disclosure — dismissing or collapsing must never be the only
+way to get past a note.
+
+Dismissal of the post-generation banner is remembered per generation-job key
+(`spineVersionId:startedAt`) in `src/lib/generationCheckpointDismissal.ts` via
+the hook `useGenerationCheckpointDismissal`. It is browser-local UI state in
+plain localStorage — deliberately **not** a persisted store collection, which
+would drag in `ALL_PROJECT_COLLECTIONS` / snapshot / sync / demo-cleanup wiring
+(rule 6) for a closed banner. A new run has a new key, so it shows again.
+
 These cards are projections, not new persisted workflow state. Aggregate
 attention gets one global home in the next-action strip and one checkpoint
 echo; local surfaces use exact action labels instead of repeating counts.

@@ -83,6 +83,7 @@ import {
     type BuildPacketActionTarget,
 } from '../lib/planning/buildPacketReadiness';
 import { useBuildPacketInputs } from '../hooks/useBuildPacketInputs';
+import { useGenerationCheckpointDismissal } from '../hooks/useGenerationCheckpointDismissal';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
@@ -370,7 +371,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // active to settled; a settled job encountered on mount is intentionally
     // ignored.
     const [completedGenerationJobKey, setCompletedGenerationJobKey] = useState<string>();
-    const [dismissedGenerationJobKey, setDismissedGenerationJobKey] = useState<string>();
+    // Dismissal is remembered per generation-job key in localStorage (a UI
+    // preference, not project state) so closing the summary sticks across a
+    // remount instead of resurfacing on the next visit.
+    const generationCheckpointDismissal = useGenerationCheckpointDismissal(projectId);
     const previousAssetJobRef = useRef<{ key?: string; active: boolean }>({ active: false });
     const assetJobKey = assetJob
         ? `${assetJob.spineVersionId}:${assetJob.startedAt}`
@@ -1146,9 +1150,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         critiqueIssues: checkpointCritiqueIssues,
     });
     const showGenerationCheckpoint = pipelineStage === 'workspace'
+        && !!assetJobKey
         && assetJob?.spineVersionId === activeSpine?.id
         && assetJobKey === completedGenerationJobKey
-        && assetJobKey !== dismissedGenerationJobKey;
+        && !generationCheckpointDismissal.isDismissed(assetJobKey);
     const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
     const recordsForIds = (ids: string[]) => {
         const requested = new Set(ids);
@@ -2322,12 +2327,15 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             </div>
                         )}
                         {showGenerationCheckpoint && (
-                            <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+                            // py-2: the card is compact by default (one line for a
+                            // successful advisory-only run), so the frame around it
+                            // must not re-add the height the card just gave back.
+                            <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-2">
                                 <div className="mx-auto max-w-6xl">
                                     <WorkflowCheckpointSummaryCard
                                         summary={generationCheckpointSummary}
                                         onOpen={row => openCheckpointDestination(row.destination)}
-                                        onDismiss={() => setDismissedGenerationJobKey(assetJobKey)}
+                                        onDismiss={() => generationCheckpointDismissal.dismiss(assetJobKey)}
                                     />
                                 </div>
                             </div>
