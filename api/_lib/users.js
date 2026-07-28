@@ -57,6 +57,7 @@ export function sanitizeProviderString(value) {
   if (typeof value !== 'string') return '';
   // Strip C0 control characters except tab/newline (the rendered text
   // shouldn't contain them, and they confuse logs + some renderers).
+  // eslint-disable-next-line no-control-regex -- matching control chars is the point
   const cleaned = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
   return cleaned.slice(0, MAX_FIELD_LEN);
 }

@@ -64,14 +64,21 @@ class ImageRequestTimeoutError extends Error {
     }
 }
 
+// Mirrors geminiClient's sleepWithAbort: the listener is removed on normal
+// completion too, so a long-lived caller signal doesn't accumulate one dead
+// abort listener per retry backoff.
 const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
     new Promise((resolve, reject) => {
         if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
-        const t = setTimeout(resolve, ms);
-        signal?.addEventListener('abort', () => {
+        const onAbort = () => {
             clearTimeout(t);
             reject(new DOMException('Aborted', 'AbortError'));
-        }, { once: true });
+        };
+        const t = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
     });
 
 // Each attempt gets its own AbortController + timeout, combined with the

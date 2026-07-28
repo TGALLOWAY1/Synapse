@@ -48,6 +48,10 @@ const PUSH_DEBOUNCE_MS = 1500;
 
 let activeUserId: string | null = null;
 let unsubscribe: (() => void) | null = null;
+// Identity of the most recent startProjectSync attempt. A reconcile that
+// resolves after a newer start superseded it must not install a subscription
+// (see startProjectSync).
+let activeStartToken: object | null = null;
 // While true, store changes are NOT pushed — used to silence the echo from
 // applying server bundles into the store.
 let suspendPush = false;
@@ -573,10 +577,20 @@ export function startProjectSync(userId: string | null): void {
   setImageSyncUser(userId);
   knownProjectIds = new Set(syncableIds(useProjectStore.getState()));
 
+  // Identifies THIS start attempt. `startProjectSync` short-circuits on an
+  // already-syncing user only once `unsubscribe` is set, so a repeat call for
+  // the same user while the first reconcile is still in flight (session refresh
+  // landing just after sign-in) restarts and leaves two reconciles racing to
+  // assign `unsubscribe`. Without this token the loser's subscription is
+  // overwritten rather than detached, and leaks for the life of the page.
+  const startToken = {};
+  activeStartToken = startToken;
+
   void reconcile(userId).then(() => {
     // Subscribe only after the initial reconcile so the rehydrate/merge churn
     // doesn't spam pushes; live edits from here on are synced.
     if (activeUserId !== userId) return; // user changed mid-reconcile
+    if (activeStartToken !== startToken) return; // superseded by a later start
     unsubscribe = useProjectStore.subscribe(handleStoreChange);
   });
 }
@@ -590,6 +604,7 @@ export function stopProjectSync(): void {
   for (const timer of pushTimers.values()) clearTimeout(timer);
   pushTimers.clear();
   editSeqs.clear();
+  activeStartToken = null;
   activeUserId = null;
   setImageSyncUser(null);
   clearImageRefRegistry();

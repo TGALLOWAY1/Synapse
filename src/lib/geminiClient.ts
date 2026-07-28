@@ -230,14 +230,23 @@ const createWatchdog = (ms: number, upstream?: AbortSignal) => {
     };
 };
 
+// The abort listener is removed once the sleep settles. `{ once: true }` only
+// covers the aborted path; on the far more common normal completion the
+// listener would otherwise stay attached to the CALLER's signal, which outlives
+// this sleep and accumulates one dead listener per retry backoff across a whole
+// generation run.
 const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
     new Promise((resolve, reject) => {
         if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
-        const t = setTimeout(resolve, ms);
-        signal?.addEventListener('abort', () => {
+        const onAbort = () => {
             clearTimeout(t);
             reject(new DOMException('Aborted', 'AbortError'));
-        }, { once: true });
+        };
+        const t = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
     });
 
 const fetchWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
