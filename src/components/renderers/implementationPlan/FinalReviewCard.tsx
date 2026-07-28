@@ -24,7 +24,11 @@ import {
     type FinalReviewAction,
     type FinalReviewCta,
 } from '../../../lib/planning/buildPacketApproval';
-import type { CrossCuttingObligationsReport } from '../../../lib/planning/crossCuttingObligations';
+import type {
+    CrossCuttingObligationStatus,
+    CrossCuttingObligationsReport,
+} from '../../../lib/planning/crossCuttingObligations';
+import type { FlagPlanningConcernResult } from '../../../lib/planning/flagToPlan';
 import { buildPacketActionLabel } from '../../planning/readinessCheckpointView';
 import { CrossCuttingObligationsCard } from '../../artifacts/CrossCuttingObligationsCard';
 import { CoverageTab } from './CoverageTab';
@@ -49,6 +53,15 @@ export interface PlanFinalReviewContext {
     onNavigateTarget?: (target: BuildPacketActionTarget) => void;
     /** §W5's cross-cutting obligations report, folded in here (see below). */
     obligations?: CrossCuttingObligationsReport;
+    /**
+     * User-initiated: flags an unresolved obligation as a planning concern and
+     * opens the Decision Center on it. Capability-gated by `ArtifactWorkspace`
+     * exactly like `onApprove` — omitted in a read-only/demo project, and then
+     * the flag renders with no write action at all.
+     */
+    onAddressObligation?: (
+        status: CrossCuttingObligationStatus,
+    ) => FlagPlanningConcernResult | void;
     /** The spine version this packet is evaluated against. */
     spineVersionId?: string;
 }
@@ -372,12 +385,16 @@ export function FinalReviewCard({
                 </div>
             </details>
 
-            {/* --- §W5's conditional cross-cutting obligations ---------------- */}
+            {/* --- §W5's conditional cross-cutting obligations ----------------
+                A COMPACT FLAG, not a second blocker panel: the blocker list
+                above is the one authoritative statement of severity, and the
+                flag points at it. See CrossCuttingObligationsCard. */}
             {context?.obligations && (
                 <CrossCuttingObligationsCard
                     report={context.obligations}
                     securityPrivacy={plan.securityPrivacy}
                     measurement={plan.measurement}
+                    onAddressObligation={context.onAddressObligation}
                 />
             )}
 

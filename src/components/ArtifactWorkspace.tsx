@@ -89,10 +89,12 @@ import type {
 } from '../lib/planning/planningNavigation';
 import {
     buildScreenNotePlanningReturnTarget,
+    flagCrossCuttingObligationConcern,
     flagScreenNotePlanningConcern,
     screenNotePlanningSourceScopeKey,
 } from '../lib/planning/flagToPlan';
 import { deriveCrossCuttingObligations } from '../lib/planning/crossCuttingObligations';
+import type { CrossCuttingObligationStatus } from '../lib/planning/crossCuttingObligations';
 import type {
     BuildPacketActionTarget,
     BuildPacketReadiness,
@@ -2035,6 +2037,37 @@ export function ArtifactWorkspace({
                 obligations: planObligations,
                 spineVersionId,
                 ...(onNavigateBuildPacketTarget ? { onNavigateTarget: onNavigateBuildPacketTarget } : {}),
+                // §W5 flag → Decision Center. Capability-gated exactly like
+                // `onApprove` (rule 5) AND dependent on the workspace being
+                // given a planning-record opener, so a read-only/demo plan
+                // renders the flag with no write action. Nothing is created
+                // until the user clicks: `flagCrossCuttingObligationConcern`
+                // runs in the handler, never on render (rule 13).
+                ...(capabilities.canPersistWorkflowState && onOpenPlanningRecord ? {
+                    onAddressObligation: (status: CrossCuttingObligationStatus) => {
+                        const result = flagCrossCuttingObligationConcern(
+                            {
+                                projectId,
+                                artifactId: artifact.id,
+                                artifactVersionId: preferred.id,
+                                spineVersionId,
+                                status,
+                            },
+                            useProjectStore.getState().flagPlanningConcern,
+                        );
+                        if (result.status !== 'rejected') {
+                            onOpenPlanningRecord(result.planningRecordId, {
+                                destination: {
+                                    kind: 'artifact',
+                                    artifactId: artifact.id,
+                                    nodeId: 'implementation_plan',
+                                },
+                                label: `Back to ${artifact.title}`,
+                            });
+                        }
+                        return result;
+                    },
+                } : {}),
                 ...(capabilities.canPersistWorkflowState ? {
                     onApprove: () => {
                         updateArtifactOverlay(

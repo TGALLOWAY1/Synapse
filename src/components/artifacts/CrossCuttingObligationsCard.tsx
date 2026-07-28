@@ -1,6 +1,9 @@
-import type { ReactNode } from 'react';
-import { AlertTriangle, ClipboardCheck, ListChecks, ShieldCheck } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import {
+    AlertTriangle, ArrowRight, ChevronDown, ClipboardCheck, ListChecks, ShieldCheck,
+} from 'lucide-react';
 import type { PlanMeasurementSection, PlanSecurityPrivacySection } from '../../types';
+import type { FlagPlanningConcernResult } from '../../lib/planning/flagToPlan';
 import type {
     CrossCuttingObligationStatus,
     CrossCuttingObligationsReport,
@@ -12,42 +15,90 @@ interface Props {
     /** The plan's sections, when it carries them. */
     securityPrivacy?: PlanSecurityPrivacySection;
     measurement?: PlanMeasurementSection;
+    /**
+     * User-initiated route from a flagged obligation into the Decision Center.
+     * Supplied only when the project may persist planning state — the workspace
+     * derives that from the capability policy (`useProjectCapabilities`), never
+     * from a project-id check. When it is absent NO write action is rendered,
+     * so a demo/read-only project is never offered an action that would write.
+     *
+     * It must never be called on render (cross-cutting rule 13): the flag is a
+     * pointer, and a `PlanningRecord` exists only after the user clicks.
+     */
+    onAddressObligation?: (
+        status: CrossCuttingObligationStatus,
+    ) => FlagPlanningConcernResult | void;
 }
 
+type ObligationState = 'unresolved' | 'covered' | 'not_required';
+
+const CHIP_CLASS: Record<ObligationState, string> = {
+    unresolved: 'border-amber-200 bg-amber-50 text-amber-800',
+    covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    not_required: 'border-neutral-200 bg-neutral-50 text-neutral-500',
+};
+
+const ICON_CLASS: Record<ObligationState, string> = {
+    unresolved: 'text-amber-600',
+    covered: 'text-emerald-600',
+    not_required: 'text-neutral-400',
+};
+
 /**
- * The Implementation Plan's two CONDITIONAL cross-cutting sections
- * (plan §W5), rendered in exactly three states per section:
+ * The Implementation Plan's two CONDITIONAL cross-cutting sections (plan §W5),
+ * rendered as **compact flags** — one quiet row per section, never a full-width
+ * amber panel and never a nested amber sub-panel.
  *
- *  1. **Not required** — renders nothing at all. A project with no safety
- *     context, no privacy signals, and no declared success metrics never sees
- *     these sections.
- *  2. **Required and satisfied** — the controls / metric mappings with their
- *     links (requirements, tasks, verification / event contract).
- *  3. **Required and not satisfied** — an explicit UNRESOLVED OBLIGATION: what
- *     triggered the requirement and the named gaps. Never an empty section and
- *     never silently omitted. Whatever the plan *does* carry still renders
- *     underneath, so a partial section shows both what exists and what does not.
+ *  1. **Not required** — renders nothing at all, unless the plan volunteered
+ *     content anyway (that is real plan output and stays reachable).
+ *  2. **Required and satisfied** — a "Covered" chip; the controls / metric
+ *     mappings with their links sit behind the row's disclosure.
+ *  3. **Required and not satisfied** — an amber *chip* naming the gap count
+ *     ("3 gaps" / "Not in the plan") plus ONE action: address it in the
+ *     Decision Center. The named gaps and the trigger evidence stay reachable
+ *     behind the same disclosure.
  *
- * Advisory only at this layer: nothing here blocks generation or rendering.
- * The build-packet readiness evaluator (plan §W6) is what blocks, and it reads
- * the same report from `deriveCrossCuttingObligations`.
+ * SEVERITY IS EXPRESSED ONCE. An unresolved obligation is a build-packet
+ * blocker, and §W6's blocker list inside Final Review is the single
+ * authoritative statement of that — it carries the consequence, the remedy, and
+ * the count that drives the "Resolve N blockers" primary action. This card is a
+ * quiet pointer to it, not a second full-volume statement of the same fact: the
+ * row stays collapsed by default and the detail says where the severity lives
+ * instead of restating it. Nothing here blocks generation or rendering; the
+ * gate that blocks reads the same `deriveCrossCuttingObligations` report.
  */
-export function CrossCuttingObligationsCard({ report, securityPrivacy, measurement }: Props) {
+export function CrossCuttingObligationsCard({
+    report,
+    securityPrivacy,
+    measurement,
+    onAddressObligation,
+}: Props) {
     const showSecurity = shouldRender(report.securityPrivacy);
     const showMeasurement = shouldRender(report.measurement);
     if (!showSecurity && !showMeasurement) return null;
 
     return (
-        <div className="space-y-3 not-prose">
+        <div
+            data-testid="plan-cross-cutting-obligations"
+            className="not-prose divide-y divide-neutral-100 rounded-lg border border-neutral-200"
+        >
             {showSecurity && (
-                <ObligationSection status={report.securityPrivacy} icon={<ShieldCheck size={16} aria-hidden="true" />}>
+                <ObligationFlag
+                    status={report.securityPrivacy}
+                    icon={<ShieldCheck size={13} aria-hidden="true" />}
+                    onAddressObligation={onAddressObligation}
+                >
                     <SecurityPrivacyBody section={securityPrivacy} />
-                </ObligationSection>
+                </ObligationFlag>
             )}
             {showMeasurement && (
-                <ObligationSection status={report.measurement} icon={<ListChecks size={16} aria-hidden="true" />}>
+                <ObligationFlag
+                    status={report.measurement}
+                    icon={<ListChecks size={13} aria-hidden="true" />}
+                    onAddressObligation={onAddressObligation}
+                >
                     <MeasurementBody section={measurement} />
-                </ObligationSection>
+                </ObligationFlag>
             )}
         </div>
     );
@@ -61,90 +112,156 @@ function shouldRender(status: CrossCuttingObligationStatus): boolean {
     return status.required || status.itemCount > 0;
 }
 
-function ObligationSection({
+function obligationState(status: CrossCuttingObligationStatus): ObligationState {
+    if (!status.required) return 'not_required';
+    return status.satisfied ? 'covered' : 'unresolved';
+}
+
+function chipLabel(status: CrossCuttingObligationStatus, state: ObligationState): string {
+    if (state === 'covered') return 'Covered';
+    if (state === 'not_required') return 'Not required';
+    if (status.absent) return 'Not in the plan';
+    return `${status.missing.length} gap${status.missing.length === 1 ? '' : 's'}`;
+}
+
+function rejectionCopy(
+    result: Extract<FlagPlanningConcernResult, { status: 'rejected' }>,
+): string {
+    if (result.reason === 'source_changed') {
+        return 'This plan changed since you opened it. Reopen the current version, then try again.';
+    }
+    if (result.reason === 'spine_not_found') {
+        return 'The PRD version this plan was generated from is no longer available.';
+    }
+    return 'This plan version is no longer available. Reopen the current Implementation Plan to try again.';
+}
+
+/**
+ * ONE compact row. The disclosure is a button + `aria-expanded` + conditional
+ * render rather than `<details>` (UI_PATTERNS: jsdom does not toggle
+ * `<details>`, and collapsed `<details>` content still sits in the DOM and the
+ * accessibility tree).
+ */
+function ObligationFlag({
     status,
     icon,
     children,
+    onAddressObligation,
 }: {
     status: CrossCuttingObligationStatus;
     icon: ReactNode;
     children: ReactNode;
+    onAddressObligation?: (
+        status: CrossCuttingObligationStatus,
+    ) => FlagPlanningConcernResult | void;
 }) {
-    const unresolved = status.required && !status.satisfied;
-    const tone = unresolved
-        ? { border: 'border-amber-200', bg: 'bg-amber-50', title: 'text-amber-950', body: 'text-amber-900', icon: 'text-amber-700' }
-        : { border: 'border-neutral-200', bg: 'bg-white', title: 'text-neutral-900', body: 'text-neutral-700', icon: 'text-emerald-600' };
+    const [open, setOpen] = useState(false);
+    const [rejection, setRejection] = useState<string | null>(null);
+    const state = obligationState(status);
+    const unresolved = state === 'unresolved';
+
+    const address = () => {
+        setRejection(null);
+        const result = onAddressObligation?.(status);
+        if (result && result.status === 'rejected') setRejection(rejectionCopy(result));
+    };
 
     return (
         <section
             aria-label={status.label}
-            className={`rounded-xl border p-4 ${tone.border} ${tone.bg}`}
+            data-testid={`plan-obligation-${status.key}`}
+            data-obligation-state={state}
         >
-            <div className="flex items-start gap-2.5">
-                <span className={`mt-0.5 shrink-0 ${tone.icon}`}>
-                    {unresolved ? <AlertTriangle size={16} aria-hidden="true" /> : icon}
-                </span>
-                <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <h3 className={`text-sm font-semibold ${tone.title}`}>{status.label}</h3>
-                        {unresolved ? (
-                            <span className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800">
-                                Unresolved obligation
-                            </span>
-                        ) : status.required ? (
-                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-                                Covered
-                            </span>
-                        ) : (
-                            <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                                Not required
-                            </span>
-                        )}
-                    </div>
-                    <p className={`mt-1 text-xs ${tone.body}`}>{status.reason}</p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1">
+                <button
+                    type="button"
+                    data-testid={`plan-obligation-toggle-${status.key}`}
+                    aria-expanded={open}
+                    onClick={() => setOpen(value => !value)}
+                    className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                    <ChevronDown
+                        size={14}
+                        className={`shrink-0 text-neutral-400 transition ${open ? 'rotate-180' : ''}`}
+                        aria-hidden="true"
+                    />
+                    <span className={`shrink-0 ${ICON_CLASS[state]}`}>
+                        {unresolved ? <AlertTriangle size={13} aria-hidden="true" /> : icon}
+                    </span>
+                    <span className="min-w-0 truncate text-sm font-medium text-neutral-800">
+                        {status.label}
+                    </span>
+                    <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${CHIP_CLASS[state]}`}>
+                        {chipLabel(status, state)}
+                    </span>
+                </button>
+                {unresolved && onAddressObligation && (
+                    <button
+                        type="button"
+                        data-testid={`plan-obligation-address-${status.key}`}
+                        onClick={address}
+                        className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-neutral-200 bg-white px-2.5 text-[11px] font-medium text-neutral-700 transition hover:bg-neutral-50"
+                    >
+                        Address in Decision Center
+                        <ArrowRight size={11} aria-hidden="true" />
+                    </button>
+                )}
+            </div>
 
-                    {/* Why it is required — the exact input signals, quoted. */}
-                    {status.triggers.length > 0 && (
-                        <details className="mt-2">
-                            <summary className={`cursor-pointer text-xs font-medium ${tone.body}`}>
-                                {status.triggers.length === 1
-                                    ? 'What triggered this obligation'
-                                    : `What triggered this obligation (${status.triggers.length})`}
-                            </summary>
-                            <ul className={`mt-1.5 list-disc space-y-0.5 pl-4 text-xs ${tone.body}`}>
-                                {status.triggers.map((trigger, i) => (
-                                    <li key={`${trigger.source}-${i}`}>{trigger.detail}</li>
-                                ))}
-                            </ul>
-                        </details>
-                    )}
+            {rejection && (
+                <p role="alert" className="px-3 pb-2 text-[11px] text-amber-800">
+                    {rejection}
+                </p>
+            )}
 
-                    {/* State 3: the named gaps. */}
-                    {unresolved && (
-                        <div className="mt-2.5 rounded-lg border border-amber-200 bg-white/70 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">
+            {open && (
+                <div className="space-y-2.5 border-t border-neutral-100 px-3 py-2.5">
+                    <p className="text-xs text-neutral-600">{status.reason}</p>
+
+                    {/* State 3: the named gaps — a plain list, not a nested panel.
+                        Their severity is stated once, in Final Review's blocker
+                        list; this only says where to find it. */}
+                    {unresolved && status.missing.length > 0 && (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
                                 {status.absent ? 'Missing from the plan' : `Gaps (${status.missing.length})`}
                             </p>
-                            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-amber-900">
+                            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-neutral-700">
                                 {status.missing.map((item, i) => <li key={i}>{item}</li>)}
                             </ul>
-                            <p className="mt-2 text-[11px] text-amber-800">
-                                Regenerate the Implementation Plan (or edit it) so every obligation above is
-                                assigned to a task. Synapse does not fill these in for you.
+                            <p className="mt-1.5 text-[11px] text-neutral-500">
+                                Counted in the Final Review blockers above, which state what it
+                                costs and how to close it.
                             </p>
                         </div>
                     )}
 
+                    {/* Why it is required — the exact input signals, quoted. */}
+                    {status.triggers.length > 0 && (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
+                                {status.triggers.length === 1
+                                    ? 'What triggered this obligation'
+                                    : `What triggered this obligation (${status.triggers.length})`}
+                            </p>
+                            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-neutral-600">
+                                {status.triggers.map((trigger, i) => (
+                                    <li key={`${trigger.source}-${i}`}>{trigger.detail}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
                     {/* State 2 (and any partial content in state 3). */}
-                    <div className="mt-2.5">{children}</div>
+                    {children}
 
                     {status.advisories.length > 0 && (
-                        <ul className="mt-2 list-disc space-y-0.5 pl-4 text-[11px] text-neutral-500">
+                        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-neutral-500">
                             {status.advisories.map((item, i) => <li key={i}>{item}</li>)}
                         </ul>
                     )}
                 </div>
-            </div>
+            )}
         </section>
     );
 }

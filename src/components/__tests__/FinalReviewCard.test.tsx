@@ -341,6 +341,32 @@ describe('Final Review — the approval action', () => {
     });
 });
 
+const unresolvedSecurityPrivacy = (): CrossCuttingObligationStatus => ({
+    key: 'security_privacy',
+    label: 'Security & Privacy',
+    required: true,
+    satisfied: false,
+    absent: true,
+    itemCount: 0,
+    reason: 'This project handles personal data.',
+    triggers: [{ source: 'data_model_privacy_fields', detail: 'Entity User stores an email address.' }],
+    missing: ['No security controls are named.'],
+    advisories: [],
+});
+
+const satisfiedMeasurement = (): CrossCuttingObligationStatus => ({
+    key: 'measurement',
+    label: 'Measurement',
+    required: false,
+    satisfied: true,
+    absent: true,
+    itemCount: 0,
+    reason: 'No success metrics are declared.',
+    triggers: [],
+    missing: [],
+    advisories: [],
+});
+
 describe('Final Review — folded-in surfaces', () => {
     it('is the single home for the cross-cutting obligations card', () => {
         const securityPrivacy: CrossCuttingObligationStatus = {
@@ -383,6 +409,63 @@ describe('Final Review — folded-in surfaces', () => {
         expect(card).toBeInTheDocument();
         // It sits inside Final Review, not as a sibling above the plan.
         expect(screen.getByRole('region', { name: 'Final Review' })).toContainElement(card);
+    });
+
+    it('states the obligation severity once — blocker list loud, section flag quiet', () => {
+        const securityPrivacy = unresolvedSecurityPrivacy();
+        renderPlan({
+            packet: packet([
+                blocker('cc1', 'cross_cutting', { kind: 'artifact_slot', nodeId: 'implementation_plan' }),
+            ]),
+            manifest: MANIFEST,
+            obligations: {
+                securityPrivacy,
+                measurement: satisfiedMeasurement(),
+                unresolved: [securityPrivacy],
+                hasUnresolvedObligations: true,
+            },
+        });
+
+        // 1. The signal is NOT weakened: the packet still reads incomplete and
+        //    the primary action still counts the blocker, without any click.
+        const primary = screen.getByTestId('final-review-primary');
+        expect(primary).toHaveAttribute('data-cta-state', 'resolve_blockers');
+        expect(primary).toHaveTextContent('Resolve 1 blocker');
+
+        // 2. The blocker list is still the authoritative statement of severity.
+        fireEvent.click(primary);
+        const blockers = screen.getByTestId('final-review-blockers');
+        expect(blockers).toHaveTextContent('cc1 consequence');
+        expect(blockers).toHaveTextContent('cc1 remedy');
+
+        // 3. The section flag next to it is quiet: a chip, and the consequence
+        //    and remedy are not restated in the plan body.
+        const flag = screen.getByTestId('plan-obligation-security_privacy');
+        expect(flag).toHaveAttribute('data-obligation-state', 'unresolved');
+        expect(flag).toHaveTextContent('Not in the plan');
+        expect(flag).not.toHaveTextContent('cc1 consequence');
+        expect(flag).not.toHaveTextContent('cc1 remedy');
+    });
+
+    it('hands the obligation flag its Decision Center action, and withholds it when read-only', () => {
+        const securityPrivacy = unresolvedSecurityPrivacy();
+        const onAddressObligation = vi.fn();
+        const obligations = {
+            securityPrivacy,
+            measurement: satisfiedMeasurement(),
+            unresolved: [securityPrivacy],
+            hasUnresolvedObligations: true,
+        };
+
+        const view = renderPlan({ packet: packet([]), manifest: MANIFEST, obligations, onAddressObligation });
+        fireEvent.click(screen.getByTestId('plan-obligation-address-security_privacy'));
+        expect(onAddressObligation).toHaveBeenCalledWith(securityPrivacy);
+
+        // A project that cannot persist gets the flag with no write action.
+        view.unmount();
+        renderPlan({ packet: packet([]), manifest: MANIFEST, obligations });
+        expect(screen.getByTestId('plan-obligation-security_privacy')).toBeInTheDocument();
+        expect(screen.queryByTestId('plan-obligation-address-security_privacy')).toBeNull();
     });
 
     it('keeps the traceability matrix reachable as an expandable detail', () => {

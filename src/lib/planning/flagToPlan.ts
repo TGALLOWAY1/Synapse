@@ -3,6 +3,10 @@ import type {
     CoreArtifactSubtype,
     PlanningRecord,
 } from '../../types';
+import type {
+    CrossCuttingObligationKey,
+    CrossCuttingObligationStatus,
+} from './crossCuttingObligations';
 import { planningContentHash } from './planningHash';
 import type {
     PlanningReturnTarget,
@@ -162,6 +166,99 @@ export const artifactConcernPlanningSourceKey = (input: {
     return `artifact-concern:${input.artifactId}:${input.artifactVersionId}:${
         planningContentHash(canonicalContent)
     }:${losslessContentIdentity}`;
+};
+
+// --- Cross-cutting obligations (plan §W5) → Decision Center -------------------
+//
+// An unresolved cross-cutting obligation is a real open question about the plan
+// ("the PRD declares success metrics and the plan says how none of them is
+// measured"). The Implementation Plan surface flags it *quietly* and offers one
+// user action that routes it here, through the SAME `flagPlanningConcern` path
+// every other artifact concern uses (cross-cutting rule 13: one durable
+// planning aggregate, records created only by an explicit user action).
+//
+// Nothing in this module runs on render — `deriveCrossCuttingObligations` stays
+// a pure read-side projection, and no planning record exists until the user
+// clicks.
+
+/**
+ * Source key for an obligation concern. Deliberately **version-less**: the same
+ * obligation on a regenerated plan is the same open question, so a promoted
+ * obligation stays deduplicated across plan versions (the rationale
+ * `assetOpenItemPlanningSourceKey` uses).
+ */
+export const crossCuttingObligationPlanningSourceKey = (input: {
+    artifactId: string;
+    obligationKey: CrossCuttingObligationKey;
+}): string => `cross-cutting-obligation:${input.artifactId}:${input.obligationKey}`;
+
+/**
+ * Title matches §W6's blocker title for the same obligation on purpose — the
+ * Final Review blocker and the planning record must read as ONE item, not two
+ * findings. The statement carries the derived reason plus every named gap at
+ * flag time, untruncated (the blocker copy truncates for a list row; a planning
+ * record is where the detail is worked).
+ */
+export const buildCrossCuttingObligationConcernInput = (input: {
+    artifactId: string;
+    artifactVersionId: string;
+    spineVersionId: string;
+    status: CrossCuttingObligationStatus;
+}): FlagPlanningConcernInput => ({
+    sourceKey: crossCuttingObligationPlanningSourceKey({
+        artifactId: input.artifactId,
+        obligationKey: input.status.key,
+    }),
+    artifactId: input.artifactId,
+    artifactVersionId: input.artifactVersionId,
+    artifactSubtype: 'implementation_plan',
+    artifactSlot: 'implementation_plan',
+    spineVersionId: input.spineVersionId,
+    title: `${input.status.label} not discharged`,
+    statement: [input.status.reason, ...input.status.missing]
+        .map(part => part.trim())
+        .filter(Boolean)
+        .join(' '),
+    // NOT `'blocking'`. The obligation already blocks the build packet through
+    // §W6, which is the single authoritative expression of its severity. A
+    // `'blocking'` record would additionally arm the Finalize materiality
+    // hard stop (`deriveMaterialityGateSnapshot`) off a one-click UI action —
+    // a second gate for one fact, which is exactly the duplication this flow
+    // removes.
+    materiality: 'normal',
+    locator: {
+        entityType: 'artifact',
+        entityId: input.artifactId,
+    },
+});
+
+/**
+ * Flags an unresolved obligation as a planning concern. Returns the store's
+ * result unchanged so the caller can navigate on success and report a rejection
+ * (a stale plan version) honestly instead of silently doing nothing.
+ */
+export const flagCrossCuttingObligationConcern = (
+    input: {
+        projectId: string;
+        artifactId?: string;
+        artifactVersionId?: string;
+        spineVersionId: string;
+        status: CrossCuttingObligationStatus;
+    },
+    flagPlanningConcern: (
+        projectId: string,
+        concern: FlagPlanningConcernInput,
+    ) => FlagPlanningConcernResult,
+): FlagPlanningConcernResult => {
+    if (!input.artifactId || !input.artifactVersionId) {
+        return { status: 'rejected', reason: 'source_not_found' };
+    }
+    return flagPlanningConcern(input.projectId, buildCrossCuttingObligationConcernInput({
+        artifactId: input.artifactId,
+        artifactVersionId: input.artifactVersionId,
+        spineVersionId: input.spineVersionId,
+        status: input.status,
+    }));
 };
 
 export const screenIssueMateriality = (

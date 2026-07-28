@@ -319,6 +319,61 @@ states the actual next step.**
   does not toggle `<details>` on a summary click, and the collapsed content of a
   `<details>` is still in the accessibility tree and the DOM.
 
+### Severity is expressed once; sections carry a flag, not a second verdict
+
+A problem that a readiness evaluator already blocks on has **one** loud home:
+the evaluator's blocker list. The place in the document where the problem lives
+gets a **compact flag** — a small chip naming the thing and its gap count, plus
+one action — and the flag points at the blocker instead of restating it. Two
+full-volume statements of one fact read as two problems, and a page of amber
+panels teaches users to ignore amber.
+
+The reference implementation is `CrossCuttingObligationsCard`
+(`src/components/artifacts/CrossCuttingObligationsCard.tsx`), the Implementation
+Plan's §W5 Security & Privacy / Measurement sections:
+
+| state | chip | action | detail |
+|---|---|---|---|
+| required, unsatisfied | `Not in the plan` (absent) or `N gaps` — amber chip | **Address in Decision Center** | collapsed |
+| required, satisfied | `Covered` — emerald chip | none | collapsed |
+| not required (content volunteered) | `Not required` — neutral chip | none | collapsed |
+| not required, no content | *renders nothing* | — | — |
+
+Rules this pattern holds to:
+
+- **The volume drops, the signal does not.** The obligation still blocks the
+  build packet through §W6; Final Review's status pill, its "Resolve N
+  blockers" primary, and its blocker list all still fire without any click. A
+  user who never opens the flag still learns the packet is incomplete.
+- **The flag never restates the consequence or the remedy** — those are the
+  blocker's fields. Its expanded detail names the gaps and then says
+  *"Counted in the Final Review blockers above"*.
+- **Collapsed by default in every state, including the unresolved one.** This is
+  the deliberate exception to the checkpoint-card rule above (where `attention`
+  opens the disclosure): a checkpoint card *is* the statement of severity, a
+  section flag is a pointer to one made elsewhere on the same screen.
+- **No full-width tinted panel and no nested tinted sub-panel.** The only
+  coloured surface is the chip; gap lists render as plain neutral lists.
+- The disclosure uses button + `aria-expanded` + conditional render, per above.
+
+**The action opens the Decision Center, it does not fix anything inline.** The
+flag calls one injected `onAddressObligation` handler, which routes through the
+existing flag→plan path — `flagCrossCuttingObligationConcern`
+(`src/lib/planning/flagToPlan.ts`) → the store's `flagPlanningConcern` → 
+`ProjectWorkspace.openDecisionCenter(recordId, returnTo)` — landing the user on
+the new record with a return target back to the plan. The card itself owns no
+store access and no navigation. Two constraints ride on that handler:
+
+- It is **capability-gated by the caller** (`ArtifactWorkspace` supplies it only
+  when `capabilities.canPersistWorkflowState` and it has a planning-record
+  opener). Absent handler → the flag renders with **no write action at all**, so
+  a demo/read-only project is never offered an action that would write. Never a
+  project-id check at the call site (rule 5).
+- It runs **only in the click handler** — never on render, never in a memo. The
+  derived report is computed on read; the `PlanningRecord` exists only after an
+  explicit user action (rule 13). A rejected flag (stale plan version) is
+  reported inline rather than silently navigating nowhere.
+
 ### Interactive product tour (`src/components/tour/`)
 
 "Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with

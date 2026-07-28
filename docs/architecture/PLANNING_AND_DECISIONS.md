@@ -198,6 +198,32 @@ impact previews / the write-barrier apply path in
   omits the version so a promoted item stays marked after a regeneration). Do
   not re-add an in-asset open-item indicator, and do not auto-create planning
   records from this projection.
+- **An unresolved cross-cutting obligation resolves in the Decision Center
+  too.** The Implementation Plan's §W5 sections are a contract-level derivation
+  (`deriveCrossCuttingObligations`), not the retired open-item heuristic, so
+  they *do* keep an in-plan indicator — but a deliberately quiet one: a compact
+  flag whose single action routes the obligation out to the Decision Center (see
+  "Severity is expressed once" in UI_PATTERNS.md for the presentation rules).
+  The route is the ordinary flag→plan path, not a new concept:
+  `flagCrossCuttingObligationConcern` (`src/lib/planning/flagToPlan.ts`) builds
+  a `FlagPlanningConcernInput` from the derived status and hands it to the
+  store's `flagPlanningConcern`, which creates the usual `createdBy: 'user'`
+  `open_question` record. Three fixed properties:
+  - the **source key omits the plan version**
+    (`cross-cutting-obligation:<artifactId>:<key>`), so regenerating the plan
+    does not split one open question into two;
+  - the record **title matches §W6's blocker title** for the same obligation
+    (`"<label> not discharged"`) so the blocker and the record read as one item,
+    and the statement carries the derived reason plus every named gap
+    untruncated;
+  - materiality is **`'normal'`, never `'blocking'`**. §W6 is the single
+    authority on this obligation's severity; a `'blocking'` record would also
+    arm the Finalize materiality hard stop off a one-click UI action, giving one
+    fact two independent gates.
+
+  Nothing is created by rendering the plan — the write happens only in the
+  click handler, and the action is offered only when the capability policy
+  allows persistence.
 - **`PlanningArtifactRegionTarget.planId`/`itemId` are optional.** They are
   present only when a region came from a downstream update plan; a plan-less
   locator (an asset open item pointing at a flow) supplies just the label and
