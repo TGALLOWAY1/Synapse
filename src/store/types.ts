@@ -212,6 +212,22 @@ export interface ProjectState {
     // no projectId param.
     resetDemoProject: () => Promise<{ projectId: string; available: boolean }>;
 
+    // Project-gallery hydration — the multi-project upgrade of the demo. Each
+    // gallery slot hydrates from its pinned cloud snapshot into the stable
+    // per-slot project id (see GALLERY_PROJECT_IDS), with the same
+    // pointer-probe freshness, image-completeness stamping, and cache
+    // fallback semantics as `loadDemoProject`. `projectId` is null only for
+    // an out-of-range slot.
+    loadGalleryProject: (
+        slot: number,
+        options?: { force?: boolean },
+    ) => Promise<{ projectId: string | null; available: boolean }>;
+
+    // Gallery counterpart of `resetDemoProject`: wipes the slot's local state
+    // (store maps, transient slices, IDB image stores + reactive caches) and
+    // falls through to `loadGalleryProject(slot)` for a full re-fetch.
+    resetGalleryProject: (slot: number) => Promise<{ projectId: string | null; available: boolean }>;
+
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (

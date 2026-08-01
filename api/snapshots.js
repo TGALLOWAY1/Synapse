@@ -21,6 +21,20 @@ import { requireOwner } from './_lib/ownerAuth.js';
 //   PUT    /api/snapshots?demo=1&id=          -> mark a snapshot as the demo (owner)
 //   PUT    /api/snapshots?demo=1              -> clear the demo pointer (owner)
 //
+// Project gallery (the multi-project upgrade of the single demo). The owner
+// pins up to GALLERY_SIZE snapshots into an ordered list and then flips the
+// showcase mode from 'demo' to 'gallery' — the mode toggle is the go-live
+// switch, and the server refuses to flip it until every slot is filled:
+//
+//   GET    /api/snapshots?gallery=1                    -> gallery state + entry summaries (PUBLIC)
+//   GET    /api/snapshots?gallery=1&pointer=1          -> raw gallery pointer, no manifest joins (PUBLIC)
+//   GET    /api/snapshots?gallery=1&slot=N             -> load one gallery snapshot bundle (PUBLIC)
+//   GET    /api/snapshots?gallery=1&slot=N&image=<key> -> load one gallery image (PUBLIC)
+//   PUT    /api/snapshots?gallery=1&id=<id>            -> add a snapshot to the gallery (owner)
+//   PUT    /api/snapshots?gallery=1&id=<id>&remove=1   -> remove a snapshot from the gallery (owner)
+//   PUT    /api/snapshots?gallery=1&mode=<demo|gallery>-> switch showcase mode (owner; 'gallery'
+//                                                        requires all GALLERY_SIZE slots filled)
+//
 // Schema v2 stores mockup images as separate per-image blobs under
 // `snapshots/<id>/images/<hash>.json` so a single project with N large
 // images doesn't blow past Vercel's ~4.5 MB serverless body cap on either
@@ -35,6 +49,13 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 const SNAPSHOT_PREFIX = 'snapshots/';
 const DEMO_POINTER_PATH = 'snapshots/_demo.json';
+const GALLERY_POINTER_PATH = 'snapshots/_gallery.json';
+// The public showcase is either the single pinned demo ('demo', the default)
+// or the project gallery ('gallery'). Gallery mode only goes live when the
+// owner has pinned a full set of GALLERY_SIZE snapshots and explicitly
+// toggled the mode — handlePutGalleryMode enforces the "full set" half.
+const GALLERY_SIZE = 6;
+const GALLERY_MODES = ['demo', 'gallery'];
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
 const IMAGE_KEY_MAX = 512;
 const CURRENT_SCHEMA_VERSION = 2;
@@ -113,6 +134,36 @@ async function clearDemoPointer() {
       .filter((b) => b.pathname === DEMO_POINTER_PATH)
       .map((b) => del(b.url)),
   );
+}
+
+// Read the gallery pointer blob, which holds the showcase mode plus the
+// ordered list of snapshot ids pinned into the gallery. A missing or
+// malformed pointer means "gallery never configured": demo mode, no entries.
+async function readGalleryPointer() {
+  const fallback = { mode: 'demo', snapshotIds: [], updatedAt: null };
+  const page = await list({ prefix: GALLERY_POINTER_PATH });
+  const blob = page.blobs.find((b) => b.pathname === GALLERY_POINTER_PATH);
+  if (!blob) return fallback;
+  try {
+    const body = await fetchBlobJson(blob.url);
+    const mode = GALLERY_MODES.includes(body?.mode) ? body.mode : 'demo';
+    const snapshotIds = (Array.isArray(body?.snapshotIds) ? body.snapshotIds : [])
+      .filter((id) => typeof id === 'string' && ID_RE.test(id))
+      .slice(0, GALLERY_SIZE);
+    return { mode, snapshotIds, updatedAt: body?.updatedAt ?? null };
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeGalleryPointer(mode, snapshotIds) {
+  const payload = JSON.stringify({ mode, snapshotIds, updatedAt: nowIso() });
+  await put(GALLERY_POINTER_PATH, payload, {
+    contentType: 'application/json',
+    access: 'private',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
 }
 
 async function handlePost(req, res) {
@@ -260,7 +311,7 @@ async function fetchBlobJson(url) {
 }
 
 async function handleList(_req, res) {
-  const [summaries, pointer] = await Promise.all([
+  const [summaries, pointer, gallery] = await Promise.all([
     (async () => {
       const out = [];
       let cursor;
@@ -279,6 +330,7 @@ async function handleList(_req, res) {
       return out;
     })(),
     readDemoPointer(),
+    readGalleryPointer(),
   ]);
 
   const demoId = pointer?.snapshotId ?? null;
@@ -287,7 +339,11 @@ async function handleList(_req, res) {
   }
 
   summaries.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-  return json(res, 200, { snapshots: summaries, demoSnapshotId: demoId });
+  return json(res, 200, {
+    snapshots: summaries,
+    demoSnapshotId: demoId,
+    gallery: { mode: gallery.mode, snapshotIds: gallery.snapshotIds, size: GALLERY_SIZE },
+  });
 }
 
 // Public: serve whichever snapshot the owner has marked as the demo. No
@@ -332,25 +388,21 @@ async function handleGetDemoPointer(res) {
   });
 }
 
-async function handlePutDemo(id, res) {
-  // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
-  // PUT /api/snapshots?demo=1          -> clear pointer
-  if (id === null) {
-    await clearDemoPointer();
-    return json(res, 200, { demoSnapshotId: null });
-  }
-  // Verify the target snapshot exists before we update the pointer, so we
-  // don't leave a dangling reference.
+// SYN-003: server backstop for the pin-time completeness gate (the client
+// hard-blocks too). A publicly pinned snapshot whose mockup spec claims
+// screens but carries zero rendered image blobs would render "Generated"
+// cards with no images — refuse to pin it, whether the pin target is the
+// single demo or a gallery slot. Count the per-image blobs (under
+// `.../images/`) and cross-check the manifest's mockupScreenCount. Legacy
+// manifests (no mockupScreenCount) pass here — the client gate covers them.
+//
+// Returns `{ error: { status, body } }` when the pin must be rejected, or
+// `{ error: null }` when the snapshot exists and may be pinned.
+async function pinGateError(id) {
   const blobs = await findBlobsForId(id);
   const exists = blobs.some((b) => b.pathname.endsWith('/data.json'));
-  if (!exists) return json(res, 404, { error: 'not_found' });
+  if (!exists) return { error: { status: 404, body: { error: 'not_found' } } };
 
-  // SYN-003: server backstop for the pin-time completeness gate (the client
-  // hard-blocks too). A demo whose mockup spec claims screens but carries zero
-  // rendered image blobs would render "Generated" cards with no images — refuse
-  // to pin it. Count the per-image blobs (under `.../images/`) and cross-check
-  // the manifest's mockupScreenCount. Legacy manifests (no mockupScreenCount)
-  // pass here — the client gate covers them.
   const imageBlobCount = blobs.filter((b) => b.pathname.includes('/images/')).length;
   if (imageBlobCount === 0) {
     const manifestBlob = blobs.find((b) => b.pathname.endsWith('/manifest.json'));
@@ -362,19 +414,187 @@ async function handlePutDemo(id, res) {
         manifest = null; // unreadable manifest → don't block on a transient read error
       }
       if (manifest && Number(manifest.mockupScreenCount) > 0) {
+        return {
+          error: {
+            status: 422,
+            body: {
+              error: 'demo_snapshot_incomplete',
+              message:
+                `This snapshot's mockup spec describes ${Number(manifest.mockupScreenCount)} screen(s) `
+                + 'but contains 0 rendered mockup images, so the demo would claim mockups it cannot show. '
+                + 'Generate the mockup images, save a new snapshot, and pin that one instead.',
+            },
+          },
+        };
+      }
+    }
+  }
+  return { error: null };
+}
+
+async function handlePutDemo(id, res) {
+  // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
+  // PUT /api/snapshots?demo=1          -> clear pointer
+  if (id === null) {
+    await clearDemoPointer();
+    return json(res, 200, { demoSnapshotId: null });
+  }
+  // Verify the target snapshot exists (and passes the SYN-003 completeness
+  // gate) before we update the pointer, so we don't leave a dangling or
+  // image-less reference.
+  const { error } = await pinGateError(id);
+  if (error) return json(res, error.status, error.body);
+
+  await writeDemoPointer(id);
+  return json(res, 200, { demoSnapshotId: id });
+}
+
+// PUT /api/snapshots?gallery=1&id=<id>          -> add to the gallery
+// PUT /api/snapshots?gallery=1&id=<id>&remove=1 -> remove from the gallery
+async function handlePutGalleryEntry(id, remove, res) {
+  const pointer = await readGalleryPointer();
+  const snapshotIds = [...pointer.snapshotIds];
+
+  if (remove) {
+    const idx = snapshotIds.indexOf(id);
+    if (idx === -1) return json(res, 404, { error: 'not_in_gallery' });
+    snapshotIds.splice(idx, 1);
+    // Removing a slot can leave the gallery below the go-live threshold. The
+    // mode deliberately stays as-is (the owner may be swapping an entry out
+    // for a better one); the client surfaces the below-capacity state.
+    await writeGalleryPointer(pointer.mode, snapshotIds);
+    return json(res, 200, { mode: pointer.mode, snapshotIds, size: GALLERY_SIZE });
+  }
+
+  if (snapshotIds.includes(id)) {
+    return json(res, 409, { error: 'already_in_gallery' });
+  }
+  if (snapshotIds.length >= GALLERY_SIZE) {
+    return json(res, 409, {
+      error: 'gallery_full',
+      message: `The gallery already holds ${GALLERY_SIZE} snapshots. Remove one before adding another.`,
+    });
+  }
+  // Same existence + SYN-003 completeness gate as pinning the demo — a
+  // gallery slot is just as public as the demo pointer.
+  const { error } = await pinGateError(id);
+  if (error) return json(res, error.status, error.body);
+
+  snapshotIds.push(id);
+  await writeGalleryPointer(pointer.mode, snapshotIds);
+  return json(res, 200, { mode: pointer.mode, snapshotIds, size: GALLERY_SIZE });
+}
+
+// PUT /api/snapshots?gallery=1&mode=<demo|gallery>
+// The go-live switch. Flipping TO 'gallery' is refused until every slot is
+// filled with a snapshot that still exists — this is what keeps the gallery
+// invisible to visitors until the owner has saved all six snapshots and
+// explicitly toggled.
+async function handlePutGalleryMode(mode, res) {
+  if (!GALLERY_MODES.includes(mode)) {
+    return json(res, 400, { error: 'invalid_mode' });
+  }
+  const pointer = await readGalleryPointer();
+  if (mode === 'gallery') {
+    if (pointer.snapshotIds.length < GALLERY_SIZE) {
+      return json(res, 422, {
+        error: 'gallery_not_ready',
+        message:
+          `Gallery mode needs all ${GALLERY_SIZE} slots filled before it can go live `
+          + `(currently ${pointer.snapshotIds.length}/${GALLERY_SIZE}).`,
+      });
+    }
+    // Verify every pinned snapshot still resolves — a slot whose snapshot was
+    // deleted since it was added must not go live as an empty card.
+    for (const snapshotId of pointer.snapshotIds) {
+      const blobs = await findBlobsForId(snapshotId);
+      if (!blobs.some((b) => b.pathname.endsWith('/data.json'))) {
         return json(res, 422, {
-          error: 'demo_snapshot_incomplete',
-          message:
-            `This snapshot's mockup spec describes ${Number(manifest.mockupScreenCount)} screen(s) `
-            + 'but contains 0 rendered mockup images, so the demo would claim mockups it cannot show. '
-            + 'Generate the mockup images, save a new snapshot, and pin that one instead.',
+          error: 'gallery_not_ready',
+          message: `Gallery snapshot ${snapshotId} no longer exists. Remove it and pin a replacement before going live.`,
         });
       }
     }
   }
+  await writeGalleryPointer(mode, pointer.snapshotIds);
+  return json(res, 200, { mode, snapshotIds: pointer.snapshotIds, size: GALLERY_SIZE });
+}
 
-  await writeDemoPointer(id);
-  return json(res, 200, { demoSnapshotId: id });
+// Public, lightweight: the raw gallery pointer with no manifest joins. The
+// client uses this both to decide which entry UI to show (demo button vs
+// gallery) and as the per-slot freshness probe before reusing a cached
+// gallery project — the gallery counterpart of `handleGetDemoPointer`.
+async function handleGetGalleryPointer(res) {
+  const pointer = await readGalleryPointer();
+  return json(res, 200, {
+    mode: pointer.mode,
+    snapshotIds: pointer.snapshotIds,
+    size: GALLERY_SIZE,
+    updatedAt: pointer.updatedAt,
+  });
+}
+
+// Public: gallery state joined with each entry's manifest summary so the
+// gallery page can render cards (title, project name, image counts) without
+// downloading any bundle. An entry whose manifest can't be read right now is
+// kept with its id only — better a sparse card than a vanishing slot.
+async function handleGetGallery(res) {
+  const pointer = await readGalleryPointer();
+  const entries = await Promise.all(pointer.snapshotIds.map(async (snapshotId, slot) => {
+    const base = { slot, snapshotId };
+    try {
+      const page = await list({ prefix: `${SNAPSHOT_PREFIX}${snapshotId}/manifest.json` });
+      const blob = page.blobs.find((b) => b.pathname === `${SNAPSHOT_PREFIX}${snapshotId}/manifest.json`);
+      if (!blob) return base;
+      const manifest = await fetchBlobJson(blob.url);
+      return {
+        ...base,
+        title: manifest?.title,
+        projectName: manifest?.projectName,
+        createdAt: manifest?.createdAt,
+        imageCount: manifest?.imageCount,
+        screenImageCount: manifest?.screenImageCount,
+        mockupScreenCount: manifest?.mockupScreenCount,
+        variantImageCount: manifest?.variantImageCount,
+        sizeBytes: manifest?.sizeBytes,
+      };
+    } catch {
+      return base;
+    }
+  }));
+  return json(res, 200, {
+    mode: pointer.mode,
+    size: GALLERY_SIZE,
+    entries,
+    updatedAt: pointer.updatedAt,
+  });
+}
+
+// Resolve a gallery slot number to its pinned snapshot id, or null when the
+// slot is out of range / empty. Slots are 0-based positions in the pointer's
+// ordered id list.
+async function resolveGallerySlot(slotQuery) {
+  const slot = Number(slotQuery);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= GALLERY_SIZE) return null;
+  const pointer = await readGalleryPointer();
+  return pointer.snapshotIds[slot] ?? null;
+}
+
+// Public: serve one gallery snapshot's bundle by slot. Deliberately NOT gated
+// on mode === 'gallery': the owner needs to preview each slot's project
+// before flipping the go-live toggle, and slot URLs are only *discoverable*
+// once the client surfaces the gallery (which it does gate on mode).
+async function handleGetGallerySlot(slotQuery, res) {
+  const snapshotId = await resolveGallerySlot(slotQuery);
+  if (!snapshotId) return json(res, 404, { error: 'no_gallery_slot' });
+  return await handleGetOne(snapshotId, res);
+}
+
+// Public counterpart of `handleGetDemoImage` for gallery slots.
+async function handleGetGallerySlotImage(slotQuery, key, res) {
+  const snapshotId = await resolveGallerySlot(slotQuery);
+  if (!snapshotId) return json(res, 404, { error: 'no_gallery_slot' });
+  return await handleGetImage(snapshotId, key, res);
 }
 
 async function handleGetOne(id, res) {
@@ -413,6 +633,18 @@ async function handleDelete(id, res) {
   const blobs = await findBlobsForId(id);
   if (blobs.length === 0) return json(res, 404, { error: 'not_found' });
   await Promise.all(blobs.map((b) => del(b.url)));
+  // Scrub the deleted snapshot out of the gallery pointer so a slot never
+  // dangles. Best-effort: a failed scrub is tolerated because every gallery
+  // read path already survives a dangling id (slot loads 404, the go-live
+  // toggle re-verifies existence).
+  try {
+    const gallery = await readGalleryPointer();
+    if (gallery.snapshotIds.includes(id)) {
+      await writeGalleryPointer(gallery.mode, gallery.snapshotIds.filter((s) => s !== id));
+    }
+  } catch (err) {
+    console.warn('[snapshots] failed to scrub deleted snapshot from gallery pointer', err);
+  }
   return json(res, 200, { id, deleted: blobs.length });
 }
 
@@ -421,11 +653,13 @@ export default async function handler(req, res) {
     return methodNotAllowed(res, ['GET', 'POST', 'PUT', 'DELETE']);
   }
 
-  // `?demo=1` is the public-demo channel. GET is anonymous (so any visitor
-  // can load the demo), but PUT (set/clear pointer) is owner-only. Every
+  // `?demo=1` is the public-demo channel and `?gallery=1` is the public
+  // project-gallery channel. GET is anonymous on both (so any visitor can
+  // load the showcase), but PUT (pointer/mode writes) is owner-only. Every
   // other route stays owner-gated as before.
   const isDemoChannel = req.query?.demo === '1' || req.query?.demo === 'true';
-  const isPublicDemoRead = isDemoChannel && req.method === 'GET';
+  const isGalleryChannel = req.query?.gallery === '1' || req.query?.gallery === 'true';
+  const isPublicDemoRead = (isDemoChannel || isGalleryChannel) && req.method === 'GET';
 
   // The public demo read gets its own, larger budget: one cache-less demo
   // load is a legitimate burst of `2 + imageCount + screenImageCount`
@@ -471,6 +705,25 @@ export default async function handler(req, res) {
   const isPointerProbe = req.query?.pointer === '1' || req.query?.pointer === 'true';
 
   try {
+    if (isGalleryChannel) {
+      const slotQuery = typeof req.query?.slot === 'string' ? req.query.slot : null;
+      if (req.method === 'GET') {
+        if (isPointerProbe) return await handleGetGalleryPointer(res);
+        if (slotQuery !== null && imageReadKey !== null) {
+          return await handleGetGallerySlotImage(slotQuery, imageReadKey, res);
+        }
+        if (slotQuery !== null) return await handleGetGallerySlot(slotQuery, res);
+        return await handleGetGallery(res);
+      }
+      if (req.method === 'PUT') {
+        const mode = typeof req.query?.mode === 'string' ? req.query.mode : null;
+        if (mode !== null) return await handlePutGalleryMode(mode, res);
+        if (id === null) return json(res, 400, { error: 'missing_id' });
+        const remove = req.query?.remove === '1' || req.query?.remove === 'true';
+        return await handlePutGalleryEntry(id, remove, res);
+      }
+      return methodNotAllowed(res, ['GET', 'PUT']);
+    }
     if (isDemoChannel) {
       if (req.method === 'GET') {
         if (isPointerProbe) return await handleGetDemoPointer(res);

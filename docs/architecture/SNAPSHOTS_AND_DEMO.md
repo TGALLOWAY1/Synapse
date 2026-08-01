@@ -1,6 +1,57 @@
 # Snapshots & the Demo Project
 
-> Extracted from CLAUDE.md. Load-bearing rules for the owner snapshot system, the public demo, demo hydration/reset, and the demo capability boundary.
+> Extracted from CLAUDE.md. Load-bearing rules for the owner snapshot system, the public demo, the project gallery, demo/gallery hydration/reset, and the showcase capability boundary.
+
+### The project gallery (multi-project upgrade of the demo)
+
+The single pinned demo can be upgraded to a **project gallery** of up to
+`GALLERY_SIZE` (6) snapshot-backed showcase projects. Everything below about
+the demo applies per-slot to the gallery unless noted; the shared vocabulary
+in code is **"showcase project"** (`isShowcaseProjectId` in
+`src/data/demoProject.ts` = the demo id + all `GALLERY_PROJECT_IDS`).
+
+- **Server state is one pointer blob** (`snapshots/_gallery.json`, next to the
+  demo's `_demo.json`): `{ mode: 'demo' | 'gallery', snapshotIds: [...] }`.
+  The array index IS the slot. Routes live on the `?gallery=1` channel of
+  `api/snapshots.js` (GET public — pointer probe / manifest-joined state /
+  per-slot bundle / per-slot image; PUT owner — add/remove entry, set mode).
+  Public gallery GETs share the burst-friendly `snapshots-demo` rate scope.
+- **The mode toggle is the go-live switch.** Until the owner has filled all 6
+  slots AND flipped mode to `'gallery'`, every visitor-facing surface keeps
+  the classic single-demo presentation. The server refuses the flip
+  (`422 gallery_not_ready`) while slots are unfilled or reference deleted
+  snapshots; adding beyond capacity is `409 gallery_full`; adding an
+  image-less mockup snapshot is blocked by the same SYN-003 pin gate as the
+  demo (client `completenessGateError` in SnapshotsPanel + server
+  `pinGateError`). Deleting a snapshot scrubs it from the pointer
+  (best-effort) so slots never dangle silently.
+- **Each slot hydrates under a stable local project id**
+  (`GALLERY_PROJECT_IDS[slot]`, `/p/<id>`), exactly like the demo:
+  route-owned hydration (`DemoRouteGate` with `gallerySlot`), per-target
+  single-flight (`hydrateGalleryProject` / `resetGalleryProjectSingleFlight`
+  in `demoRouteHydration.ts` — the in-flight map is keyed by project id so
+  slots never serialize behind each other), and the store's
+  `loadGalleryProject(slot)` / `resetGalleryProject(slot)` which share
+  `loadShowcaseProject` / `wipeShowcaseProject` with the demo actions. All
+  freshness rules below (pointer probe before cache reuse, stamped cache =
+  known-complete, fresh-partial never overwrites a stamped cache, no stamp on
+  a partial restore) apply verbatim — the slot's "pointer" is its entry in
+  the gallery pointer's `snapshotIds`, and the stamp reuses
+  `Project.demoSourceSnapshotId` / `demoCachePolicyVersion`.
+- **Discovery is gated on mode, content is not.** The Home/Login entry button
+  and `/gallery` (the card grid, `GalleryPage`) consult the public mode via
+  `src/lib/galleryStatus.ts` (a deliberately self-contained fetch — it must
+  degrade to demo presentation on ANY failure, and it must not couple entry
+  surfaces to `snapshotClient`). While the mode is `'demo'`, `/gallery`
+  redirects to the classic demo. Direct slot URLs resolve regardless of mode
+  so the owner can preview each slot before going live — the go-live gate
+  governs what visitors are *shown*, not what a deep link can *load*.
+- **Gallery ids inherit every demo exclusion automatically** via
+  `isShowcaseProjectId`: the read-only capability policy
+  (`projectCapabilities.ts`), server project sync (`projectServerSync.ts`
+  `syncableIds`/push/delete guards), mockup-image sync (`projectImageSync.ts`),
+  and the design-setup gate. When adding a new "not for the demo" guard, use
+  `isShowcaseProjectId` — never compare against `DEMO_PROJECT_ID` directly.
 
 ### Snapshots & the demo project (`src/lib/snapshotClient.ts`, `api/snapshots.js`)
 

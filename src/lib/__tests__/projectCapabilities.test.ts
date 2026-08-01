@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_PROJECT_ID } from '../../data/demoProject';
+import { DEMO_PROJECT_ID, GALLERY_PROJECT_IDS, GALLERY_SIZE } from '../../data/demoProject';
 import {
     ProjectCapabilityError,
     assertProjectCapability,
@@ -24,6 +24,21 @@ describe('project capabilities', () => {
             canPersistWorkflowState: false,
             canExportExternally: false,
         });
+    });
+
+    it('applies the same read-only policy to every gallery slot project', () => {
+        expect(GALLERY_PROJECT_IDS).toHaveLength(GALLERY_SIZE);
+        for (const galleryId of GALLERY_PROJECT_IDS) {
+            const capabilities = getProjectCapabilities({ id: galleryId });
+            expect(capabilities.isReadOnly).toBe(true);
+            expect(capabilities.canExplore).toBe(true);
+            expect(capabilities.canPersistWorkflowState).toBe(false);
+            expect(capabilities.canGenerateArtifacts).toBe(false);
+            expect(canPerformProjectAction(galleryId, 'persist')).toBe(false);
+            expect(canPerformProjectAction(galleryId, 'explore')).toBe(true);
+            expect(() => assertProjectCapability({ id: galleryId }, 'canEditProjectContent'))
+                .toThrow('This example project is read-only.');
+        }
     });
 
     it('keeps ordinary projects editable', () => {

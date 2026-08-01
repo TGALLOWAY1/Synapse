@@ -40,7 +40,11 @@ const snap = (overrides: Partial<SnapshotListItem>): SnapshotListItem => ({
 });
 
 async function renderWith(snapshot: SnapshotListItem, demoSnapshotId: string | null = null) {
-    mockedList.mockResolvedValue({ snapshots: [snapshot], demoSnapshotId });
+    mockedList.mockResolvedValue({
+        snapshots: [snapshot],
+        demoSnapshotId,
+        gallery: { mode: 'demo', snapshotIds: [], size: 6 },
+    });
     render(<SnapshotsPanel projectId="p1" onClose={() => {}} />);
     await screen.findByText('My Snapshot');
 }
