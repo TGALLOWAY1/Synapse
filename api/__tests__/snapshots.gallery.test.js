@@ -157,6 +157,42 @@ describe('PUT /api/snapshots?gallery=1&id= — slot management', () => {
     expect(res.statusCode).toBe(200);
     expect(parsed(res).snapshotIds).toEqual([SNAP_IDS[0], ...SNAP_IDS.slice(2)]);
   });
+
+  it('demotes a LIVE gallery back to demo mode when a removal drops it below capacity', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'PUT', query: { gallery: '1', id: SNAP_IDS[0], remove: '1' }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res).mode).toBe('demo');
+    expect(putPointerBody()).toMatchObject({ mode: 'demo', snapshotIds: SNAP_IDS.slice(1) });
+  });
+
+  it('keeps demo mode as-is when removing from a not-yet-live gallery', async () => {
+    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS.slice(0, 3) }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'PUT', query: { gallery: '1', id: SNAP_IDS[0], remove: '1' }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res).mode).toBe('demo');
+  });
+});
+
+describe('DELETE /api/snapshots?id= — gallery pointer scrub', () => {
+  it('scrubs the deleted snapshot from the pointer and demotes a live gallery below capacity', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'DELETE', query: { id: SNAP_IDS[2] }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(putPointerBody()).toMatchObject({
+      mode: 'demo',
+      snapshotIds: SNAP_IDS.filter((s) => s !== SNAP_IDS[2]),
+    });
+  });
 });
 
 describe('PUT /api/snapshots?gallery=1&mode= — the go-live switch', () => {

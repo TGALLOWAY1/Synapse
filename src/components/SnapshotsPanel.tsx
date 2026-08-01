@@ -214,6 +214,17 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                 setError(gateError);
                 return;
             }
+        } else if (gallery?.mode === 'gallery') {
+            // Removing a slot from a LIVE gallery drops it below capacity, so
+            // the server demotes the showcase back to demo mode — make that
+            // consequence explicit before proceeding.
+            const confirmed = confirm(
+                'Removing this snapshot takes the live gallery below '
+                + `${gallery.size} slots, so the public showcase will switch back to the `
+                + 'single demo project. The remaining slots are kept — re-fill and go '
+                + 'live again when ready. Continue?',
+            );
+            if (!confirmed) return;
         }
         setBusy(`gallery:${id}`);
         setError(null);

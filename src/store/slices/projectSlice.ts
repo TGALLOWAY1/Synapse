@@ -47,6 +47,15 @@ export type ProjectSlice = {
 type ShowcaseSet = (updater: (state: ProjectState) => Partial<ProjectState>) => void;
 type ShowcaseGet = () => ProjectState;
 
+// Outcome of a showcase pointer probe. The two null-ish cases are NOT the
+// same thing and must stay distinguishable: a FAILED probe (offline / proxy
+// error) means "trust the cache — better stale than empty", while a
+// SUCCESSFUL probe that finds nothing pinned means the owner explicitly
+// removed the content — a cached copy is removed content, not a fallback.
+type ShowcasePointerProbe =
+    | { ok: true; snapshotId: string | null }
+    | { ok: false };
+
 // Wipe one showcase project's slice of every project-keyed store map and its
 // IDB images. Shared by `clearDemoProject` and the gallery cache-policy
 // discard — this is a session/route-level concern, not a durable mutation, so
@@ -104,9 +113,10 @@ async function loadShowcaseProject(
     options: {
         targetProjectId: string;
         force: boolean;
-        // Resolves the live pinned snapshot id for this showcase target, or
-        // null when the probe failed / nothing is pinned.
-        probePointer: () => Promise<string | null>;
+        // Resolves the live pinned snapshot id for this showcase target. See
+        // `ShowcasePointerProbe`: a failed probe and an explicitly empty
+        // pointer drive opposite cache decisions.
+        probePointer: () => Promise<ShowcasePointerProbe>;
         // Fetches the full public snapshot payload, or null when unavailable.
         fetchPayload: () => Promise<SnapshotPayload | null>;
     },
@@ -123,12 +133,23 @@ async function loadShowcaseProject(
         force = true;
     }
 
-    const pointerId = await probePointer();
+    const probe = await probePointer();
+
+    if (probe.ok && !probe.snapshotId) {
+        // The probe SUCCEEDED and found nothing pinned for this target (e.g.
+        // the owner removed this gallery slot). A cached copy is removed
+        // content, not a network fallback — drop it and report unavailable
+        // rather than serving it indefinitely on this device.
+        if (existing) await clearShowcaseProject(set, get, targetProjectId);
+        return { available: false };
+    }
+
+    const pointerId = probe.ok ? probe.snapshotId : null;
 
     if (!force && existing && pointerId && existing.demoSourceSnapshotId === pointerId) {
         return { available: true };
     }
-    if (!force && existing && !pointerId) {
+    if (!force && existing && !probe.ok) {
         // Pointer probe failed — keep the cached copy rather than wiping it.
         return { available: true };
     }
@@ -457,7 +478,13 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                     console.error('[loadDemoProject] failed to read demo pointer', err);
                     return null;
                 });
-                return pointer?.snapshotId ?? null;
+                // `loadDemoSnapshotPointer` returns null for BOTH a transport
+                // failure and "no demo pinned", so the demo probe reports
+                // ok:false either way — a cached demo keeps serving, exactly
+                // the pre-gallery behavior.
+                return pointer?.snapshotId
+                    ? { ok: true as const, snapshotId: pointer.snapshotId }
+                    : { ok: false as const };
             },
             fetchPayload: () => loadDemoSnapshotPublic().catch((err) => {
                 console.error('[loadDemoProject] failed to fetch demo snapshot', err);
@@ -480,7 +507,11 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             force,
             probePointer: async () => {
                 const pointer = await loadGalleryPointerPublic();
-                return pointer?.snapshotIds[slot] ?? null;
+                // A readable pointer whose slot is empty means the owner
+                // explicitly removed this slot — distinct from a failed probe
+                // (null), which keeps the cache.
+                if (!pointer) return { ok: false as const };
+                return { ok: true as const, snapshotId: pointer.snapshotIds[slot] ?? null };
             },
             fetchPayload: () => loadGallerySnapshotPublic(slot).catch((err) => {
                 console.error('[loadGalleryProject] failed to fetch gallery snapshot', err);

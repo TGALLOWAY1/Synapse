@@ -459,11 +459,16 @@ async function handlePutGalleryEntry(id, remove, res) {
     const idx = snapshotIds.indexOf(id);
     if (idx === -1) return json(res, 404, { error: 'not_in_gallery' });
     snapshotIds.splice(idx, 1);
-    // Removing a slot can leave the gallery below the go-live threshold. The
-    // mode deliberately stays as-is (the owner may be swapping an entry out
-    // for a better one); the client surfaces the below-capacity state.
-    await writeGalleryPointer(pointer.mode, snapshotIds);
-    return json(res, 200, { mode: pointer.mode, snapshotIds, size: GALLERY_SIZE });
+    // A LIVE gallery must never fall below its full slot count — go-live is
+    // explicitly gated on all GALLERY_SIZE slots being filled, and visitors
+    // must not see a partial gallery. Removing below capacity while live
+    // demotes the showcase back to demo mode; the slots that remain are kept
+    // so the owner can re-fill and flip go-live again.
+    const mode = pointer.mode === 'gallery' && snapshotIds.length < GALLERY_SIZE
+      ? 'demo'
+      : pointer.mode;
+    await writeGalleryPointer(mode, snapshotIds);
+    return json(res, 200, { mode, snapshotIds, size: GALLERY_SIZE });
   }
 
   if (snapshotIds.includes(id)) {
@@ -634,13 +639,19 @@ async function handleDelete(id, res) {
   if (blobs.length === 0) return json(res, 404, { error: 'not_found' });
   await Promise.all(blobs.map((b) => del(b.url)));
   // Scrub the deleted snapshot out of the gallery pointer so a slot never
-  // dangles. Best-effort: a failed scrub is tolerated because every gallery
-  // read path already survives a dangling id (slot loads 404, the go-live
-  // toggle re-verifies existence).
+  // dangles. Same live-gallery invariant as the remove route: if the scrub
+  // drops a live gallery below capacity, the showcase demotes to demo mode
+  // rather than serving a partial gallery. Best-effort: a failed scrub is
+  // tolerated because every gallery read path already survives a dangling id
+  // (slot loads 404, the go-live toggle re-verifies existence).
   try {
     const gallery = await readGalleryPointer();
     if (gallery.snapshotIds.includes(id)) {
-      await writeGalleryPointer(gallery.mode, gallery.snapshotIds.filter((s) => s !== id));
+      const snapshotIds = gallery.snapshotIds.filter((s) => s !== id);
+      const mode = gallery.mode === 'gallery' && snapshotIds.length < GALLERY_SIZE
+        ? 'demo'
+        : gallery.mode;
+      await writeGalleryPointer(mode, snapshotIds);
     }
   } catch (err) {
     console.warn('[snapshots] failed to scrub deleted snapshot from gallery pointer', err);

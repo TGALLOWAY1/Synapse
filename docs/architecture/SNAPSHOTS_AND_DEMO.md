@@ -16,15 +16,18 @@ in code is **"showcase project"** (`isShowcaseProjectId` in
   `api/snapshots.js` (GET public — pointer probe / manifest-joined state /
   per-slot bundle / per-slot image; PUT owner — add/remove entry, set mode).
   Public gallery GETs share the burst-friendly `snapshots-demo` rate scope.
-- **The mode toggle is the go-live switch.** Until the owner has filled all 6
-  slots AND flipped mode to `'gallery'`, every visitor-facing surface keeps
-  the classic single-demo presentation. The server refuses the flip
-  (`422 gallery_not_ready`) while slots are unfilled or reference deleted
-  snapshots; adding beyond capacity is `409 gallery_full`; adding an
-  image-less mockup snapshot is blocked by the same SYN-003 pin gate as the
-  demo (client `completenessGateError` in SnapshotsPanel + server
-  `pinGateError`). Deleting a snapshot scrubs it from the pointer
-  (best-effort) so slots never dangle silently.
+- **The mode toggle is the go-live switch, and "live ⇒ full" is an
+  invariant.** Until the owner has filled all 6 slots AND flipped mode to
+  `'gallery'`, every visitor-facing surface keeps the classic single-demo
+  presentation. The server refuses the flip (`422 gallery_not_ready`) while
+  slots are unfilled or reference deleted snapshots; adding beyond capacity
+  is `409 gallery_full`; adding an image-less mockup snapshot is blocked by
+  the same SYN-003 pin gate as the demo (client `completenessGateError` in
+  SnapshotsPanel + server `pinGateError`). The invariant also holds on the
+  way DOWN: any write that would leave a live gallery below capacity — a
+  slot removal or the snapshot-delete pointer scrub — **demotes the mode
+  back to `'demo'`** in the same pointer write (remaining slots are kept, so
+  the owner re-fills and re-toggles). Visitors never see a partial gallery.
 - **Each slot hydrates under a stable local project id**
   (`GALLERY_PROJECT_IDS[slot]`, `/p/<id>`), exactly like the demo:
   route-owned hydration (`DemoRouteGate` with `gallerySlot`), per-target
@@ -37,7 +40,13 @@ in code is **"showcase project"** (`isShowcaseProjectId` in
   known-complete, fresh-partial never overwrites a stamped cache, no stamp on
   a partial restore) apply verbatim — the slot's "pointer" is its entry in
   the gallery pointer's `snapshotIds`, and the stamp reuses
-  `Project.demoSourceSnapshotId` / `demoCachePolicyVersion`.
+  `Project.demoSourceSnapshotId` / `demoCachePolicyVersion`. One probe nuance
+  is gallery-specific: a **failed** probe keeps the cache (better stale than
+  empty, same as the demo), but a **successful** probe that finds the slot
+  empty means the owner removed that content — the cached copy is wiped and
+  the slot reports unavailable (`ShowcasePointerProbe` in `projectSlice.ts`
+  keeps the two cases distinguishable; the demo probe can't tell them apart
+  on the wire and conservatively keeps its cache, the pre-gallery behavior).
 - **Discovery is gated on mode, content is not.** The Home/Login entry button
   and `/gallery` (the card grid, `GalleryPage`) consult the public mode via
   `src/lib/galleryStatus.ts` (a deliberately self-contained fetch — it must

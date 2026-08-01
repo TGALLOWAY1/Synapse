@@ -168,6 +168,20 @@ describe('loadGalleryProject — per-slot hydration', () => {
         expect(result).toEqual({ projectId: SLOT_PROJECT_ID, available: false });
     });
 
+    it('drops the cached copy when the owner has removed the slot (probe ok, slot empty)', async () => {
+        seedSlot('snap-C');
+        // The pointer probe SUCCEEDS but the slot no longer holds a snapshot —
+        // removed content must not keep serving from cache on this device.
+        mockedPointer.mockResolvedValue(pointerState(['s0', 's1']));
+
+        const result = await useProjectStore.getState().loadGalleryProject(SLOT);
+
+        expect(result).toEqual({ projectId: SLOT_PROJECT_ID, available: false });
+        expect(useProjectStore.getState().projects[SLOT_PROJECT_ID]).toBeUndefined();
+        expect(mockedPublic).not.toHaveBeenCalled();
+        expect(mockedRestore).not.toHaveBeenCalled();
+    });
+
     it('does NOT stamp when the slot load dropped images (self-heals next open)', async () => {
         mockedPointer.mockResolvedValue(pointerState(['s0', 's1', 'snap-C']));
         mockedPublic.mockResolvedValue({ ...fakePayload('snap-C'), imagesComplete: false });
