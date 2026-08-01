@@ -14,23 +14,63 @@ workspace" below), **Architecture** (Data Model), and **Development**
 `CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
-per-artifact model overrides keep working. **`component_inventory` (UI Components)
-is a *hidden* artifact** — no hard dependents, not useful to surface directly
-right now, so it is hidden from the assets list but **still generates** (it stays
-in `CORE_ARTIFACT_PIPELINE` and `MOCKUP_DEPENDENCIES`; mockups softly consume it
-to tag per-screen `componentRefs`). **`HIDDEN_ARTIFACT_SUBTYPES` /
-`isHiddenArtifactSubtype` in `coreArtifactPipeline.ts` is the single source of
-truth for "hidden"** and drives three things: (1) `buildSlotMetas` drops it so it
-renders no sidebar/mobile-header/auto-open row (it may stay listed in
-`ARTIFACT_GROUPS.items`; the filter removes it); (2) `ProjectWorkspace.assetsReady`
-excludes hidden subtypes so a hidden slot erroring can't strand the finalize
-success modal on "assets are being created" (the user has no row to see/retry it);
-(3) `artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending
-slots so an errored hidden slot isn't retried invisibly on every remount — but
+per-artifact model overrides keep working.
+
+**`HIDDEN_ARTIFACT_SUBTYPES` / `isHiddenArtifactSubtype` in
+`coreArtifactPipeline.ts` is the single source of truth for "hidden"** — a
+subtype that still *generates* but is surfaced nowhere. It drives: (1)
+`buildSlotMetas` drops it so it renders no sidebar/mobile-header/auto-open row;
+(2) `ProjectWorkspace.assetsReady` excludes it (via `visibleCoreSubtypes()`) so a
+hidden slot erroring can't strand the finalize success modal on "assets are being
+created" — the user has no row to see/retry it; (3) `ExportModal` drops it from
+the export list; (4) `artifactDependencyGraph.isVisibleSubtype` excludes it as a
+node (dependents inherit its dependencies transitively, and
+`expandWithHiddenDependencyClosure` re-adds it to graph-driven batches); (5)
+`artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending slots
+so an errored hidden slot isn't retried invisibly on every remount — while
 `startAll` still includes hidden slots in its pending set, so they're best-effort
-generated alongside visible ones. A hidden artifact must never gate readiness or
-be the sole reason a run resumes. To re-expose one, remove it from
-`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6.
+generated alongside visible ones. **The load-bearing rule: a hidden artifact must
+never gate user-facing readiness or trigger an invisible retry loop.**
+
+**The hidden set is currently EMPTY.** `component_inventory` (UI Components) was
+its last member and was **unhidden by W4** of
+[docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md):
+it feeds every mockup through `MOCKUP_DEPENDENCIES` (`generateMockup` tags
+per-screen `componentRefs` from it, which reach the gpt-image prompts), so an
+invisible failure silently degraded the product. The mechanism above is retained
+(empty, not deleted) so a future subtype can be hidden without re-deriving the
+rule; `expandWithHiddenDependencyClosure` takes an injectable `isHidden`
+predicate so the closure behavior stays unit-testable while the set is empty.
+
+What unhiding `component_inventory` changed — all intentional and test-covered:
+
+- **It is reviewable.** `ComponentInventoryRenderer` (dispatched from
+  `ArtifactContentRenderer`) renders it as the **Components section inside the
+  Screens experience** (`ScreenComponentsSection`), with screen back-references
+  and advisory component/screen contradictions. See SCREENS_EXPERIENCE.md.
+- **It still has no sidebar row.** It is deliberately absent from
+  `ARTIFACT_GROUPS.items`, so `buildSlotMetas` never materializes a row —
+  the same treatment as `screen_inventory`/`mockup`. Deep links / graph nodes /
+  checkpoint destinations naming it route to the Screens view via
+  `SCREENS_HOSTED_SLOTS`. **"No row" ≠ "hidden"** — don't conflate the layout
+  choice with the visibility contract.
+- **It now GATES output readiness.** `ProjectWorkspace.assetsReady` iterates
+  `visibleCoreSubtypes()` (the shared "not hidden, not retired" list — use it
+  rather than re-filtering), which now includes `component_inventory`. An errored
+  component inventory legitimately holds the "outputs are ready" signal back.
+  That is only acceptable because the Components section shows its status and
+  offers Retry. Covered by `coreArtifactPipeline.test.ts`.
+- **It now AUTO-RETRIES.** `resumeIfNeeded` wakes a run for a pending
+  `component_inventory` slot instead of skipping it — no longer an invisible
+  retry, for the same reason. Covered by `src/lib/__tests__/artifactJobResume.test.ts`.
+- **It is a Dependency-Graph node and an export row.** The mockup's dependency on
+  it is now an explicit edge instead of a collapsed one, it appears in the
+  Sync-outputs row list (so it can be regenerated like any other output), and it
+  is included in exports.
+
+To hide a subtype again, add it back to `HIDDEN_ARTIFACT_SUBTYPES` — and re-check
+every consumer above against the load-bearing rule. `docs/backlog/BACKLOG.md` §6
+records the original hide decision and its resolution.
 **`prompt_pack` (Developer Prompts) is a *retired* artifact**
 (`RETIRED_ARTIFACT_SUBTYPES` / `isRetiredArtifactSubtype`, same module) —
 stronger than hidden: retired subtypes are excluded from new generation runs
@@ -159,17 +199,18 @@ Convert-to-Tasks all keep working). See
 - **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
   `renderers/implementationPlan/ConsolidatedPlanView.tsx` — a guided build
   launcher, not a report. Tab **ids** keep the internal vocabulary
-  (`overview`/`milestones`/`prompt_packs`/`traceability`) and the **labels**
-  are Build Brief / Roadmap / Prompts / Coverage. **Synapse ends at the
-  plan + prompts handoff** — see the "Removed: validation surface" note
-  below. An executive `PlanHeader` sits above the tabs: readiness pill, scope
-  counts, generated-from PRD version + staleness (threaded like data_model's
-  `prdVersionLabel`/`staleness` props), a primary **Copy next prompt** CTA,
-  and the **Convert to tasks** entry point (moved out of `ArtifactWorkspace`'s
-  floating row; the legacy markdown fallback renders its own
-  Convert-to-Tasks row so the modal stays reachable either way, and the
-  outer white prose card is skipped for `implementation_plan` since the view
-  brings its own cards). Decision-surface data is derived by the pure,
+  (`overview`/`milestones`/`prompt_packs`) and the **labels** are Build Brief /
+  Roadmap / Prompts. **Synapse ends at the plan + prompts handoff** — see the
+  "Removed: validation surface" note below. Above the tabs sit two cards, in
+  order: `PlanHeader` (an **identity strip only** — title, the adapter's
+  plan-shape readiness pill, scope counts, generated-from PRD version +
+  staleness, threaded like data_model's `prdVersionLabel`/`staleness` props),
+  then **`FinalReviewCard` — the plan's one decision surface** (see "Final
+  Review" below, which owns every action including Convert to tasks). The
+  legacy markdown fallback renders its own Convert-to-Tasks row so the modal
+  stays reachable either way, and the outer white prose card is skipped for
+  `implementation_plan` since the view brings its own cards.
+  Decision-surface data is derived by the pure,
   unit-tested **`src/lib/services/implementationPlanInsights.ts`**:
   prompt-pack build order + next-pack resolution, the coverage matrix (cells
   are explicitly `covered`/`missing`/`not_tracked` — `missing` only when the
@@ -177,14 +218,20 @@ Convert-to-Tasks all keep working). See
   over-reported), change-impact scoping per upstream artifact, and structured
   prompt previews. The **Build Brief** tab's Build Timeline is the single
   milestone-sequencing view (the redundant Critical Path chip row was
-  removed). User progress (copied packs only) persists as the
+  removed). The **Coverage tab is gone** (plan §W7): its gap summary is folded
+  into Final Review and the full matrix survives there as an expandable
+  detail via `CoverageTab showSummary={false}`, mounted only when opened. Do
+  not re-add a Coverage tab — a second top-level integrity surface is the
+  defect §W7 fixed. User progress (copied packs only) persists as the
   **`planProgress` metadata overlay** on the implementation_plan
   ArtifactVersion (`readPlanProgress`; same per-version pattern as
-  screenEdits/promptEdits — regeneration starts clean; written silently via
-  `updateArtifactVersionMetadata`, no history event). Saved
-  `ProjectTask`s are threaded in as `savedTasks` so structured-plan task ids
-  (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs merely
-  planned. Fence-less, milestone-less content falls back to the old timeline
+  screenEdits/promptEdits — regeneration starts clean; written through
+  `updateArtifactOverlay` like every other user overlay, cross-cutting rule
+  12). Saved `ProjectTask`s are threaded in as `savedTasks` so structured-plan
+  task ids (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs
+  merely planned, and any self-reported progress on them is named per
+  "Task progress is SELF-REPORTED" below.
+  Fence-less, milestone-less content falls back to the old timeline
   / plain markdown. `ArtifactWorkspace` threads the legacy standalone
   prompt_pack artifact's preferred content in as `promptPackContent`, plus
   `sourceVersions` (core_artifact sourceRefs resolved to "Data Model v2"
@@ -196,9 +243,22 @@ Convert-to-Tasks all keep working). See
   Steps / Acceptance Criteria / Quality Gates / Validation Commands / Commit
   Guidance; no triple backticks inside bodies — they'd collide with the
   markdown fences). It has true data deps on `screen_inventory` +
-  `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
-  layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
-  over the **active** pipeline). New runs never generate `prompt_pack` (see
+  `data_model` + `user_flows`. The `user_flows` edge is a **deliberate W2
+  decision** (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W2): flows carry
+  the alternate/error journeys the plan must turn into engineering work, so
+  they reach the plan as prompt context (via `buildDependencyContext`, with a
+  flows-aware summary — `summarizeUserFlowsDependency` — that preserves every
+  flow's steps, decisions, error paths, and edge cases past the truncation
+  budget), as a provenance `SourceRef`, and as a freshness input. This makes
+  the **active pipeline 3 layers deep** (`screen_inventory → user_flows →
+  implementation_plan`); the added wall-clock was accepted — do not
+  "optimize" the edge back out. `user_flows` stays **out of
+  `REQUIRED_DEPENDENCIES`**: plan generation waits for flows but proceeds
+  with degraded context when they are missing/errored, and that gap surfaces
+  through the dependency graph's `impactedBy` (see
+  docs/ARTIFACT_DEPENDENCY_GRAPH.md), not as a generation blocker. The
+  pipeline-shape tests assert ≥3-wide layer 1 and **exactly 3 layers** over
+  the **active** pipeline. New runs never generate `prompt_pack` (see
   the retired-subtype rules above). Generated plans still carry
   `qualityGates`/`globalQualityGates` and `validationCommands` in the data
   model (the schema/prompt are unchanged), but only the validation commands
@@ -222,11 +282,109 @@ Convert-to-Tasks all keep working). See
   checklist derivations in `implementationPlanInsights.ts`, and the overlay
   field; do not resurrect model-authored "passed" styling (gates were always
   Not run until a user recorded an outcome).
+- **Requirement / criterion identity for coverage & traceability.** Stable
+  ids come from the derived `src/lib/requirementIdentity.ts` layer
+  (`RequirementId` = `Feature.id`; `CriterionId` hashes the normalized
+  criterion text — see "Derived requirement & criterion identity" in
+  PLANNING_AND_DECISIONS.md). Coverage and traceability surfaces key off
+  these ids, never off array position or raw prose equality; criterion prose
+  found in screens, tasks, and Definition-of-Done lines resolves through
+  `resolveCriterionRefs` with an explicit
+  `exact | normalized | fuzzy | unmatched` confidence, and `unmatched` is
+  reported, never dropped. The layer is derived and advisory only
+  (cross-cutting rule 10); it is consumed by the
+  ARTIFACT_READINESS_RESOLUTION_PLAN workstreams (W3/W6/W7).
 - The demo project is a **cloud snapshot** and carries the legacy
   two-artifact shape until the owner re-pins a regenerated snapshot; the
   adapter is what keeps it rendering consolidated in the meantime. Do not add
   persisted state for the consolidated view.
 
+
+### Final Review — one blocker list, one CTA (plan §W7)
+
+`renderers/implementationPlan/FinalReviewCard.tsx` is the Implementation
+Plan's **decision surface**. It replaced the old executive header, which
+rendered **four competing actions** with "Copy next prompt" styled primary
+regardless of blockers, while plan integrity was summarized in four places
+(workspace status, Dependency Graph, Coverage tab, readiness) with no single
+authority.
+
+- **Exactly one primary action, always.** The pure, unit-tested state machine
+  `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`) returns one
+  `primary` plus a `secondary` list, in four states:
+
+  | State | Primary label | Source of the label |
+  |---|---|---|
+  | `resolve_blockers` (`!packet.isPacketComplete`) | **Resolve N blockers** | `N = packet.blockers.length` from §W6's `deriveBuildPacketReadiness` |
+  | `approve` (complete, no covering approval) | **Approve build packet** / **Re-approve build packet** | fixed copy; "Re-" when a recorded approval no longer covers the current versions |
+  | `start_build` (complete + covering approval) | **Copy first / next implementation prompt**, else **Start first slice** | the plan's own next-uncopied prompt pack (`findNextPromptPack`) |
+  | `unavailable` (no `packet` — isolated renders only) | **Check build readiness**, disabled | fixed copy |
+
+  **Blockers dominate:** a packet that regressed after approval returns to
+  `resolve_blockers`, and a prior approval never promotes a build action.
+  `resolve_blockers` toggles the ordered blocker list open; each entry shows
+  `title`, `consequence`, `remedy` and a navigable action target.
+- **Copy plan / Review prompts / Convert to tasks are secondary at ALL times**,
+  including when the packet is ready — they live in a demoted "More actions"
+  menu. Copying a prompt before approval stays possible, only never as the
+  primary: every prompt-copy button on the surface (`PromptPackCard`, the
+  Prompts tab's copy-next/copy-all, "Copy milestone prompts") is permanently
+  `variant="secondary"` — approved or not — so `FinalReviewCard` holds the only
+  filled button on any tab. **Prompt review and task conversion are not
+  approvals** — do not wire either to the approval state.
+- **The blocker list and the Dependency Graph can never disagree.** Both derive
+  from the same engines: §W6 consumes `evaluateProjectFreshness` (rule 9) and
+  the graph *is* that engine's output. §W7 introduces no third integrity
+  source, and the Dependency Graph stays a **diagnostics** view.
+- **Navigation reuses the readiness router.** `BuildPacketActionTarget` is
+  `ReadinessActionTarget` plus `artifact_slot` and `readiness_commitment`.
+  `isReadinessActionTarget` / `buildPacketNavigationDestination` /
+  `buildPacketActionLabel` (`components/planning/readinessCheckpointView.ts`)
+  split them, and `ProjectWorkspace.navigateBuildPacketTarget` **delegates every
+  shared kind to `navigateReadinessTarget`**. Do not add a second router.
+- **The pinned artifact-version manifest.** `useBuildPacketInputs` returns a
+  `manifest: BuildPacketManifestEntry[]` built in the **same** slot → artifact →
+  preferred-version loop as the evaluator's per-slot state, so the gate's
+  evidence and the manifest the user signs can never describe different
+  versions. `reconcileBuildPacketManifest` compares the pinned versions against
+  the current ones and labels each row `match` / `changed` / `added` /
+  `removed` / `unpinned`; any drift marks the approval **superseded** and the
+  CTA asks to re-approve. The approval is never rewritten to "catch up" — that
+  would silently re-sign work the user never saw. **One row is exempt from
+  version comparison:** the slot hosting the overlay
+  (`BUILD_PACKET_APPROVAL_HOST_SLOT` = `implementation_plan`). Recording the
+  approval appends a content-identical clone, so the plan's own preferred version
+  id moves as a *side effect of approving*; comparing it would mark every fresh
+  approval superseded on the next render. The host row needs no comparison —
+  the overlay living on that version IS the pin, and a regenerated plan yields a
+  version with no overlay, which reads back as "not approved".
+- **How the approval persists — a versioned user overlay, no new collection.**
+  `metadata.buildPacketApproval` on the implementation_plan ArtifactVersion,
+  listed in `OVERLAY_METADATA_KEYS` and written **only** through
+  `updateArtifactOverlay` (cross-cutting rule 12), never
+  `updateArtifactVersionMetadata`. `buildPacketApprovalPatch` merges from the
+  stored value so unknown keys survive, and re-approval is destructive under
+  `patchDestroysOverlayWork`, so it **appends** and the earlier sign-off stays
+  restorable. Because `artifactVersions` is already a persisted collection, the
+  approval travels through snapshots, sync, and the recovery bundle for free —
+  **no `ALL_PROJECT_COLLECTIONS` entry** (rule 6). It is deliberately **not**
+  the readiness commitment (`readinessCommitment.ts`), which approves the
+  product *reasoning*: reusing that would conflate the two evaluators §W6 keeps
+  apart, and it cannot pin artifact versions. Regenerating the plan starts a
+  fresh version with no approval — correct, since that is a different packet.
+- **Capability.** The approval respects one policy: `ArtifactWorkspace` gates
+  `onApprove` on `capabilities.canPersistWorkflowState`
+  (`useProjectCapabilities`), the store action re-checks through
+  `guardProjectStoreActions`, and the CTA renders disabled with a stated reason
+  in a read-only project. No raw demo-id check (rule 5).
+- **§W5's cross-cutting obligations card lives here**, passed in as
+  `obligations`, instead of floating above the plan as a sibling in
+  `ArtifactWorkspace` — next to the `cross_cutting` blocker it corresponds to,
+  so plan integrity has one home. Consequence, accepted: the **legacy markdown
+  fallback** (content `buildConsolidatedPlan` cannot parse) no longer shows the
+  obligations card, since it renders no Final Review. Stating a cross-cutting
+  verdict over content Synapse could not read as a plan would be a guess; the
+  §W6 gate still blocks on it either way.
 
 ### Artifact Dependency Graph (Project Map) — read-side integrity view
 
@@ -318,6 +476,55 @@ stale and why, and the safe update order. See
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/
   `mockup` into the Screens view since neither has its own sidebar row.
 
+### Build-packet readiness (is this packet implementable?)
+
+`src/lib/planning/buildPacketReadiness.ts` (`deriveBuildPacketReadiness`, pure +
+unit-tested) is the artifact-side readiness evaluator from
+[docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md)
+§W6. It answers **"is the implementation packet complete and current?"** — a
+*different* question from `derivePlanningReadiness`'s "is the product reasoning
+sound?". The authority model, the eight criteria, and the never-conflate rule
+live in [PLANNING_AND_DECISIONS.md](PLANNING_AND_DECISIONS.md); what matters
+here is how it sits on the workspace:
+
+- **Required slots are `buildPacketRequiredSlots()` = `visibleCoreSubtypes()` +
+  `mockup`** — deliberately the same set `ProjectWorkspace.assetsReady` gates on,
+  so unhiding/hiding a subtype moves both signals together and the gate can
+  never demand an output the pipeline does not produce. A slot is *present* when
+  it has a preferred version and is neither errored nor still generating;
+  presence unions the caller's slot state with the freshness engine's
+  `missing` / `error` / `generating` statuses, so a disagreement fails closed.
+- **It consumes the one freshness engine** — `useProjectFreshness` through
+  `src/hooks/useBuildPacketInputs.ts` — and reads **both `status` and
+  `impactedBy`**. That second read is load-bearing:
+  `evaluateDependencyGraph` short-circuits when an upstream snapshot is absent,
+  so a plan whose `user_flows` input is **missing or errored** stays
+  `up_to_date` and records the problem only in `impactedBy`. Never "fix" that in
+  the engine (one engine, one vocabulary — cross-cutting rule 9); read
+  `impactedBy`.
+- **Validation** comes from the per-version disposition
+  (`readArtifactValidationDisposition`): `needs_review` blocks, while an
+  `accepted_issue` — which carries the user's recorded rationale — is reported
+  as a non-blocking warning. Endpoint completeness comes from
+  `apiContractCompleteness` and blocks only for endpoints reachable from the
+  **first milestone**; a later-slice gap is a warning.
+- **Nothing about it gates rendering or generation.** It is a derived,
+  never-persisted read-side layer (rule 10) that *reports*. Exploratory output
+  generation stays available exactly as before.
+- **Workspace consumers.** The header outputs CTA no longer labels itself
+  "Build outputs" from the planning-readiness projection (the audited false
+  claim); it reads off the recorded commitment
+  (`displaysCurrentCommitment`), and its hover copy states the packet state
+  separately. `PlanningStateBar` renders an "Implementation packet" block with
+  its own "Packet checks" disclosure next to the "Product-reasoning checks"
+  one. The Implementation Plan page's **Final Review** surface (plan §W7 — see
+  "Final Review" above) is the plan-side authority: `ProjectWorkspace` computes
+  the packet **once** and passes it to both `PlanningStateBar` and
+  `ArtifactWorkspace` (`buildPacket` / `buildPacketManifest` /
+  `onNavigateBuildPacketTarget`), so the two surfaces never evaluate
+  independently. `PlanningStateBar` stays the *plan-stage* summary; Final Review
+  owns the CTA and the blocker list, and the Dependency Graph stays diagnostics.
+
 ### Implementation tasks (plan → tracked checklist)
 
 The Implementation Plan artifact converts into trackable build tasks.
@@ -334,9 +541,52 @@ call) from the plan's structured JSON or legacy markdown. `ConvertToTasksModal`
   the created issue refs to the matching persisted tasks.
 
 `TaskChecklist` (`src/components/tasks/`) renders above the Implementation Plan
-content when saved tasks exist: a progress bar (`done / total`), a status
-toggle per row cycling todo → in_progress → done, expandable acceptance
-criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
-button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
-`sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
-up in `deleteProject`.
+content when saved tasks exist: a progress bar, a status toggle per row,
+expandable acceptance criteria, and a link to any exported GitHub issue. The
+"Convert to Tasks" button becomes "Manage Tasks (N)" once tasks are saved.
+Tasks capture `sourceSpineVersionId` for future staleness hints. Persisted
+tasks are cleaned up in `deleteProject`.
+
+#### Task progress is SELF-REPORTED, and says so (plan §W8)
+
+Synapse ends at the plan + prompts handoff — it never runs a build, a test, or
+a command — so it holds **no evidence** that a task was implemented. Every
+progress state is something the user ticked, and the vocabulary says that out
+loud: **planned → started → implemented (self-reported)**.
+
+- **`src/lib/taskProgressLanguage.ts` is the single source of those words.**
+  `taskProgressCopy(status)` maps a *stored* value to `{ label, longLabel,
+  nextAction }`; `TASK_PROGRESS_SELF_REPORTED_NOTE` is the one line that states
+  Synapse does not verify execution. Don't inline a status label at a surface.
+- **Presentation only — the persisted vocabulary is unchanged.** `TaskStatus`
+  is still `todo | in_progress | done | blocked`, so older projects, snapshots,
+  sync, exports and the plan-markdown round-trip keep working; §W8 renamed
+  nothing on disk and migrated nothing. Mapping: `todo` → Planned,
+  `in_progress` → Started, `done` → **Implemented (self-reported)**, `blocked`
+  → Blocked (import-only; no UI writes it). An unrecognized stored value reads
+  as Planned — never as implemented (cross-cutting rule 3's spirit).
+- **Where it renders.** `TaskChecklist` (the only surface that writes progress):
+  the toggle's accessible name/tooltip is `"<longLabel> — click to
+  <nextAction>"`, the header count reads `"N of M marked implemented · K
+  started"`, the bar is `aria-label`led "Self-reported implementation
+  progress", and the note renders **once** under the bar. `MilestoneCard`
+  build-task rows (read-only reflections of either a converted `ProjectTask` or
+  a legacy `- [x]` markdown deliverable) name any non-planned state in a small
+  chip with `longLabel` as its `title`, and the milestone's tracked count is
+  suffixed `· self-reported`. **One line per surface, never a per-row banner or
+  a modal.**
+- **Build-packet readiness must never count it as evidence.**
+  `buildPacketReadiness.ts` (§W6) reads plan tasks for their *structure* only —
+  ids, titles, descriptions, `linkedArtifacts`, `dependencies`, and the
+  verification texts around them. It does not read a plan task's `status`, the
+  persisted `ProjectTask.status`, or the `planProgress` overlay, and
+  `BuildPacketReadinessInput` deliberately has no field for them; otherwise a
+  project could tick its way to a green packet. Locked by
+  `buildPacketReadiness.test.ts` → "self-reported task progress is never
+  evidence" (flipping every stored status must not change the evaluation).
+- **Deliberately not built:** CI/command evidence ingestion. §6 of
+  docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md defers it (it needs an evidence
+  transport, a trust model, and staleness rules); honest labelling removes the
+  misleading signal at a fraction of the cost. Do not add a verified-state
+  lifecycle here without that plan — §W8 exists partly to hold the line against
+  Synapse drifting into a project-management tool.

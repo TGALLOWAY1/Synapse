@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ImplementationPlanRenderer } from '../renderers/ImplementationPlanRenderer';
-import type { StructuredImplementationPlan } from '../../types';
+import type { ProjectTask, StructuredImplementationPlan, TaskStatus } from '../../types';
 import {
     implementationPlanAnchor,
     type ImplementationPlanNavigationTarget,
@@ -88,17 +88,24 @@ Set up the repository foundation and initialize the project.
 describe('ImplementationPlanRenderer (consolidated view)', () => {
     it('renders the header and tabbed consolidated view for a native plan', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        // Tabs (no Validation tab — Synapse ends at plan + prompts handoff).
+        // Tabs. No Validation tab (Synapse ends at plan + prompts handoff) and
+        // no Coverage tab — plan §W7 folded it into Final Review.
         expect(screen.getByRole('button', { name: /^Build Brief$/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Roadmap/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Prompts/ })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /Coverage/ })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Validation/ })).not.toBeInTheDocument();
-        // Header: readiness, scope counts (no gate count), primary CTA.
+        expect(screen.queryByRole('button', { name: /^Coverage$/ })).not.toBeInTheDocument();
+        // Identity strip: plan-shape readiness + scope counts (no gate count).
         expect(screen.getByText('Plan complete')).toBeInTheDocument();
         expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack/)).toBeInTheDocument();
         expect(screen.queryByText(/quality gate/)).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
+        // §W7: the header no longer owns a copy action; the plan surface has
+        // exactly one primary, and with no build-packet context it is the
+        // honest "readiness unavailable" state — never a copy CTA.
+        expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
+        const primary = screen.getByTestId('final-review-primary');
+        expect(primary).toHaveAttribute('data-cta-state', 'unavailable');
+        expect(primary).toBeDisabled();
         // Overview content: strategy, stack, risks with handling.
         expect(screen.getByText('Walking skeleton first.')).toBeInTheDocument();
         expect(screen.getByText('React + Vite')).toBeInTheDocument();
@@ -123,7 +130,7 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.queryByText('Lint passes clean')).not.toBeInTheDocument();
         expect(screen.getByText('Done when')).toBeInTheDocument();
         expect(screen.getByText('CI green on main')).toBeInTheDocument();
-        expect(screen.getByText(/Landing Page/)).toBeInTheDocument();
+        expect(screen.getAllByText(/Landing Page/).length).toBeGreaterThan(0);
         // Plan tasks are labeled as planned until converted.
         expect(screen.getByText(/Planned steps — use Convert to tasks/)).toBeInTheDocument();
     });
@@ -183,17 +190,20 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
     it('marks every pack copied after "Copy all prompt packs" so next-prompt advances', async () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
         fireEvent.click(screen.getByRole('button', { name: /Prompts/ }));
+        expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
         fireEvent.click(screen.getAllByRole('button', { name: /Copy all prompt packs/ })[0]);
         await vi.waitFor(() => {
-            // The only pack is now copied → the header CTA flips off "next".
-            expect(screen.getByText(/All prompt packs copied/)).toBeInTheDocument();
+            // The only pack is now copied → the next-prompt pointer advances off
+            // the end, so the per-tab "next" affordance disappears.
+            expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
         });
-        expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
     });
 
-    it('renders the coverage matrix with explicit cell states', () => {
+    it('renders the coverage matrix inside Final Review with explicit cell states', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
-        fireEvent.click(screen.getByRole('button', { name: /Coverage/ }));
+        // §W7: the full traceability matrix survives as an expandable detail on
+        // the Final Review surface rather than a top-level Coverage tab.
+        fireEvent.click(screen.getByTestId('final-review-coverage-toggle'));
         // Desktop table + mobile cards both render (visibility is CSS-only in
         // jsdom), so covered items appear at least once.
         expect(screen.getAllByText(/Landing Page/).length).toBeGreaterThan(0);
@@ -243,5 +253,85 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         render(<ImplementationPlanRenderer content={malformed} />);
         // Falls through to plain markdown rendering of the body.
         expect(screen.queryByRole('button', { name: /Coverage/ })).not.toBeInTheDocument();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Plan §W8 — a milestone's build-task rows carry SELF-REPORTED progress, from
+// either a converted ProjectTask the user ticked or a legacy `- [x]` markdown
+// deliverable. Neither is a Synapse verification, so the row names the state
+// instead of leaving a bare green check to imply one.
+// ---------------------------------------------------------------------------
+
+describe('ImplementationPlanRenderer — self-reported task progress on milestone rows', () => {
+    const savedTask = (id: string, status: TaskStatus): ProjectTask => ({
+        id,
+        projectId: 'p1',
+        sourceArtifactId: 'artifact-plan',
+        title: `Saved ${id}`,
+        summary: 'summary',
+        acceptanceCriteria: [],
+        status,
+        createdAt: 1,
+        updatedAt: 1,
+    });
+
+    const openRoadmap = () => fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }));
+
+    it('names a converted task marked implemented, and says the milestone count is self-reported', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'done')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByText(/1 of 1 tracked in Implementation progress · self-reported/)).toBeInTheDocument();
+        const chip = screen.getByTitle('Implemented (self-reported)');
+        expect(chip).toHaveTextContent('implemented');
+    });
+
+    it('names a converted task marked started', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'in_progress')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByTitle('Started')).toHaveTextContent('started');
+    });
+
+    it('keeps the neutral "tracked" chip for a converted task with no progress yet', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                savedTasks={[savedTask('t1', 'todo')]}
+            />,
+        );
+        openRoadmap();
+
+        expect(screen.getByTitle('Tracked in Implementation progress')).toHaveTextContent('tracked');
+        expect(screen.queryByText('implemented')).not.toBeInTheDocument();
+    });
+
+    it('shows no progress chip for an unconverted plan task', () => {
+        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
+        openRoadmap();
+
+        expect(screen.getByText('Initialize Vite app')).toBeInTheDocument();
+        expect(screen.queryByTitle(/Implemented|Started|Tracked/)).not.toBeInTheDocument();
+        expect(screen.getByText(/Planned steps — use Convert to tasks/)).toBeInTheDocument();
+    });
+
+    it('labels a legacy checked markdown deliverable as self-reported, not as a bare check', () => {
+        const checkedLegacy = LEGACY_MARKDOWN.replace('- [ ] Initialize repository', '- [x] Initialize repository');
+        render(<ImplementationPlanRenderer content={checkedLegacy} />);
+        openRoadmap();
+
+        expect(screen.getByText('Initialize repository')).toBeInTheDocument();
+        expect(screen.getByTitle('Implemented (self-reported)')).toHaveTextContent('implemented');
     });
 });

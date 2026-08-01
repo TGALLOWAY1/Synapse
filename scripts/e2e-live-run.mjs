@@ -569,11 +569,12 @@ const VIEW_SLUGS = [
     'data-model', 'implementation-plan', 'dependency-graph', 'history',
 ];
 const IMPLEMENTATION_PLAN_TABS = [
-    // Source of truth: ConsolidatedPlanView.tsx section nav labels.
+    // Source of truth: ConsolidatedPlanView.tsx section nav labels. The old
+    // Coverage tab was folded into the Final Review card above the tabs (plan
+    // §W7) — its matrix is an expandable detail there, not a tab.
     { slug: 'build-brief', label: 'Build Brief' },
     { slug: 'roadmap', label: 'Roadmap' },
     { slug: 'prompts', label: 'Prompts' },
-    { slug: 'coverage', label: 'Coverage' },
 ];
 const SCREEN_DETAIL_TABS = ['Overview', 'Flow', 'Mockups'];
 const MAX_FLOWS_CAPTURED = 3;

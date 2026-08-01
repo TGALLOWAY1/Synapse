@@ -43,6 +43,7 @@
 | 🔌 | **Everything stays connected** | Each artifact remembers the spec it came from. When the PRD moves, **Sync outputs** offers a quick dependency-safe refresh or a careful per-change review, while exact version guards prevent stale plans from applying. |
 | 🧭 | **One honest checkpoint** | Generation and export summarize the current critique, validation, alignment, and accepted-risk state in one place. Exports stay available and carry that context into the handoff. |
 | 🛡️ | **A safety gate up front** | Every idea is checked before a single word is generated, and the check fails closed — a blocked idea can't drive any downstream artifact. |
+| 🚦 | **One Final Review before you build** | The implementation plan opens on a **Final Review** card with exactly one action, and it tells you the truth about what's next: *Resolve 3 blockers* (each one named, with what it costs you and a link straight to the fix), then *Approve build packet*, then *Copy first implementation prompt*. Approving pins the exact version of every artifact the sign-off covers — regenerate one and Synapse says so instead of quietly letting the approval stand. |
 | 🤝 | **Hand off to a coding agent** | One click bundles the PRD and build artifacts into a package ready for Claude Code or Cursor — closing the loop from idea to implementation. |
 
 Built to work everywhere: responsive layouts, touch-aware highlight-to-refine, and swipe navigation mean the full workflow runs on a phone, not just a desktop. Signed-in projects sync across devices; the interactive tour runs with no sign-up and no API key.
@@ -79,7 +80,10 @@ The Decision Center queues the assumptions and choices that actually move the pl
 <img width="100%" alt="Decision Center queue with a selected assumption and its impact" src="public/screenshots/app-decisions.png" />
 
 **6 · Fan out into every asset** 🎨
-Generate the design system, user flows, screens, data model, and implementation plan from the same source. Mockups take one more deliberate step: review the flows and approve which screens are worth rendering, then Synapse generates images only for the screens you picked — so the visuals follow an approved flow instead of appearing unbidden. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
+Generate the design system, user flows, screens, data model, and implementation plan from the same source. Mockups take one more deliberate step: review the flows and approve which screens are worth rendering, then Synapse generates images only for the screens you picked — so the visuals follow an approved flow instead of appearing unbidden. The Screens view also opens up the **reusable component inventory** your mockups are composed from — every component's props, accessibility contract, and the screens that use it — so nothing shaping the UI stays invisible. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
+
+**7 · Pass Final Review, then start building** 🚦
+The implementation plan's **Final Review** is the last gate, and it offers a single action at a time — *Resolve N blockers* while anything is missing, stale, uncovered, or uncommitted; *Approve build packet* once nothing is; *Copy first implementation prompt* only after you've approved. Copy plan, review prompts, and convert to tasks are always there, just never dressed up as approval. The approval records the exact artifact versions it covers, so if you regenerate the data model afterwards the packet reads *changed since approval* rather than staying green.
 
 <img width="100%" alt="Explore workspace showing generated artifacts and the design system" src="public/screenshots/app-artifacts.png" />
 

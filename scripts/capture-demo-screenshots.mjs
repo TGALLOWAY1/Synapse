@@ -124,11 +124,12 @@ const ARTIFACTS = [
             navLabel: 'Implementation plan sections',
             desktopOnly: true,
             // Labels track ConsolidatedPlanView's section nav — keep in sync.
+            // Coverage is no longer a tab: plan §W7 folded it into the Final
+            // Review card that renders above the tab strip.
             items: [
                 { slug: 'build-brief', label: 'Build Brief' },
                 { slug: 'roadmap', label: 'Roadmap' },
                 { slug: 'prompts', label: 'Prompts' },
-                { slug: 'coverage', label: 'Coverage' },
             ],
         },
     },

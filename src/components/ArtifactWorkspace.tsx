@@ -51,6 +51,7 @@ import {
     buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
+import { componentJoinScreensFromIndex } from '../lib/componentExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
 import { resolveDataModelForTrace, resolvePlanForTrace } from '../lib/screenArtifactTraceBridge';
 import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../lib/screenReviewWorkflow';
@@ -66,6 +67,7 @@ import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
 import type { ParsedFlow } from './renderers/userFlows/types';
 import { ScreenListView } from './experience/ScreenListView';
+import { ScreenComponentsSection } from './experience/ScreenComponentsSection';
 import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import type { ScreenNotePlanningRequest } from './experience/ScreenReviewNotes';
@@ -87,9 +89,23 @@ import type {
 } from '../lib/planning/planningNavigation';
 import {
     buildScreenNotePlanningReturnTarget,
+    flagCrossCuttingObligationConcern,
     flagScreenNotePlanningConcern,
     screenNotePlanningSourceScopeKey,
 } from '../lib/planning/flagToPlan';
+import { deriveCrossCuttingObligations } from '../lib/planning/crossCuttingObligations';
+import type { CrossCuttingObligationStatus } from '../lib/planning/crossCuttingObligations';
+import type {
+    BuildPacketActionTarget,
+    BuildPacketReadiness,
+} from '../lib/planning/buildPacketReadiness';
+import {
+    BUILD_PACKET_APPROVAL_KEY,
+    buildPacketApprovalPatch,
+    readBuildPacketApproval,
+    type BuildPacketManifestEntry,
+} from '../lib/planning/buildPacketApproval';
+import type { PlanFinalReviewContext } from './renderers/implementationPlan/FinalReviewCard';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import {
@@ -143,6 +159,16 @@ interface ArtifactWorkspaceProps {
     buildBlocked?: boolean;
     blockingPlanningItems?: Array<{ recordId: string; title: string }>;
     onResolveBuildBlockers?: () => void;
+    /**
+     * §W6's build-packet evaluation, computed once by `ProjectWorkspace` and
+     * passed down so the Final Review surface (§W7) and the planning state bar
+     * report the SAME packet — never a second evaluation.
+     */
+    buildPacket?: BuildPacketReadiness;
+    /** The current artifact-version manifest from `useBuildPacketInputs`. */
+    buildPacketManifest?: BuildPacketManifestEntry[];
+    /** Routes a build-packet blocker's action target (readiness router + slots). */
+    onNavigateBuildPacketTarget?: (target: BuildPacketActionTarget) => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -183,8 +209,11 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
         // tabs). The screen_inventory and mockup artifacts still generate and
         // persist unchanged — renderMain's legacy branches remain internally
         // reachable as fallbacks; they just no longer render sidebar rows.
-        // 'component_inventory' also still generates (mockups consume it) but is
-        // a hidden subtype — see HIDDEN_ARTIFACT_SUBTYPES / docs/backlog §6.
+        // 'component_inventory' is deliberately absent too: since W4 it is a
+        // reviewable (NOT hidden) artifact, rendered as the **Components
+        // section inside the Screens view** (ScreenComponentsSection) because
+        // it is a bridge artifact and a separate row would re-fragment the same
+        // surface. Adding it here would give it a sidebar row — don't.
         items: ['user_flows', 'screens'],
     },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
@@ -198,6 +227,19 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
     // slot (staleness, impact, safe update order) — not an artifact itself.
     { id: 'map', title: 'Project Map', icon: Waypoints, items: ['dependency_graph'] },
 ];
+
+// Artifact slots that render INSIDE the Screens experience instead of getting
+// their own sidebar row: the screen breakdown, the mockups, and (since W4) the
+// component inventory — surfaced as the Screens view's Components section
+// (`ScreenComponentsSection`). Any deep link / graph node / checkpoint
+// destination naming one of these opens the Screens view. NOTE: this is a
+// *layout* choice, distinct from HIDDEN_ARTIFACT_SUBTYPES (a visibility
+// contract) — none of these three is hidden.
+const SCREENS_HOSTED_SLOTS: ReadonlySet<WorkspaceSelection> = new Set<WorkspaceSelection>([
+    'screen_inventory',
+    'mockup',
+    'component_inventory',
+]);
 
 function buildSlotMetas(): SlotMeta[] {
     const base: Record<WorkspaceSelection, SlotMeta> = {
@@ -221,8 +263,11 @@ function buildSlotMetas(): SlotMeta[] {
     }
     // Materialize in the group order so the right rail / counts / mobile
     // header iterate in the same order the sidebar shows. Hidden artifact
-    // subtypes (generated for downstream use but not surfaced) are dropped here
-    // so they render no row anywhere in the workspace.
+    // subtypes (generated for downstream use but not surfaced anywhere) are
+    // dropped here so they render no row in the workspace. The set is currently
+    // empty — a subtype with no row today is simply absent from
+    // ARTIFACT_GROUPS.items (see SCREENS_HOSTED_SLOTS), which is a different
+    // thing from hidden.
     return ARTIFACT_GROUPS.flatMap(group =>
         group.items
             .filter(key =>
@@ -316,7 +361,7 @@ export function ArtifactWorkspace({
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
     initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
     onOpenPlanningRecord, onNavigatePlanning, buildBlocked, blockingPlanningItems,
-    onResolveBuildBlockers,
+    onResolveBuildBlockers, buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
 }: ArtifactWorkspaceProps) {
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
@@ -354,7 +399,10 @@ export function ArtifactWorkspace({
 
     useEffect(() => {
         if (!initialSelection) return;
-        const target: WorkspaceSelection = initialSelection === 'screen_inventory' || initialSelection === 'mockup'
+        // screen_inventory, mockup, and component_inventory have no sidebar row
+        // of their own — all three are surfaced inside the Screens experience,
+        // so any deep link to them opens that view.
+        const target: WorkspaceSelection = SCREENS_HOSTED_SLOTS.has(initialSelection)
             ? 'screens'
             : initialSelection;
         if (target === 'screens' || slotMetas.some(meta => meta.key === target)) {
@@ -548,6 +596,24 @@ export function ArtifactWorkspace({
         [implPlanPreferred],
     );
 
+    // Conditional cross-cutting obligations (plan §W5): whether this project's
+    // PRD / safety context / data model oblige the plan to carry a Security &
+    // Privacy section and/or a Measurement section, and whether the plan
+    // discharges them. Pure + derived on read — nothing persisted — and
+    // advisory here; the build-packet gate (§W6) consumes the same report.
+    const spineSafetyReview = useProjectStore(
+        s => s.spineVersions[projectId]?.find(v => v.id === spineVersionId)?.safetyReview,
+    );
+    const planObligations = useMemo(
+        () => deriveCrossCuttingObligations({
+            prd: structuredPRD,
+            safety: spineSafetyReview,
+            dataModel: traceDataModel,
+            plan: tracePlan,
+        }),
+        [structuredPRD, spineSafetyReview, traceDataModel, tracePlan],
+    );
+
     // Effective mockup payload: stored screens + the version's user-added
     // extraScreens overlay (metadata — keeps the version id, so existing
     // per-screen images stay keyed correctly).
@@ -581,6 +647,19 @@ export function ArtifactWorkspace({
             readScreenLinks(mockupPreferred?.metadata),
         );
     }, [invPreferred, parsedFlows, mockupPayload, mockupPreferred]);
+
+    // Components section of the Screens experience (W4). The component_inventory
+    // artifact has no sidebar row of its own — it surfaces here, joined to the
+    // canonical screens by the derived `componentExperience` layer (never a
+    // second screen join). Nothing new is persisted.
+    const componentInventoryArtifact = coreArtifacts.find(a => a.subtype === 'component_inventory');
+    const componentInventoryPreferred = componentInventoryArtifact
+        ? getPreferredVersion(projectId, componentInventoryArtifact.id)
+        : undefined;
+    const componentJoinScreens = useMemo(
+        () => componentJoinScreensFromIndex(screenIndex),
+        [screenIndex],
+    );
 
     // Derived per-screen readiness (user-set status wins via the edit overlay)
     // + the artifact-level coverage rollup for the Screens list panel. Pure &
@@ -1028,10 +1107,10 @@ export function ArtifactWorkspace({
     };
 
     // Dependency Graph "Open artifact" → the workspace view that hosts that
-    // node. screen_inventory and mockup have no rows of their own anymore —
-    // both live inside the Screens experience view.
+    // node. screen_inventory, mockup, and component_inventory have no rows of
+    // their own — all three live inside the Screens experience view.
     const handleOpenGraphNode = (nodeId: DependencyNodeId) => {
-        if (nodeId === 'screen_inventory' || nodeId === 'mockup') {
+        if (SCREENS_HOSTED_SLOTS.has(nodeId as WorkspaceSelection)) {
             setSelected('screens');
         } else if (nodeId === 'prd' || slotMetas.some(s => s.key === nodeId)) {
             setSelected(nodeId as WorkspaceSelection);
@@ -1640,6 +1719,22 @@ export function ArtifactWorkspace({
                                 : undefined
                         }
                     />
+                    {/* W4: the Components section of the Screens experience —
+                        component_inventory is reviewable here rather than as a
+                        new top-level sidebar row, and this is the only place its
+                        slot status/retry is reachable. */}
+                    <ScreenComponentsSection
+                        content={componentInventoryPreferred?.content}
+                        screens={componentJoinScreens}
+                        status={slotStatusFor('component_inventory')}
+                        errorMessage={slotErrorFor('component_inventory')?.message}
+                        onRetry={
+                            capabilities.canGenerateArtifacts
+                                ? () => handleRetrySlot('component_inventory')
+                                : undefined
+                        }
+                        onNavigateToScreen={handleNavigateToScreen}
+                    />
                 </div>
             );
         }
@@ -1919,6 +2014,80 @@ export function ArtifactWorkspace({
                     .filter((label): label is string => Boolean(label));
             })()
             : undefined;
+        // §W7 Final Review: the plan's ONE decision surface. The build-packet
+        // evaluation and the version manifest both arrive from ProjectWorkspace
+        // (one evaluation, one slot→version resolution — `useBuildPacketInputs`),
+        // so the blocker list, the Dependency Graph, and the manifest can never
+        // describe different versions.
+        //
+        // APPROVAL PERSISTENCE: a user overlay on THIS plan version's metadata,
+        // written only through `updateArtifactOverlay` (cross-cutting rule 12) and
+        // capability-gated exactly like the plan-progress overlay above. No new
+        // persisted collection (rule 6) — `artifactVersions` already travels
+        // through snapshots, sync, and the recovery bundle.
+        const planPrdVersionLabel = subtype === 'implementation_plan'
+            ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
+            : undefined;
+        const planFinalReview: PlanFinalReviewContext | undefined = subtype === 'implementation_plan'
+            ? {
+                packet: buildPacket,
+                manifest: buildPacketManifest,
+                approval: readBuildPacketApproval(preferred.metadata),
+                canApprove: capabilities.canPersistWorkflowState,
+                obligations: planObligations,
+                spineVersionId,
+                ...(onNavigateBuildPacketTarget ? { onNavigateTarget: onNavigateBuildPacketTarget } : {}),
+                // §W5 flag → Decision Center. Capability-gated exactly like
+                // `onApprove` (rule 5) AND dependent on the workspace being
+                // given a planning-record opener, so a read-only/demo plan
+                // renders the flag with no write action. Nothing is created
+                // until the user clicks: `flagCrossCuttingObligationConcern`
+                // runs in the handler, never on render (rule 13).
+                ...(capabilities.canPersistWorkflowState && onOpenPlanningRecord ? {
+                    onAddressObligation: (status: CrossCuttingObligationStatus) => {
+                        const result = flagCrossCuttingObligationConcern(
+                            {
+                                projectId,
+                                artifactId: artifact.id,
+                                artifactVersionId: preferred.id,
+                                spineVersionId,
+                                status,
+                            },
+                            useProjectStore.getState().flagPlanningConcern,
+                        );
+                        if (result.status !== 'rejected') {
+                            onOpenPlanningRecord(result.planningRecordId, {
+                                destination: {
+                                    kind: 'artifact',
+                                    artifactId: artifact.id,
+                                    nodeId: 'implementation_plan',
+                                },
+                                label: `Back to ${artifact.title}`,
+                            });
+                        }
+                        return result;
+                    },
+                } : {}),
+                ...(capabilities.canPersistWorkflowState ? {
+                    onApprove: () => {
+                        updateArtifactOverlay(
+                            projectId,
+                            artifact.id,
+                            {
+                                [BUILD_PACKET_APPROVAL_KEY]: buildPacketApprovalPatch(preferred.metadata, {
+                                    manifest: buildPacketManifest ?? [],
+                                    approvedAt: Date.now(),
+                                    spineVersionId,
+                                    ...(planPrdVersionLabel ? { prdVersionLabel: planPrdVersionLabel } : {}),
+                                    acknowledgedWarningIds: (buildPacket?.warnings ?? []).map(w => w.id),
+                                }),
+                            },
+                            { historyDescription: 'Build packet approved' },
+                        );
+                    },
+                } : {}),
+            }
+            : undefined;
         const validationDisposition = readArtifactValidationDisposition(preferred.metadata);
         // Small advisory note when a clean artifact was auto-enriched with PRD
         // traceability (repair succeeded → no blocking banner, just a note).
@@ -1947,6 +2116,10 @@ export function ArtifactWorkspace({
                         onChangeDirection={() => setShowDirectionPicker(true)}
                     />
                 )}
+                {/* §W5's cross-cutting obligations card no longer renders here as
+                    a sibling: §W7 folds it INTO Final Review, next to the
+                    `cross_cutting` blocker it corresponds to, so plan integrity
+                    has one home. It is passed through `planFinalReview`. */}
                 {subtype === 'implementation_plan' && (
                     <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} readOnly={!capabilities.canPersistWorkflowState} />
                 )}
@@ -1997,13 +2170,12 @@ export function ArtifactWorkspace({
                         onConvertToTasks={handleConvertToTasks}
                         onUpdatePlanProgress={handleUpdatePlanProgress}
                         sourceVersions={planSourceVersions}
+                        planFinalReview={planFinalReview}
                         prdVersionLabel={
                             // Data Model shows provenance once at the page level
                             // (the version-controls strip above), so only the plan
                             // consumes this in-content label.
-                            subtype === 'implementation_plan'
-                                ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
-                                : undefined
+                            planPrdVersionLabel
                         }
                         staleness={
                             subtype === 'data_model' || subtype === 'implementation_plan'

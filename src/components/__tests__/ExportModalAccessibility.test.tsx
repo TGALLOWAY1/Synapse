@@ -6,8 +6,10 @@ import { ExportModal } from '../ExportModal';
 
 const checkpointSummary: WorkflowCheckpointSummary = {
     context: 'export',
+    tone: 'clean',
     headline: 'Export checkpoint — no generated outputs',
     supportingText: 'The current plan remains the source of truth.',
+    detailsLabel: 'Details',
     planningVerdict: { kind: 'working_plan', label: 'Working plan' },
     counts: {
         totalArtifacts: 0,

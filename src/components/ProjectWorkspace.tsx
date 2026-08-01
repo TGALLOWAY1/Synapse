@@ -31,7 +31,13 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
-import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
+import {
+    CORE_ARTIFACT_DISPLAY_ORDER,
+    getArtifactMeta,
+    isHiddenArtifactSubtype,
+    isRetiredArtifactSubtype,
+    visibleCoreSubtypes,
+} from '../lib/coreArtifactPipeline';
 import { HistoryPanel } from './HistoryPanel';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -72,6 +78,12 @@ import {
     projectDecision,
     type PlanningAttentionItem,
 } from '../lib/planning';
+import {
+    deriveBuildPacketReadiness,
+    type BuildPacketActionTarget,
+} from '../lib/planning/buildPacketReadiness';
+import { useBuildPacketInputs } from '../hooks/useBuildPacketInputs';
+import { useGenerationCheckpointDismissal } from '../hooks/useGenerationCheckpointDismissal';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { PreBuildCheckpointCard } from './planning/PreBuildCheckpointCard';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
@@ -79,7 +91,11 @@ import { AssumptionArrivalCard } from './planning/AssumptionArrivalCard';
 import { useDecisionImpactActions } from './review/useDecisionImpactActions';
 import { useBatchVerdictCoordinator } from './review/useBatchVerdictCoordinator';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
-import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
+import {
+    buildReadinessCheckpointView,
+    isReadinessActionTarget,
+    readinessNavigationDestination,
+} from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 import {
@@ -355,7 +371,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // active to settled; a settled job encountered on mount is intentionally
     // ignored.
     const [completedGenerationJobKey, setCompletedGenerationJobKey] = useState<string>();
-    const [dismissedGenerationJobKey, setDismissedGenerationJobKey] = useState<string>();
+    // Dismissal is remembered per generation-job key in localStorage (a UI
+    // preference, not project state) so closing the summary sticks across a
+    // remount instead of resurfacing on the next visit.
+    const generationCheckpointDismissal = useGenerationCheckpointDismissal(projectId);
     const previousAssetJobRef = useRef<{ key?: string; active: boolean }>({ active: false });
     const assetJobKey = assetJob
         ? `${assetJob.spineVersionId}:${assetJob.startedAt}`
@@ -703,6 +722,13 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         });
     }, [projectId, viewedSpineId, earlyDesignSpine, earlyDesignProject]);
 
+    // Store-derived half of the build-packet readiness input (plan §W6): per-slot
+    // artifact state, the ONE freshness evaluation, the resolved data
+    // model/endpoints, and the consolidated plan. Must be read here — before the
+    // guard below — because it is a hook; the pure evaluator runs further down,
+    // once the PRD, safety context, and committed readiness checkpoint are known.
+    const buildPacketInputs = useBuildPacketInputs(projectId ?? '');
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -938,6 +964,35 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     };
     const planningReadiness = derivePlanningReadiness(planningReadinessInput);
+    // The SECOND, separate readiness question (plan §W6): "is the implementation
+    // packet complete and current?" — never the same question as
+    // `planningReadiness` ("is the product reasoning sound?"). The two states are
+    // surfaced separately and must never be conflated in copy.
+    //
+    // Approval authority: the committed criterion reads the CURRENT COMMITTED
+    // readiness review (`currentCommittedReadiness`, already filtered by
+    // `commitmentRemainsCurrent(...)` + `activeCommit`) — never
+    // `planningReadiness.isReadyToBuild`, which is a projection recomputed every
+    // render. That projection is passed only so the blocker copy can say whether a
+    // commit action is currently on offer, and `isCommitmentUnverifiable` fails
+    // the criterion closed.
+    const buildPacketReadiness = deriveBuildPacketReadiness({
+        ...buildPacketInputs,
+        prd: activeSpine?.structuredPRD,
+        safety: activeSpine?.safetyReview,
+        committedReadiness: currentCommittedReadiness
+            ? {
+                reviewId: currentCommittedReadiness.review.id,
+                spineVersionId: currentCommittedReadiness.review.spineVersionId,
+                conclusion: currentCommittedReadiness.review.conclusion,
+                committedAt: currentCommittedReadiness.commitment.activeCommit!.at,
+                acceptedRiskRationale: currentCommittedReadiness.commitment.authorization?.rationale,
+            }
+            : null,
+        commitmentUnverifiable: isCommitmentUnverifiable,
+        planningProjectionReadyToBuild: planningReadiness.isReadyToBuild,
+        currentSpineVersionId: activeSpine?.id,
+    });
     const materialityGateSnapshot = planningSourceSpine
         ? deriveMaterialityGateSnapshot({
             currentSpineVersionId: planningSourceSpine.id,
@@ -1095,9 +1150,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         critiqueIssues: checkpointCritiqueIssues,
     });
     const showGenerationCheckpoint = pipelineStage === 'workspace'
+        && !!assetJobKey
         && assetJob?.spineVersionId === activeSpine?.id
         && assetJobKey === completedGenerationJobKey
-        && assetJobKey !== dismissedGenerationJobKey;
+        && !generationCheckpointDismissal.isDismissed(assetJobKey);
     const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
     const recordsForIds = (ids: string[]) => {
         const requested = new Set(ids);
@@ -1406,27 +1462,43 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // output-completion signal only; it is intentionally unrelated to planning
     // readiness.
     const assetsReady = !!activeSpine?.structuredPRD && (() => {
-        // Hidden artifacts (generated for downstream use but not surfaced in the
-        // assets list) must not gate readiness — the user has no row to see or
-        // retry them, so a hidden slot erroring would otherwise leave the
-        // output transition stuck reporting "outputs are being created".
-        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
-            // Retired subtypes (prompt_pack) no longer generate at all, so
-            // they must not gate readiness either.
-            .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
-            .every(meta =>
-                getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
-            );
+        // The gating set is `visibleCoreSubtypes()` (coreArtifactPipeline.ts):
+        // hidden artifacts must never gate this signal — the user would have no
+        // surface to see or retry them, so a hidden slot erroring would strand
+        // the output transition on "outputs are being created" — and retired
+        // subtypes (prompt_pack) no longer generate at all.
+        //
+        // Since W4 that set INCLUDES `component_inventory`, so an errored
+        // component inventory now legitimately holds this signal back. That is
+        // intentional: it feeds every mockup, and its status + Retry are visible
+        // in the Components section of the Screens experience.
+        const gatingSubtypes = visibleCoreSubtypes();
+        const coreReady = gatingSubtypes.every(subtype =>
+            getArtifacts(projectId, 'core_artifact').some(a => a.subtype === subtype && a.currentVersionId),
+        );
         const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
         return coreReady && mockupReady;
     })();
 
     // Route to outputs. Visible as soon as a safe structured PRD exists —
     // commitment is not required, so users always see the way to their design
-    // assets (the label reads "Explore" until the plan is ready to build).
+    // assets (the label reads "Explore" until the plan has been committed).
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
+    // Honest hover copy for the outputs CTA. The label states the action; this
+    // states the two readiness facts separately — whether the reasoning is
+    // committed, and (once outputs exist) whether the implementation packet is
+    // complete. Neither is derived from the other.
+    const assetsOutputsCtaTitle = assetsBuilding
+        ? 'Outputs are being generated from this plan'
+        : assetsReady
+            ? buildPacketReadiness.isPacketComplete
+                ? 'Review outputs — the implementation packet is complete and current'
+                : `Review outputs — ${buildPacketReadiness.blockers.length} implementation ${buildPacketReadiness.blockers.length === 1 ? 'blocker' : 'blockers'} remain in the packet`
+            : displaysCurrentCommitment
+                ? 'Generate outputs from the committed plan'
+                : 'Generate exploratory outputs from this working plan — committing the plan comes first';
     // `structuredPRD` turns truthy after the FIRST section streams in, so this
     // pill used to appear mid-generation and invite the user to build outputs
     // from a half-written plan. Gate it on the run being settled.
@@ -1692,6 +1764,28 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         });
     };
 
+    // §W7: route a build-packet blocker's action target. `BuildPacketActionTarget`
+    // is `ReadinessActionTarget` plus an artifact SLOT (which may have no artifact
+    // id yet) and the readiness checkpoint — so everything the readiness router
+    // already handles is DELEGATED to it. No second router.
+    const navigateBuildPacketTarget = (target: BuildPacketActionTarget) => {
+        if (isReadinessActionTarget(target)) return navigateReadinessTarget(target);
+        if (target.kind === 'readiness_commitment') return openCurrentReadinessCheckpoint();
+        setFinalizeAutoOpen(false);
+        setWorkspaceInitialNode(target.nodeId);
+        setWorkspaceInitialArtifactId(target.artifactId);
+        setWorkspaceInitialUpdatePlanId(undefined);
+        setWorkspaceInitialUpdatePlanItemId(undefined);
+        writePlanningIntent({
+            destination: {
+                kind: 'artifact',
+                nodeId: target.nodeId,
+                ...(target.artifactId ? { artifactId: target.artifactId } : {}),
+            },
+        });
+        setPipelineStage('workspace');
+    };
+
     const handleReadinessConcern = (concernId: string) => {
         const concern = selectedReadinessReview?.concerns.find(item => item.id === concernId);
         if (concern) navigateReadinessTarget(concern.actionTarget, concernId);
@@ -1857,13 +1951,22 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         <button
                             onClick={assetsReady ? handleOpenAssets : handleGenerateAssets}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
-                            title="Generate or review outputs from this plan"
+                            title={assetsOutputsCtaTitle}
                         >
                             {assetsBuilding
                                 ? <Loader2 size={14} className="animate-spin" />
                                 : <ArrowRight size={14} />}
                             <span className="hidden sm:inline">
-                                {assetsBuilding ? 'Building outputs…' : assetsReady ? 'Review outputs' : planningReadiness.isReadyToBuild ? 'Build outputs' : 'Explore outputs'}
+                                {/* This label must never claim build readiness from the
+                                    planning-readiness projection — that answers "is the product
+                                    reasoning sound?", not "is the implementation packet
+                                    complete?" (plan §W6). It reads off the recorded commitment
+                                    instead; packet completeness is a separate state, surfaced
+                                    separately (PlanningStateBar + the title above). */}
+                                {assetsBuilding
+                                    ? 'Building outputs…'
+                                    : assetsReady ? 'Review outputs'
+                                        : displaysCurrentCommitment ? 'Build outputs' : 'Explore outputs'}
                             </span>
                         </button>
                     )}
@@ -2224,12 +2327,15 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             </div>
                         )}
                         {showGenerationCheckpoint && (
-                            <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+                            // py-2: the card is compact by default (one line for a
+                            // successful advisory-only run), so the frame around it
+                            // must not re-add the height the card just gave back.
+                            <div className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-2">
                                 <div className="mx-auto max-w-6xl">
                                     <WorkflowCheckpointSummaryCard
                                         summary={generationCheckpointSummary}
                                         onOpen={row => openCheckpointDestination(row.destination)}
-                                        onDismiss={() => setDismissedGenerationJobKey(assetJobKey)}
+                                        onDismiss={() => generationCheckpointDismissal.dismiss(assetJobKey)}
                                     />
                                 </div>
                             </div>
@@ -2262,6 +2368,9 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             buildBlocked={!buildMaterialityGate.canProceed}
                             blockingPlanningItems={materialityGateSnapshot?.blockingRecords}
                             onResolveBuildBlockers={openCurrentReadinessCheckpoint}
+                            buildPacket={buildPacketReadiness}
+                            buildPacketManifest={buildPacketInputs.manifest}
+                            onNavigateBuildPacketTarget={navigateBuildPacketTarget}
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);
@@ -2511,6 +2620,11 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                                         ) : (
                                                             <PlanningStateBar
                                                                 readiness={planningReadiness}
+                                                                // The separate build-packet state (§W6). Only shown
+                                                                // once outputs exist — before that there is no packet
+                                                                // to report on, and every criterion would read as an
+                                                                // un-actionable blocker.
+                                                                buildPacket={generatedOutputs.length > 0 ? buildPacketReadiness : undefined}
                                                                 // Avoid duplicating the executive summary: StructuredPRDView's
                                                                 // Overview already renders `executiveSummary` just below, so only
                                                                 // surface the vision here as a fallback when there's no summary.

@@ -1,10 +1,8 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, History, ListChecks, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, History, XCircle } from 'lucide-react';
 import type { ConsolidatedImplementationPlan } from '../../../types';
 import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 import { isStaleStatus } from '../../../lib/artifactFreshness';
-import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
-import type { OrderedPromptPack, PlanScope } from '../../../lib/services/implementationPlanInsights';
-import { CopyTextButton } from './CopyTextButton';
+import type { PlanScope } from '../../../lib/services/implementationPlanInsights';
 
 const READINESS_STYLE = {
     ready: { icon: CheckCircle2, cls: 'bg-emerald-50 border-emerald-200 text-emerald-800', label: 'Plan complete' },
@@ -15,37 +13,28 @@ const READINESS_STYLE = {
 interface Props {
     plan: ConsolidatedImplementationPlan;
     scope: PlanScope;
-    /** The recommended next prompt (first uncopied); null when all are copied. */
-    nextPack: OrderedPromptPack | null;
-    onNextPackCopied?: (packId: string) => void;
     /** "Version 2" — the PRD version this plan was generated from. */
     prdVersionLabel?: string;
     staleness?: DependencyNodeStatus;
-    /** Full plan markdown for the export/copy action. */
-    planMarkdown: string;
-    savedTaskCount?: number;
-    onConvertToTasks?: () => void;
-    /** Jump to the Prompts tab (used when every pack is already copied). */
-    onOpenPrompts: () => void;
 }
 
 /**
- * Executive build card at the top of the Implementation Plan: readiness
- * status, scope counts, provenance, warnings, and the primary "copy next
- * prompt" action — the plan's decision surface, ahead of any tab content.
+ * Identity strip for the Implementation Plan: title, the ADAPTER's own
+ * plan-shape readiness (did the plan parse into a usable shape?), provenance and
+ * scope counts.
+ *
+ * IT HOLDS NO ACTIONS. Until plan §W7 this card was the plan's decision surface
+ * and rendered FOUR competing actions — "Copy next prompt" styled primary
+ * regardless of blockers, plus Review prompts, Convert/Manage tasks and Copy
+ * plan. Every action now lives in `FinalReviewCard`, which promotes exactly one
+ * primary from §W6's build-packet evaluation. Do not re-add an action here: a
+ * second primary on this surface is the defect §W7 fixed.
+ *
+ * `plan.readiness` is also NOT the build-readiness signal — it only reports
+ * whether the adapter could build a usable plan view model. The build-packet
+ * state is in Final Review below.
  */
-export function PlanHeader({
-    plan,
-    scope,
-    nextPack,
-    onNextPackCopied,
-    prdVersionLabel,
-    staleness,
-    planMarkdown,
-    savedTaskCount = 0,
-    onConvertToTasks,
-    onOpenPrompts,
-}: Props) {
+export function PlanHeader({ plan, scope, prdVersionLabel, staleness }: Props) {
     const readiness = READINESS_STYLE[plan.readiness.status];
     const ReadinessIcon = readiness.icon;
     const isStale = isStaleStatus(staleness);
@@ -79,58 +68,8 @@ export function PlanHeader({
                 </div>
             </div>
 
-            {/* Next best action */}
-            <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-                <p className="flex items-start gap-1.5 text-xs text-indigo-900 min-w-0">
-                    <ArrowRight size={13} className="mt-0.5 shrink-0" />
-                    {nextPack ? (
-                        <span>
-                            <span className="font-semibold">Next: </span>
-                            {nextPack.milestoneName ? `${nextPack.milestoneName} — ` : ''}
-                            copy “{nextPack.pack.title}” into your coding agent.
-                        </span>
-                    ) : scope.promptPacks > 0 ? (
-                        <span>
-                            <span className="font-semibold">All prompt packs copied.</span>{' '}
-                            Hand the plan and prompts to your coding agent to start building.
-                        </span>
-                    ) : (
-                        <span>{plan.readiness.recommendedNextStep ?? 'Generate the Implementation Plan to get a milestone roadmap.'}</span>
-                    )}
-                </p>
-                {/* min-w-0 (not shrink-0) so the row wraps on narrow screens
-                    instead of forcing horizontal page scroll. */}
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    {nextPack ? (
-                        <CopyTextButton
-                            text={promptPackToClipboardText(nextPack.pack)}
-                            label="Copy next prompt"
-                            onCopied={onNextPackCopied ? () => onNextPackCopied(nextPack.pack.id) : undefined}
-                        />
-                    ) : scope.promptPacks > 0 ? (
-                        <button
-                            type="button"
-                            onClick={onOpenPrompts}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition min-h-[32px]"
-                        >
-                            Review prompts
-                        </button>
-                    ) : null}
-                    {onConvertToTasks && (
-                        <button
-                            type="button"
-                            onClick={onConvertToTasks}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 transition min-h-[32px]"
-                        >
-                            <ListChecks size={12} />
-                            {savedTaskCount > 0 ? `Manage tasks (${savedTaskCount})` : 'Convert to tasks'}
-                        </button>
-                    )}
-                    <CopyTextButton text={planMarkdown} label="Copy plan" variant="secondary" />
-                </div>
-            </div>
-
-            {/* Real readiness problems only — risks live in their own card. */}
+            {/* Plan-shape problems only — build-packet blockers live in Final
+                Review, and risks live in their own card. */}
             {(plan.readiness.missingInputs.length > 0 || plan.readiness.warnings.length > 0) && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
                     {plan.readiness.missingInputs.length > 0 && (

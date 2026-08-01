@@ -4,8 +4,13 @@ import {
   DEFAULT_PRD_SECTIONS,
   generateProgressivePrd,
   makeSkeletonJobs,
+  retrySectionMaxOutputTokens,
+  RETRY_SECTION_MAX_OUTPUT_TOKENS,
+  sectionMaxOutputTokens,
+  SECTION_MAX_OUTPUT_TOKENS,
   selectModelTier,
   validateGraph,
+  WIDE_SECTION_MAX_OUTPUT_TOKENS,
   type PrdSectionTemplate,
 } from '../services/progressivePrdGeneration';
 
@@ -346,5 +351,77 @@ describe('progressive PRD generation', () => {
       expect(startedIdx).toBeGreaterThan(readyIdx);
       expect(completedIdx).toBeGreaterThan(startedIdx);
     }
+  });
+});
+
+/**
+ * A live run truncated `ux_loops` at the flat 8192 cap on a four-feature
+ * product, failing the whole section. The two WIDE sections — the ones whose
+ * output grows with the feature count — now carry a larger per-section cap.
+ */
+describe('per-section output budgets', () => {
+  it('gives the wide sections a larger cap than the default', () => {
+    expect(WIDE_SECTION_MAX_OUTPUT_TOKENS).toBeGreaterThan(SECTION_MAX_OUTPUT_TOKENS);
+    for (const id of ['ux_loops', 'features']) {
+      expect(sectionMaxOutputTokens(id)).toBe(WIDE_SECTION_MAX_OUTPUT_TOKENS);
+    }
+  });
+
+  it('leaves every other section on the tighter default', () => {
+    const wide = new Set(['ux_loops', 'features']);
+    for (const section of DEFAULT_PRD_SECTIONS.filter(s => !wide.has(s.id))) {
+      expect(sectionMaxOutputTokens(section.id)).toBe(SECTION_MAX_OUTPUT_TOKENS);
+    }
+  });
+
+  it('falls back to the default for an unknown section id', () => {
+    expect(sectionMaxOutputTokens('not_a_section')).toBe(SECTION_MAX_OUTPUT_TOKENS);
+  });
+
+  it('always retries a section with strictly more headroom than its first pass', () => {
+    // The invariant the retry path depends on: retrying must never be a
+    // guaranteed repeat of the same truncation. A flat retry constant would
+    // break this for a wide section that already starts at 16384.
+    for (const section of DEFAULT_PRD_SECTIONS) {
+      expect(retrySectionMaxOutputTokens(section.id))
+        .toBeGreaterThan(sectionMaxOutputTokens(section.id));
+    }
+    expect(retrySectionMaxOutputTokens('ux_loops')).toBeGreaterThan(RETRY_SECTION_MAX_OUTPUT_TOKENS);
+    // Default-cap sections keep exactly the retry budget they had before.
+    expect(retrySectionMaxOutputTokens('product_basics')).toBe(RETRY_SECTION_MAX_OUTPUT_TOKENS);
+  });
+
+  it('passes a section its own cap through to the provider, defaulting when unset', async () => {
+    // Dependency-free templates so the subset is a valid graph on its own; the
+    // real DEFAULT_PRD_SECTIONS caps are asserted by the tests above.
+    const wide: PrdSectionTemplate = {
+      ...DEFAULT_PRD_SECTIONS.find(s => s.id === 'ux_loops')!,
+      dependencies: undefined,
+    };
+    const plain = DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!;
+    const caps: number[] = [];
+    await generateProgressivePrd({
+      prompt: 'budget test',
+      provider: {
+        async generateText(input: { prompt: string; model: string; schema: object; maxOutputTokens?: number }) {
+          caps.push(input.maxOutputTokens!);
+          return '{}';
+        },
+      },
+      sections: [wide],
+      config: baseConfig,
+    });
+    await generateProgressivePrd({
+      prompt: 'budget test',
+      provider: {
+        async generateText(input: { prompt: string; model: string; schema: object; maxOutputTokens?: number }) {
+          caps.push(input.maxOutputTokens!);
+          return '{}';
+        },
+      },
+      sections: [plain],
+      config: baseConfig,
+    });
+    expect(caps).toEqual([WIDE_SECTION_MAX_OUTPUT_TOKENS, SECTION_MAX_OUTPUT_TOKENS]);
   });
 });

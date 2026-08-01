@@ -19,6 +19,7 @@ export const OVERLAY_METADATA_KEYS = [
     'dismissedScreenIssues', // advisory issues the user chose to dismiss
     'planProgress',          // implementation-plan task progress
     'mockupApproval',        // reviewed flows + approved screen set
+    'buildPacketApproval',   // Final Review sign-off + the pinned artifact-version manifest
     'promptEdits',           // legacy prompt packs (no live writer; read by the dependency graph)
 ] as const;
 

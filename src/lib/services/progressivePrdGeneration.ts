@@ -51,6 +51,13 @@ export type PrdSectionTemplate = {
     dependencies?: SectionId[];
     /** Rough wall-clock estimate (seconds) used by the progress UI. */
     estimatedSeconds: number;
+    /**
+     * Per-section output cap, overriding `SECTION_MAX_OUTPUT_TOKENS`. Set it
+     * for **wide** sections — ones that emit several collections in a single
+     * response, so their length scales with the product's feature count rather
+     * than being roughly fixed. See `WIDE_SECTION_MAX_OUTPUT_TOKENS`.
+     */
+    maxOutputTokens?: number;
 };
 
 export type ProgressiveGenerationConfig = {
@@ -73,6 +80,11 @@ export type ModelProvider = {
         prompt: string;
         model: string;
         schema: object;
+        /**
+         * Per-section output cap. Omitted means the provider's default
+         * (`SECTION_MAX_OUTPUT_TOKENS`); wide sections pass a larger one.
+         */
+        maxOutputTokens?: number;
         signal?: AbortSignal;
         /** Optional sink for token usage — forwarded to the transport. */
         onUsage?: (usage: NodeTokenUsage) => void;
@@ -123,15 +135,37 @@ export type ProgressiveEvent =
 // builders degrade gracefully (via `missingNote()`) when an upstream field they
 // reference is not a declared dependency, so dropping an edge never breaks a
 // section — it just lets it start sooner.
+/**
+ * Cap for **wide** sections — those emitting several collections in one
+ * response, whose length scales with the feature count instead of being
+ * roughly fixed. `ux_loops` (userLoops + uxPages + roles) and `features` (every
+ * feature with its acceptance criteria) are the two that grow without bound as
+ * a product gets larger, and a live run on a four-feature product truncated
+ * `ux_loops` at the 8192 default — so the default is too tight for those two,
+ * not for the pipeline as a whole.
+ *
+ * A cap is not a reservation: raising it costs nothing on a response that
+ * finishes early, and only these two sections are raised, so a runaway
+ * generation elsewhere still meets the tighter default.
+ *
+ * Declared above DEFAULT_PRD_SECTIONS because the templates reference it at
+ * module-init time — moving it below puts it in the temporal dead zone.
+ */
+export const WIDE_SECTION_MAX_OUTPUT_TOKENS = 16384;
+
 export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
     { id: 'product_basics',       title: SECTION_TITLES.product_basics,       order: 1,  risk: 'low',  estimatedSeconds: 8 },
     { id: 'product_thesis',       title: SECTION_TITLES.product_thesis,       order: 2,  risk: 'high', estimatedSeconds: 25, dependencies: ['product_basics'] },
     { id: 'grounding',            title: SECTION_TITLES.grounding,            order: 3,  risk: 'low',  estimatedSeconds: 10, dependencies: ['product_basics'] },
     // features depends on product_basics only — it runs in parallel with the
     // slow product_thesis call instead of waiting behind it.
-    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics'] },
+    // features + ux_loops are the two WIDE sections: their output scales with
+    // the feature count (every feature with its criteria; userLoops + uxPages +
+    // roles across all of them), so they get the larger cap. See
+    // WIDE_SECTION_MAX_OUTPUT_TOKENS.
+    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics'], maxOutputTokens: WIDE_SECTION_MAX_OUTPUT_TOKENS },
     // ux_loops only truly needs the feature set; thesis is incidental context.
-    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features'] },
+    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features'], maxOutputTokens: WIDE_SECTION_MAX_OUTPUT_TOKENS },
     // architecture grounds its entity reasoning in the grounding section's
     // domainEntities (the retired data_model section previously played this role).
     { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'grounding'] },
@@ -191,6 +225,25 @@ export const applyAiUpdate = (section: PrdSectionJob, content: string): PrdSecti
 export const SECTION_MAX_OUTPUT_TOKENS = 8192;
 export const RETRY_SECTION_MAX_OUTPUT_TOKENS = 16384;
 
+/** Initial-pass output cap for a section: its override, else the default. */
+export const sectionMaxOutputTokens = (
+    sectionId: string,
+    sections: PrdSectionTemplate[] = DEFAULT_PRD_SECTIONS,
+): number =>
+    sections.find(s => s.id === sectionId)?.maxOutputTokens ?? SECTION_MAX_OUTPUT_TOKENS;
+
+/**
+ * Output cap for a single-section retry. Always **double** that section's
+ * initial cap, which preserves the invariant the retry path depends on — a
+ * retry is never a guaranteed repeat of the same truncation. Deriving it keeps
+ * that true for wide sections too: a flat `RETRY_SECTION_MAX_OUTPUT_TOKENS`
+ * would give a 16384-capped section no headroom at all on retry.
+ */
+export const retrySectionMaxOutputTokens = (
+    sectionId: string,
+    sections: PrdSectionTemplate[] = DEFAULT_PRD_SECTIONS,
+): number => Math.max(sectionMaxOutputTokens(sectionId, sections) * 2, RETRY_SECTION_MAX_OUTPUT_TOKENS);
+
 /**
  * Thrown when a section's response hit the model's output-token cap. The DAG
  * worker converts it into a normal section error, so the section lands in
@@ -234,12 +287,12 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
 };
 
 export const makeJsonProvider = (): ModelProvider => ({
-    async generateText({ prompt, model, schema, signal, onUsage, onFinish, traceMeta }) {
+    async generateText({ prompt, model, schema, signal, onUsage, onFinish, traceMeta, maxOutputTokens }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',
             responseSchema: schema,
             model,
-            maxOutputTokens: SECTION_MAX_OUTPUT_TOKENS,
+            maxOutputTokens: maxOutputTokens ?? SECTION_MAX_OUTPUT_TOKENS,
             temperature: 0.4,
             topP: 0.9,
             onUsage,
@@ -492,6 +545,7 @@ export async function generateProgressivePrd(params: {
                 prompt: `${system}\n\n${user}`,
                 model,
                 schema,
+                maxOutputTokens: section.maxOutputTokens ?? SECTION_MAX_OUTPUT_TOKENS,
                 signal: params.signal,
                 onUsage: (u) => { usage = u; },
                 onFinish: (info) => { finishReason = info.finishReason; },

@@ -121,16 +121,20 @@ describe('DataModelRenderer — overview header', () => {
 
 describe('DataModelRenderer — PII tile interactivity', () => {
     it('clicking "Entities with PII" expands and reveals a PII-bearing entity card', () => {
-        const { getByLabelText, getByText, queryByText } = renderModel(groupedModel);
+        const { getByLabelText, container } = renderModel(groupedModel);
         // InfographicSource carries a privacy rule → collapsed by default in a
-        // 4-entity grouped model, so its field isn't visible yet.
-        expect(queryByText('uploaded_image must be access-controlled')).toBeNull();
+        // 4-entity grouped model, so its inspector row isn't visible yet.
+        // (Scoped to the card: the Privacy & Security review section below
+        // always lists the rule text.)
+        const card = container.querySelector('#data-model-entity-infographicsource') as HTMLElement;
+        expect(card).toBeTruthy();
+        expect(within(card).queryByText('uploaded_image must be access-controlled')).toBeNull();
 
         const piiTile = getByLabelText('Show entities containing PII');
         expect(piiTile.tagName).toBe('BUTTON');
         fireEvent.click(piiTile);
 
-        expect(getByText('uploaded_image must be access-controlled')).toBeInTheDocument();
+        expect(within(card).getByText('uploaded_image must be access-controlled')).toBeInTheDocument();
     });
 
     it('renders a static (non-interactive) tile when there is no PII', () => {
@@ -269,11 +273,14 @@ describe('DataModelRenderer — inspector rows + categories', () => {
             }],
             apiEndpoints: [],
         };
-        const { getByText, container } = renderModel(model);
-        // Single entity → expanded, inspector sections present.
-        expect(getByText('Relationships')).toBeInTheDocument();
-        expect(getByText('joy_score must be between 0 and 1')).toBeInTheDocument();
-        expect(getByText('raw_input must be redacted')).toBeInTheDocument();
+        const { container } = renderModel(model);
+        // Single entity → expanded, inspector sections present. Scoped to the
+        // card: the Privacy & Security review section repeats the privacy rule.
+        const card = container.querySelector('#data-model-entity-moodsnapshot') as HTMLElement;
+        expect(card).toBeTruthy();
+        expect(within(card).getByText('Relationships')).toBeInTheDocument();
+        expect(within(card).getByText('joy_score must be between 0 and 1')).toBeInTheDocument();
+        expect(within(card).getByText('raw_input must be redacted')).toBeInTheDocument();
         // Category badge derived (mostly_immutable + user-facing → Generated Outputs).
         expect(container).toHaveTextContent('Generated Outputs');
     });
@@ -431,6 +438,174 @@ describe('DataModelRenderer — missing optional metadata', () => {
         expect(within(card).queryByText(/constraint/)).toBeNull();
         // The single "1 field" count still renders.
         expect(within(card).getByText('1 field')).toBeInTheDocument();
+    });
+});
+
+// A fully specified API contract endpoint (every field the completeness
+// module scores).
+const completeEndpoint = {
+    method: 'POST',
+    path: '/api/orders',
+    description: 'Create an order',
+    entity: 'Order',
+    auth: { authentication: 'Bearer JWT required', authorization: 'Any authenticated user' },
+    requestSchema: '{ total_cents: Integer }',
+    responseSchema: '{ id: UUID, total_cents: Integer }',
+    errors: ['401 — missing or invalid token', '422 — total_cents must be positive'],
+    pagination: 'none',
+    idempotency: 'not idempotent — creates a new record per call',
+    rateLimit: '60/min per user',
+    requirementIds: ['f1', 'f3'],
+    tests: ['Creates an order for a valid payload', 'Rejects a negative total with 422'],
+};
+
+describe('DataModelRenderer — review segmentation (Schema → API Contract → Privacy & Security)', () => {
+    it('renders the three explicit review sections with completeness indicators', () => {
+        const { getByRole } = renderModel(modelWithApi);
+        const schema = getByRole('region', { name: 'Schema' });
+        const api = getByRole('region', { name: 'API Contract' });
+        const privacy = getByRole('region', { name: 'Privacy & Security' });
+        // Schema holds the existing entities browser; its indicator reflects
+        // that every entity defines fields.
+        expect(within(schema).getByRole('region', { name: 'Entities' })).toBeInTheDocument();
+        expect(within(schema).getByText('2 entities defined')).toBeInTheDocument();
+        expect(api).toBeInTheDocument();
+        expect(privacy).toBeInTheDocument();
+    });
+
+    it('shows legacy endpoints (no contract fields) as an advisory stub, never an error', () => {
+        const { getByRole } = renderModel(modelWithApi);
+        const api = getByRole('region', { name: 'API Contract' });
+        // Section-level indicator is the honest legacy state.
+        expect(within(api).getByText('Legacy format — no contract details')).toBeInTheDocument();
+        // Every endpoint row carries a neutral Stub chip and the advisory copy.
+        expect(within(api).getAllByText('Stub')).toHaveLength(5);
+        expect(
+            within(api).getAllByText(/No contract details recorded \(legacy format\)/).length,
+        ).toBeGreaterThan(0);
+        // No error language for the legacy shape.
+        expect(within(api).queryByText(/error:/i)).toBeNull();
+        expect(within(api).queryByText(/invalid/i)).toBeNull();
+    });
+
+    it('renders a complete endpoint contract with all fields and a Complete indicator', () => {
+        const model: DataModelContent = {
+            entities: twoEntityModel.entities,
+            apiEndpoints: [completeEndpoint],
+        };
+        const { getByRole } = renderModel(model);
+        const api = getByRole('region', { name: 'API Contract' });
+        expect(within(api).getByText('Contract complete')).toBeInTheDocument();
+        expect(within(api).getByText('Complete')).toBeInTheDocument();
+        expect(within(api).getByText('Bearer JWT required')).toBeInTheDocument();
+        expect(within(api).getByText('Any authenticated user')).toBeInTheDocument();
+        expect(within(api).getByText('{ total_cents: Integer }')).toBeInTheDocument();
+        expect(within(api).getByText('401 — missing or invalid token')).toBeInTheDocument();
+        expect(within(api).getByText('60/min per user')).toBeInTheDocument();
+        expect(within(api).getByText('f1')).toBeInTheDocument();
+        expect(within(api).getByText('f3')).toBeInTheDocument();
+        expect(within(api).getByText('Rejects a negative total with 422')).toBeInTheDocument();
+    });
+
+    it('names the specific missing fields on a partial endpoint', () => {
+        const model: DataModelContent = {
+            entities: twoEntityModel.entities,
+            apiEndpoints: [{
+                method: 'GET',
+                path: '/api/orders',
+                description: 'List orders',
+                entity: 'Order',
+                auth: { authentication: 'Bearer JWT required', authorization: 'Owner only' },
+                responseSchema: '{ orders: Order[] }',
+            }],
+        };
+        const { getByRole } = renderModel(model);
+        const api = getByRole('region', { name: 'API Contract' });
+        expect(within(api).getByText('0 of 1 complete')).toBeInTheDocument();
+        expect(within(api).getByText('Partial')).toBeInTheDocument();
+        expect(
+            within(api).getByText('Missing: requestSchema, errors, pagination, idempotency, rateLimit, requirementIds, tests'),
+        ).toBeInTheDocument();
+    });
+
+    it('shows an explicit empty state when the model declares no endpoints', () => {
+        const { getByRole } = renderModel(twoEntityModel);
+        const api = getByRole('region', { name: 'API Contract' });
+        expect(within(api).getByText('No endpoints declared')).toBeInTheDocument();
+        expect(within(api).getByText('No API endpoints declared in this data model.')).toBeInTheDocument();
+    });
+
+    it('parses a legacy table-form API Endpoints section through the fallback parser', () => {
+        const legacyMarkdown = `# Data Model
+
+## Order
+
+A purchase.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+
+## API Endpoints
+
+| Method | Path | Description | Entity |
+|--------|------|-------------|--------|
+| GET | /api/orders | List orders | Order |
+`;
+        const { getByRole } = render(<DataModelRenderer content={legacyMarkdown} />);
+        const api = getByRole('region', { name: 'API Contract' });
+        expect(within(api).getByText('/api/orders')).toBeInTheDocument();
+        expect(within(api).getByText('List orders')).toBeInTheDocument();
+        // Table-form endpoints carry no contract fields → advisory stub.
+        expect(within(api).getByText('Legacy format — no contract details')).toBeInTheDocument();
+    });
+
+    it('reports PII coverage in the Privacy & Security section', () => {
+        // groupedModel: InfographicSource has PII + a privacy rule → covered.
+        const { getByRole } = renderModel(groupedModel);
+        const privacy = getByRole('region', { name: 'Privacy & Security' });
+        expect(within(privacy).getByText('PII covered by rules')).toBeInTheDocument();
+        expect(within(privacy).getByText('InfographicSource')).toBeInTheDocument();
+        expect(within(privacy).getByText('uploaded_image must be access-controlled')).toBeInTheDocument();
+    });
+
+    it('flags a PII-bearing entity without privacy rules as partial (advisory)', () => {
+        const model: DataModelContent = {
+            entities: [{
+                name: 'Account',
+                description: 'A user account.',
+                fields: [
+                    { name: 'id', type: 'UUID', required: true, description: 'pk' },
+                    { name: 'password_hash', type: 'String', required: true, description: 'Hashed password' },
+                ],
+                relationships: [],
+            }],
+            apiEndpoints: [],
+        };
+        const { getByRole } = renderModel(model);
+        const privacy = getByRole('region', { name: 'Privacy & Security' });
+        expect(within(privacy).getByText('1 PII entity without rules')).toBeInTheDocument();
+        expect(within(privacy).getByText('Contains PII but declares no privacy rules.')).toBeInTheDocument();
+    });
+
+    it('shows a neutral "None declared" state when no PII or privacy rules exist', () => {
+        const { getByRole } = renderModel(twoEntityModel);
+        const privacy = getByRole('region', { name: 'Privacy & Security' });
+        expect(within(privacy).getByText('None declared')).toBeInTheDocument();
+        expect(within(privacy).getByText('No PII fields or privacy rules declared in this data model.')).toBeInTheDocument();
+    });
+
+    it('reports endpoint auth coverage in the Privacy & Security section', () => {
+        const model: DataModelContent = {
+            entities: twoEntityModel.entities,
+            apiEndpoints: [
+                completeEndpoint,
+                { method: 'GET', path: '/api/orders', description: 'List orders', entity: 'Order' },
+            ],
+        };
+        const { getByRole } = renderModel(model);
+        const privacy = getByRole('region', { name: 'Privacy & Security' });
+        expect(within(privacy).getByText(/1 of 2 endpoints declare auth/)).toBeInTheDocument();
     });
 });
 

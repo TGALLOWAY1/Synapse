@@ -43,7 +43,9 @@ impact previews / the write-barrier apply path in
   scope, material open decisions/assumptions, current challenge coverage,
   source drift, incomplete sections, and output alignment. Never replace it
   with a percentage or artifact-count score. Missing outputs do not reduce
-  planning readiness.
+  planning readiness. **It answers "is the product reasoning sound?" and
+  nothing else** — do not widen it to look at artifacts; that is the separate
+  build-packet evaluator's job (see "Two readiness evaluators" below).
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
   current readiness category, supporting criteria, and the three planning tools
   as an always-visible, ordered set — Decision Center (settle open choices /
@@ -196,6 +198,32 @@ impact previews / the write-barrier apply path in
   omits the version so a promoted item stays marked after a regeneration). Do
   not re-add an in-asset open-item indicator, and do not auto-create planning
   records from this projection.
+- **An unresolved cross-cutting obligation resolves in the Decision Center
+  too.** The Implementation Plan's §W5 sections are a contract-level derivation
+  (`deriveCrossCuttingObligations`), not the retired open-item heuristic, so
+  they *do* keep an in-plan indicator — but a deliberately quiet one: a compact
+  flag whose single action routes the obligation out to the Decision Center (see
+  "Severity is expressed once" in UI_PATTERNS.md for the presentation rules).
+  The route is the ordinary flag→plan path, not a new concept:
+  `flagCrossCuttingObligationConcern` (`src/lib/planning/flagToPlan.ts`) builds
+  a `FlagPlanningConcernInput` from the derived status and hands it to the
+  store's `flagPlanningConcern`, which creates the usual `createdBy: 'user'`
+  `open_question` record. Three fixed properties:
+  - the **source key omits the plan version**
+    (`cross-cutting-obligation:<artifactId>:<key>`), so regenerating the plan
+    does not split one open question into two;
+  - the record **title matches §W6's blocker title** for the same obligation
+    (`"<label> not discharged"`) so the blocker and the record read as one item,
+    and the statement carries the derived reason plus every named gap
+    untruncated;
+  - materiality is **`'normal'`, never `'blocking'`**. §W6 is the single
+    authority on this obligation's severity; a `'blocking'` record would also
+    arm the Finalize materiality hard stop off a one-click UI action, giving one
+    fact two independent gates.
+
+  Nothing is created by rendering the plan — the write happens only in the
+  click handler, and the action is offered only when the capability policy
+  allows persistence.
 - **`PlanningArtifactRegionTarget.planId`/`itemId` are optional.** They are
   present only when a region came from a downstream update plan; a plan-less
   locator (an asset open item pointing at a flow) supplies just the label and
@@ -275,6 +303,116 @@ impact previews / the write-barrier apply path in
   referenced readiness reviews, and the current substantive challenge are
   protected from pruning so nothing readiness/commitment currently relies on
   disappears.
+
+### Derived requirement & criterion identity (read-side, advisory)
+
+`src/lib/requirementIdentity.ts` (pure, unit-tested) is the identity substrate
+from docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W1: stable ids for
+requirements and acceptance criteria so coverage/traceability can key off
+identity instead of label-matching heuristics.
+
+- `RequirementId` **is** the existing `Feature.id` — reused, never a parallel
+  id scheme.
+- `CriterionId` = `` `${featureId}.AC.${hash8(normalize(text))}` `` — derived
+  from the criterion's **normalized text**, never its array position.
+  Reordering a feature's criteria changes no id; rewording one criterion
+  changes exactly that one id (deliberate — a reworded criterion is a
+  different criterion, and the id delta is the drift signal).
+- `buildRequirementIndex` indexes a structured PRD's features across all five
+  criterion lists the PRD markdown renders as acceptance-criteria groups
+  (`acceptanceCriteria`, plus premium `successCriteria` / `edgeCases` /
+  `failureModes` / `uiAcceptanceCriteria`).
+  `resolveCriterionRefs(text, index)` maps criterion prose quoted in screen
+  contracts, implementation tasks, and plan Definition-of-Done lines back to
+  canonical ids with an honest confidence label:
+  `exact | normalized | fuzzy | unmatched`. The fuzzy tier is deliberately
+  conservative (token-overlap thresholds documented in the module);
+  `unmatched` is a **first-class reported state** — "not traced to a PRD
+  criterion" — never silently dropped and never auto-rewritten to force a
+  match.
+- **Derived, never persisted** (cross-cutting rule 10): ids are recomputed on
+  read as a pure function of PRD content — no new collection, no
+  `ALL_PROJECT_COLLECTIONS` / snapshot / sync wiring — so legacy projects
+  gain traceability with no migration. The layer is advisory: nothing gates
+  rendering or generation on it. Consumers land in the later plan
+  workstreams (W3 API-contract `requirementIds`, W6 build-packet coverage,
+  W7 Final Review). Per-criterion *lifecycle* state (approved/superseded,
+  with owner) is explicitly deferred — that would be persisted state and is
+  out of this layer's scope (see the plan's §6).
+
+### Two readiness evaluators: reasoning vs. packet (never conflate them)
+
+There are **two** readiness evaluators, answering **two different questions**.
+They are independently reportable, and the copy at every surface must keep them
+apart (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W6 — the audit's central
+finding was a truth-in-signalling defect, where the reasoning projection was
+presented as build readiness):
+
+| Evaluator | Question | Reads |
+|---|---|---|
+| `derivePlanningReadiness` (`planningReadiness.ts`) | *is the product **reasoning** sound?* | PRD foundation, scope, decisions, challenge, alignment |
+| `deriveBuildPacketReadiness` (`buildPacketReadiness.ts`) | *is the implementation **packet** complete and current?* | artifact slots, freshness, validation, coverage, API contracts, plan shape, the committed checkpoint |
+
+- **Do not widen `derivePlanningReadiness`** to cover artifacts, and do not add
+  an `isReadyToBuild`-style field to the packet evaluator — it deliberately
+  exports `isPacketComplete` so the two can never be swapped by autocomplete.
+- **Eight blocking criteria** (`BUILD_PACKET_CRITERION_ORDER`), each with
+  evidence and a navigable action target: required outputs exist and are
+  non-errored · no required source stale **or** missing · zero unresolved
+  blocking validation issues · every in-scope requirement maps to a task and a
+  verification criterion · every endpoint reachable from the first slice has a
+  complete contract · conditional security/privacy + measurement obligations
+  discharged · the first milestone is an executable slice with no unresolved
+  dependency · the product reasoning is **committed**.
+- **Sources are consumed, never re-derived.** Staleness comes from the one
+  freshness engine (`evaluateProjectFreshness` / `useProjectFreshness`, rule 9)
+  and is read through **both `status` and `impactedBy`** — a MISSING or ERRORED
+  dependency leaves the dependent `up_to_date` and shows up only in
+  `impactedBy`. Validation state comes from
+  `readArtifactValidationDisposition`; endpoint completeness from
+  `apiContractCompleteness`; obligations from `crossCuttingObligations`;
+  requirement/criterion identity from `requirementIdentity`; the plan shape from
+  the consolidated-plan adapter.
+- **In-scope requirement** = `tier === 'mvp'` **or** `priority === 'must'`, with
+  a feature declaring **neither** field counted in scope, and the same
+  empty-set fallback `derivePlanningReadiness`'s `scopeCandidates` applies (no
+  match → every feature is in scope), so the gate and the planning scope
+  criterion never disagree and "no in-scope requirement" can never become a
+  vacuous pass. `should` / `could` / `v1` / `later` coverage is reported as a
+  **non-blocking warning**.
+- **Approval authority is the committed checkpoint, not the projection.** The
+  committed criterion requires a **current committed `ReadinessReview`** — the
+  caller's `commitmentRemainsCurrent(...)` + `activeCommit` filter
+  (`currentCommittedReadiness` in `ProjectWorkspace`). It **fails closed** on
+  `isCommitmentUnverifiable`, on a commitment bound to a different spine
+  version, and on a `not_ready` commitment with no recorded rationale.
+  `planningReadiness.isReadyToBuild` is passed in **only** so the blocker copy
+  can say whether a commit action is currently on offer — it can never satisfy
+  the criterion. A `not_ready` commitment **with** the authorizing event's
+  rationale is reported as an accepted-risk warning.
+- **Warnings are earned.** A non-blocking warning is permitted only when
+  `owner`, `impact`, and `rationale` are all recorded (the type requires all
+  three); anything that cannot state them is a blocker. There is **no composite
+  score** (rule 13) and nothing auto-rewrites an artifact.
+- **Derived, never persisted** (rule 10) and **advisory transport**: the
+  evaluator reports; it never blocks rendering or generation on its own.
+  `src/hooks/useBuildPacketInputs.ts` assembles the store-derived half of its
+  input (slot states, freshness, resolved data model/endpoints, consolidated
+  plan) and is the only React binding — it resolves the Data Model through the
+  same `resolveDataModelForTrace` the advisory obligations card uses, so the
+  gate and that card can never disagree about which obligations are owed.
+- **The gate must never be stricter than the generator** (plan §7). Every
+  blocking criterion ships with a test proving a freshly generated, well-formed
+  project satisfies it (`buildPacketReadiness.test.ts`). Anything the generator
+  is not prompted to produce — verbatim PRD-criterion restatements in the plan,
+  a vertical (UI + data) first milestone, supplementary endpoint fields — is a
+  warning, not a blocker.
+
+Consumers today: `ProjectWorkspace` (the outputs CTA no longer claims build
+readiness from the reasoning projection; its label reads off the recorded
+commitment) and `PlanningStateBar` (an "Implementation packet" block with its
+own "Packet checks" disclosure, beside the "Product-reasoning checks" one). The
+single-CTA Final Review surface is plan §W7 and is not built yet.
 
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence

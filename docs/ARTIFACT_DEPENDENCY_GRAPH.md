@@ -18,7 +18,11 @@ the feature keys off.)
   `prompt_pack` is **retired** (`RETIRED_ARTIFACT_SUBTYPES`).
 - **Real generation dependencies.** `CORE_ARTIFACT_PIPELINE[].dependsOn`:
   `user_flows ← screen_inventory`; `component_inventory ← screen_inventory`;
-  `implementation_plan ← screen_inventory + data_model`. The mockup consumes
+  `implementation_plan ← screen_inventory + data_model + user_flows` (the
+  `user_flows` edge is the deliberate W2 decision — flows carry the
+  alternate/error journeys the plan must see; it makes the active pipeline 3
+  layers deep, accepted in docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W2,
+  and is optional context, not a `REQUIRED_DEPENDENCIES` entry). The mockup consumes
   `MOCKUP_DEPENDENCIES = [screen_inventory, component_inventory,
   design_system]` (constant now lives in `coreArtifactPipeline.ts`, shared
   with `artifactJobController`). Every artifact is additionally generated
@@ -88,6 +92,19 @@ downstream as `impactedBy`
 warns when an ancestor is stale — surfaced as the blue **Impacted** pill.
 Manual edits (`provenance.changeSource === 'user_edit'`) surface as a
 caution flag, never a hard status.
+
+**A missing dependency is not a stale one.** When an upstream snapshot is
+absent, the evaluator short-circuits (`if (!depSnapshot) continue` — nothing
+concrete to compare), so the dependent's own status stays `up_to_date`; the
+problem is reported **only through `impactedBy`** (the propagation loop's
+`troubled()` predicate includes `missing` and `error`). Concretely for the W2
+edge: a **changed** `user_flows` marks `implementation_plan` `needs_update`
+(`dependency_changed`), but a **missing or errored** `user_flows` leaves the
+plan `up_to_date` with `user_flows` in its `impactedBy`. Consumers must
+therefore read `impactedBy` alongside status (`isStaleStatus` alone misses
+this case — W6's build-packet gate reads both). This is deliberate engine
+semantics (cross-cutting rule 9) — do not "fix" it by changing the status
+vocabulary.
 
 ## Update ordering & actions
 

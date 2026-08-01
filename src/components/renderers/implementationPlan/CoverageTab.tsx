@@ -17,6 +17,13 @@ interface Props {
     /** Source artifact versions recorded at generation time ("Data Model v1"). */
     sourceVersions?: string[];
     onOpenMilestone: (milestoneId: string) => void;
+    /**
+     * Render the provenance + gap-count card above the matrix. Final Review
+     * (plan §W7) folds that summary into its own header and embeds this matrix
+     * as an expandable detail, so it passes `false` to avoid stating the same
+     * gap count twice.
+     */
+    showSummary?: boolean;
 }
 
 const CELL_STATE_TEXT = {
@@ -85,7 +92,9 @@ function ImpactRow({ entry, onOpenMilestone }: { entry: ChangeImpactEntry; onOpe
  * versions, and a change-impact panel answers "if X changes, what do I
  * regenerate?".
  */
-export function CoverageTab({ plan, prdVersionLabel, staleness, sourceVersions = [], onOpenMilestone }: Props) {
+export function CoverageTab({
+    plan, prdVersionLabel, staleness, sourceVersions = [], onOpenMilestone, showSummary = true,
+}: Props) {
     const matrix = useMemo(() => buildCoverageMatrix(plan), [plan]);
 
     if (matrix.rows.length === 0) {
@@ -115,6 +124,7 @@ export function CoverageTab({ plan, prdVersionLabel, staleness, sourceVersions =
     return (
         <div className="space-y-4">
             {/* Provenance + gap summary */}
+            {showSummary && (
             <div className="bg-white rounded-xl border border-neutral-200 p-4 space-y-2">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
@@ -153,6 +163,7 @@ export function CoverageTab({ plan, prdVersionLabel, staleness, sourceVersions =
                     </p>
                 )}
             </div>
+            )}
 
             {/* Desktop: coverage matrix */}
             <div className="hidden md:block bg-white rounded-xl border border-neutral-200 overflow-x-auto">

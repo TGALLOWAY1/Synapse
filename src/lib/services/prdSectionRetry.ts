@@ -16,7 +16,7 @@ import {
     DEFAULT_PRD_SECTIONS,
     selectModelTier,
     parseSectionJson,
-    RETRY_SECTION_MAX_OUTPUT_TOKENS,
+    retrySectionMaxOutputTokens,
     SectionTruncatedError,
 } from './progressivePrdGeneration';
 import type { SectionStatusUpdate } from './progressivePrdPipeline';
@@ -117,7 +117,9 @@ export const regeneratePrdSection = async (
         // The retry runs with a larger output budget than the original DAG
         // pass: the most common retry cause is a MAX_TOKENS truncation, and
         // re-running with the identical cap would be a near-guaranteed repeat
-        // failure (and full re-spend) for an over-length section.
+        // failure (and full re-spend) for an over-length section. The budget is
+        // derived per section rather than flat, so a wide section that already
+        // starts at the larger cap still gains headroom here.
         let finishReason: string | undefined;
         const raw = await callGemini(
             '',
@@ -126,7 +128,7 @@ export const regeneratePrdSection = async (
                 responseMimeType: 'application/json',
                 responseSchema: SECTION_SCHEMAS[sectionId],
                 model,
-                maxOutputTokens: RETRY_SECTION_MAX_OUTPUT_TOKENS,
+                maxOutputTokens: retrySectionMaxOutputTokens(sectionId),
                 temperature: 0.4,
                 topP: 0.9,
                 onFinish: (info) => { finishReason = info.finishReason; },

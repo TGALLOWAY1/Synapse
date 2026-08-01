@@ -23,7 +23,7 @@
   partial body as transport-level "success", so every JSON-mode caller checks
   it — PRD sections and section retries throw `SectionTruncatedError` (the
   section lands in `failedSections` with the standard retry affordance; the
-  retry path re-runs with the larger `RETRY_SECTION_MAX_OUTPUT_TOKENS` cap),
+  retry path re-runs with a larger cap — see the per-section budgets below),
   the consistency review rejects the pass outright (`'truncated'`), and core
   artifacts stamp `metadata.truncated` which the job controller converts into
   a blocking-validation issue (slot reads `needs_review`, never `done`).
@@ -33,6 +33,24 @@
   before failing; a raw unparseable body is never stored as a completed
   artifact. Do not re-introduce a call site that ignores `finishReason` on a
   structured-output path.
+
+  **Per-section output budgets.** PRD sections do not share one flat cap.
+  `SECTION_MAX_OUTPUT_TOKENS` (8192) is the default; the two **wide** sections —
+  `features` (every feature with its acceptance criteria) and `ux_loops`
+  (`userLoops` + `uxPages` + `roles`) — declare
+  `maxOutputTokens: WIDE_SECTION_MAX_OUTPUT_TOKENS` (16384) on their
+  `PrdSectionTemplate`, because their length scales with the product's feature
+  count rather than being roughly fixed. A live run truncated `ux_loops` at the
+  flat default on a *four-feature* product, so the default was too tight for
+  those two specifically, not for the pipeline. A cap is not a reservation —
+  raising it costs nothing when a response finishes early — but only these two
+  are raised, so a runaway generation elsewhere still meets the tighter default.
+  Retry budgets are **derived**, not flat: `retrySectionMaxOutputTokens(id)` is
+  double the section's own cap (floored at `RETRY_SECTION_MAX_OUTPUT_TOKENS`),
+  which preserves the invariant the retry path depends on — a retry must never
+  be a guaranteed repeat of the same truncation. A flat retry constant would
+  hand a wide section zero headroom. When adding a section that emits several
+  collections in one response, give it the wide cap.
 
 - **LLM Trace Viewer (`src/lib/trace/`, `src/components/developer/`) — a
   developer-only debugging surface.** Every call through the geminiClient
@@ -706,6 +724,68 @@
     (the `prdVersionLabel` prop is passed only to `implementation_plan` now). Do
     **not** change `dataModelMarkdown.ts`'s parser output shape without
     re-checking `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
+    - **API endpoints are full contracts (W3, 2026-07), declared in three
+      layers that must move together:** the `dataModelSchema.apiEndpoints`
+      response schema (`schemas/artifactSchemas.ts`), the exported
+      `ApiEndpointContract` type (`src/types/index.ts` —
+      `DataModelContent.apiEndpoints`), and `ParsedApiEndpoint` +
+      emitter/parser in `services/dataModelMarkdown.ts`. Beyond the original
+      required `method`/`path`/`description`/`entity`, each endpoint carries
+      **optional** contract fields: `auth` ({authentication, authorization}),
+      `requestSchema`, `responseSchema`, `errors`, `pagination`,
+      `idempotency`, `rateLimit`, `requirementIds` (canonical PRD `Feature`
+      ids — plain strings, same vocabulary as entity `featureRefs`), and
+      `tests`. They are non-required in the Gemini schema and optional in the
+      domain type (cross-cutting rule 3) so a model that omits one still
+      produces a parseable artifact and legacy persisted data models render
+      unchanged. The prompt requirement text is the shared fragment
+      **`API_ENDPOINT_CONTRACT_SPEC`** (`prompts/artifactPromptFragments.ts`),
+      composed into the `data_model` system prompt — edit it there, never
+      inline, and update the `promptSurfaces` snapshot in the same change.
+      **Markdown form:** the emitter writes a per-endpoint **block**
+      (`### METHOD /path` + labeled `- **Label:** …` bullets, list bullets for
+      Errors/Tests) under `## API Endpoints` instead of the old 3–4 column
+      table, so schemas and error lists survive the markdown round-trip; the
+      parser reads the block form first and **falls back to the legacy table
+      parser** for pre-contract persisted documents. The `DataModelRenderer`
+      presents the artifact as three explicit review sections — **Schema →
+      API Contract → Privacy & Security** — with per-section derived
+      completeness chips; the API section scores each endpoint
+      `complete | partial | stub` via `src/lib/apiContractCompleteness.ts`
+      (advisory-only; see SAFETY_AND_VALIDATION.md). Endpoints with no
+      contract fields (legacy) read as neutral "stub", never as errors.
+    - **The implementation_plan prompt carries two CONDITIONAL sections (W5,
+      2026-07):** `securityPrivacy` (Security & Privacy obligations) and
+      `measurement`. They are **sections of the plan, not new artifact
+      subtypes** — a new subtype would cost a generation slot and re-fragment
+      review. Conditionality lives in the prompt: the shared fragment
+      **`PLAN_CONDITIONAL_SECTIONS_SPEC`**
+      (`prompts/artifactPromptFragments.ts`, composed into the
+      `implementation_plan` system prompt) tells the model to emit each section
+      only when its trigger condition holds and to **omit it entirely**
+      otherwise — never to emit it empty — and to park what it cannot
+      responsibly answer under that section's `openQuestions` instead of
+      inventing a control or an event. In `schemas/artifactSchemas.ts` both
+      objects are **non-required** on `implementationPlanSchema` (that is what
+      makes them conditional), and every linking field inside a control/metric
+      is non-required too, so a partial emit still parses and the read side can
+      name the exact missing link. The domain shapes
+      (`PlanSecurityPrivacySection` / `PlanSecurityControl`,
+      `PlanMeasurementSection` / `PlanMeasurementMetric`, `src/types/index.ts`)
+      are all-optional per rule 3, and `implementationPlanToMarkdown` +
+      `consolidatedPlanToMarkdown` write the readable `## Security & Privacy
+      Obligations` / `## Measurement` sections **only when the plan carries
+      them**. Whether a section is *required* is never stored: it is derived on
+      read by **`src/lib/planning/crossCuttingObligations.ts`**
+      (`deriveCrossCuttingObligations`) — the single contract shared by this
+      prompt and the build-packet readiness gate (plan §W6), which blocks on
+      `report.unresolved`. Its privacy vocabulary is the exported
+      `PRIVACY_SIGNAL_RE` from `canonicalPrdSpine.ts`, the same test the spine
+      uses to build `constraints.privacySecurityCompliance` — keep them
+      identical, or the gate will demand a section the prompt never asked for.
+      Any edit to the trigger wording in the fragment must move the predicate
+      (and the promptSurfaces snapshot) in the same change. See
+      `docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md`.
     `component_inventory` (UI Components) is a **hidden artifact** (see
     "Post-finalization transition" below) with no reachable render UI — the
     old mobile-first searchable component-library renderer (sticky search +
@@ -781,7 +861,12 @@
 - **Shared prompt fragments & snapshot net.**
   `prompts/artifactPromptFragments.ts` holds the artifact-prompt sentences that
   used to be copy-pasted across `CORE_ARTIFACT_PROMPTS` subtypes
-  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`);
+  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`,
+  `API_ENDPOINT_CONTRACT_SPEC` — the data_model endpoint-contract requirement
+  text, mirrored by `apiContractCompleteness.ts` on the read side — and
+  `PLAN_CONDITIONAL_SECTIONS_SPEC` — the implementation_plan conditional
+  security/privacy + measurement sections, mirrored by
+  `planning/crossCuttingObligations.ts` on the read side);
   `prompts/imagePromptFragments.ts` holds the image-prompt strings shared by
   the internal gpt-image-2 builder and the external copy prompt
   (`IMAGE_PLATFORM_HINTS`, `IMAGE_CLOSING_RULES`, and `fidelityStyleHint(fidelity,

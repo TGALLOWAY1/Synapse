@@ -16,6 +16,11 @@ import {
     TerminalSquare,
 } from 'lucide-react';
 import type { ImplementationPlanMilestone, ImplementationPromptPack, ProjectTask } from '../../../types';
+import {
+    isSelfReportedImplemented,
+    isSelfReportedStarted,
+    taskProgressCopy,
+} from '../../../lib/taskProgressLanguage';
 import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
 import { PromptPackCard } from './PromptPackCard';
@@ -41,6 +46,19 @@ const ARTIFACT_KIND_ROWS: Array<{
     { key: 'apis', icon: TerminalSquare, label: 'APIs', why: 'Endpoints this milestone exposes or consumes' },
     { key: 'risks', icon: Flag, label: 'Risks', why: 'Watch-outs recorded for this milestone' },
 ];
+
+/**
+ * Chip styling for a build-task row's progress state. A task reaches a
+ * non-planned state either because the user ticked its converted `ProjectTask`
+ * or because a legacy markdown plan carried a `- [x]` deliverable — both are
+ * SELF-REPORTED (plan §W8), so the row names the state instead of leaving a
+ * bare green check to imply Synapse checked anything.
+ */
+const statusChipClass = (status: string): string =>
+    isSelfReportedImplemented(status) ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        : isSelfReportedStarted(status) ? 'bg-amber-50 text-amber-700 border-amber-200'
+            : status === 'blocked' ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-neutral-100 text-neutral-600 border-neutral-200';
 
 interface Props {
     milestone: ImplementationPlanMilestone;
@@ -198,7 +216,7 @@ export function MilestoneCard({
                                 </p>
                                 <span className="text-[10px] text-neutral-400">
                                     {trackedCount > 0
-                                        ? `${trackedCount} of ${m.tasks.length} tracked in Implementation progress`
+                                        ? `${trackedCount} of ${m.tasks.length} tracked in Implementation progress · self-reported`
                                         : 'Planned steps — use Convert to tasks to track progress'}
                                 </span>
                             </div>
@@ -206,20 +224,32 @@ export function MilestoneCard({
                                 {m.tasks.map(t => {
                                     const saved = savedTaskById?.get(t.id);
                                     const status = saved?.status ?? t.status;
-                                    const done = status === 'done';
-                                    const inProgress = status === 'in_progress';
-                                    const Icon = done ? CheckCircle2 : inProgress ? Clock : Square;
-                                    const iconCls = done
+                                    const copy = taskProgressCopy(status);
+                                    const implemented = isSelfReportedImplemented(status);
+                                    const started = isSelfReportedStarted(status);
+                                    const Icon = implemented ? CheckCircle2 : started ? Clock : Square;
+                                    const iconCls = implemented
                                         ? 'text-emerald-600'
-                                        : inProgress ? 'text-amber-500' : 'text-neutral-300';
+                                        : started ? 'text-amber-500' : 'text-neutral-300';
+                                    // Name any non-planned state; fall back to the
+                                    // neutral "tracked" chip for a converted task
+                                    // the user has not moved yet.
+                                    const chip = status !== 'todo'
+                                        ? { text: copy.label.toLowerCase(), title: copy.longLabel }
+                                        : saved
+                                            ? { text: 'tracked', title: 'Tracked in Implementation progress' }
+                                            : null;
                                     return (
                                         <li id={implementationPlanAnchor.task(m.id, t.id)} tabIndex={-1} key={t.id} className="flex scroll-mt-24 items-start gap-2 text-sm text-neutral-800">
                                             <Icon size={15} className={`mt-0.5 shrink-0 ${iconCls}`} aria-hidden="true" />
                                             <span className="min-w-0">
-                                                <span className={done ? 'text-neutral-400 line-through' : undefined}>{t.title}</span>
-                                                {saved && (
-                                                    <span className="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                                        tracked
+                                                <span className={implemented ? 'text-neutral-400 line-through' : undefined}>{t.title}</span>
+                                                {chip && (
+                                                    <span
+                                                        title={chip.title}
+                                                        className={`ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded border ${statusChipClass(status)}`}
+                                                    >
+                                                        {chip.text}
                                                     </span>
                                                 )}
                                                 {t.description && (

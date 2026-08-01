@@ -12,7 +12,13 @@ import { callGeminiStream } from '../geminiClient';
 import type { ProviderOptions, GeminiTokenUsage } from '../geminiClient';
 import { repairTruncatedJson } from '../jsonRepair';
 import type { LlmTraceMeta } from '../trace/traceTypes';
-import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE } from '../prompts/artifactPromptFragments';
+import {
+    artifactRole,
+    AGENT_AGNOSTIC_RULE,
+    ANTI_PREAMBLE_RULE,
+    API_ENDPOINT_CONTRACT_SPEC,
+    PLAN_CONDITIONAL_SECTIONS_SPEC,
+} from '../prompts/artifactPromptFragments';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
@@ -169,6 +175,7 @@ Top-level shape:
   - teamAssumption: who this plan assumes is building (e.g. "One developer pairing with a coding agent").
 - milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep. Keep milestones SMALL — each should be independently shippable and verifiable.
 - globalQualityGates: 3-6 project-wide quality gates (shape below) that apply to every milestone.
+- securityPrivacy, measurement: CONDITIONAL sections — see "Conditional sections" below for when to include each. Omit entirely when the condition does not hold.
 - architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
 - risks: top-level array of { description, mitigation } items spanning the project.
 - definitionOfDone: top-level array of project-wide acceptance criteria.
@@ -182,7 +189,7 @@ Per milestone:
 - priority: "critical" | "high" | "medium" | "low" — by position on the critical path.
 - estimatedEffort: short effort estimate (e.g. "2-3 days").
 - dependencies: array of OTHER milestone ids that must complete first. Empty array if none.
-- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD. Link only what this milestone directly implements; do not invent names.
+- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD (userFlows: flow names from the user_flows dependency context). Link only what this milestone directly implements; do not invent names.
 - tasks: 3-8 atomic, executable tasks.
 - promptPacks: 1-3 copy-ready coding-agent prompts (shape below) that implement this milestone. Every milestone MUST have at least one.
 - qualityGates: 2-4 milestone-specific quality gates.
@@ -221,11 +228,14 @@ Per prompt pack:
 - acceptanceCriteria: 3-6 specific, testable criteria.
 - recommendedCommitMessage: a conventional, imperative commit message for the resulting change.
 
+${PLAN_CONDITIONAL_SECTIONS_SPEC}
+
 Rules:
 - Task, milestone, prompt-pack, and quality-gate ids must be unique across the entire plan.
 - All ids in dependencies must reference ids in the same plan.
 - Quality gate shape: { id, title, description?, category, required } with category one of design_fidelity | functional | data_integrity | integration | accessibility | performance | testing | regression.
 - Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
+- Plan the full journeys, not just happy paths: the user_flows dependency context defines each flow's steps plus its Decision branches, Error Paths, and Edge Cases. That alternate/error handling is concrete engineering work — cover it in milestone tasks (and reflect it in acceptance criteria) rather than dropping it.
 - Tasks should read as atomic engineering work, not as themes.
 - Favor safe implementation: small milestones, frequent commits, explicit non-goals, validation after every milestone, no broad rewrites.`,
         userPrefix: 'Create a consolidated Implementation Plan (milestones + prompt packs + quality gates) from this PRD:',
@@ -259,7 +269,7 @@ For each entity, populate:
 - privacyRules: separate from constraints. Privacy/safety rules like "raw_input must be null when source = FACE_SCAN", "PII fields must be encrypted at rest", "soft-delete only — never hard delete". Use this for anything safety, privacy, or compliance related.
 - exampleRecord: optional. For the FIRST userFacing entity (and others only when illustrative), provide a compact example record as a JSON-encoded STRING (e.g., "{\\"joy_score\\": 0.7, \\"energy_level\\": 0.6, \\"vibe_title\\": \\"Warm Sunset Drift\\"}"). 4-8 fields max; keep it illustrative, not exhaustive.
 
-Top-level apiEndpoints: existing array of { method, path, description, entity }. Required.
+${API_ENDPOINT_CONTRACT_SPEC}
 
 Top-level productMapping: an array of { field, uiBehavior } mapping the most product-relevant fields to visible UI behavior (e.g., { field: "vibe_title", uiBehavior: "Appears as the generated playlist name" }, { field: "energy_level", uiBehavior: "Affects track intensity" }). Aim for 5-10 entries covering the fields that most directly shape the user experience.
 
@@ -475,6 +485,43 @@ function implementationPlanToMarkdown(plan: StructuredImplementationPlan): strin
         plan.risks.forEach(r => {
             lines.push(`- **${r.description}**${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`);
         });
+        lines.push('');
+    }
+    // Conditional cross-cutting sections. Emitted into the readable body only
+    // when the plan actually carries them — an absent section is meaningful
+    // (see crossCuttingObligations.ts), so never write an empty heading.
+    if (plan.securityPrivacy) {
+        const sp = plan.securityPrivacy;
+        lines.push('## Security & Privacy Obligations');
+        if (sp.summary) lines.push(sp.summary, '');
+        sp.controls?.forEach(c => {
+            lines.push(`- **${c.title}**${c.obligation ? ` — ${c.obligation}` : ''}`);
+            if (c.implementation) lines.push(`  - Implementation: ${c.implementation}`);
+            if (c.requirementIds?.length) lines.push(`  - Requirements: ${c.requirementIds.join(', ')}`);
+            if (c.taskIds?.length) lines.push(`  - Tasks: ${c.taskIds.join(', ')}`);
+            if (c.tests?.length) lines.push(`  - Verification: ${c.tests.join('; ')}`);
+        });
+        if (sp.openQuestions?.length) {
+            lines.push('**Open Questions:**');
+            sp.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
+        lines.push('');
+    }
+    if (plan.measurement) {
+        const mm = plan.measurement;
+        lines.push('## Measurement');
+        if (mm.summary) lines.push(mm.summary, '');
+        mm.metrics?.forEach(m => {
+            lines.push(`- **${m.metric}**${m.eventName ? ` → \`${m.eventName}\`` : ''}`);
+            if (m.properties?.length) lines.push(`  - Properties: ${m.properties.join(', ')}`);
+            if (m.trigger) lines.push(`  - Trigger: ${m.trigger}`);
+            if (m.validation) lines.push(`  - Validation: ${m.validation}`);
+            if (m.taskIds?.length) lines.push(`  - Tasks: ${m.taskIds.join(', ')}`);
+        });
+        if (mm.openQuestions?.length) {
+            lines.push('**Open Questions:**');
+            mm.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
         lines.push('');
     }
     if (plan.definitionOfDone?.length) {

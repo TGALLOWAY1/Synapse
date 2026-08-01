@@ -148,8 +148,11 @@ export function ExportModal({
         artifact.subtype ? getArtifactMeta(artifact.subtype).title : artifact.title;
 
     // Order artifacts the way the Assets tab does (CORE_ARTIFACT_DISPLAY_ORDER)
-    // and drop hidden subtypes (e.g. UI Components) so the export list matches
-    // exactly what the user sees in the workspace.
+    // and drop hidden subtypes so the export list matches exactly what the user
+    // can see in the workspace. `component_inventory` (UI Components) used to be
+    // filtered out here as hidden; since W4 it is reviewable (in the Screens
+    // view's Components section) and therefore exportable — a deliberate change,
+    // since mockups are generated against it.
     const orderedCoreArtifacts: Artifact[] = CORE_ARTIFACT_DISPLAY_ORDER
         .filter(meta => !isHiddenArtifactSubtype(meta.subtype))
         .map(meta => coreArtifacts.find(a => a.subtype === meta.subtype))

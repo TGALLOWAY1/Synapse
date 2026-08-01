@@ -44,9 +44,15 @@ export function buildDependencyContext(
             // summary that lists ALL screen ids/names first (never truncated),
             // then the truncated per-screen prose — so downstream artifacts
             // always see the complete screen roster even when detail is cut.
+            // User flows get the analogous treatment: every flow's steps and
+            // alternate/error paths survive the budget (see
+            // summarizeUserFlowsDependency) — they are the whole reason the
+            // implementation_plan consumes flows (W2).
             const text = dep === 'screen_inventory'
                 ? summarizeScreenInventoryDependency(depContent, DEPENDENCY_PROSE_BUDGET)
-                : depContent.slice(0, DEPENDENCY_PROSE_BUDGET);
+                : dep === 'user_flows'
+                    ? summarizeUserFlowsDependency(depContent, DEPENDENCY_PROSE_BUDGET)
+                    : depContent.slice(0, DEPENDENCY_PROSE_BUDGET);
             return `${label}\n${text}`;
         })
         .join('\n\n');
@@ -75,6 +81,51 @@ export function summarizeScreenInventoryDependency(content: string, proseBudget:
         : prose;
 
     return `${rosterBlock}\n\n${truncatedProse}`;
+}
+
+// Bold section labels inside a `### Flow:` block whose content is load-bearing
+// for downstream planning: the step sequence (including nested **Decision:**
+// branches) and the alternate/error journeys. Everything else (Preconditions,
+// Related Features, Success Outcome, …) is detail the budget may cut.
+const FLOW_KEEP_LABELS = /^\*\*(Goal|Steps|Error Paths|Edge Cases):\*\*/;
+const FLOW_ANY_LABEL = /^\*\*[^*]+:\*\*/;
+
+/**
+ * Build a dependency summary of the user_flows artifact that guarantees every
+ * flow's step sequence and alternate/error paths survive truncation — the
+ * implementation_plan consumes flows precisely for those journeys (W2), so a
+ * head-slice that drops later flows' error paths would defeat the dependency.
+ * Mirrors summarizeScreenInventoryDependency: the structural core is emitted
+ * in full; only the detail sections are dropped. Content that already fits the
+ * budget, or doesn't parse as the strict `### Flow:` format, passes through
+ * the generic path unchanged.
+ */
+export function summarizeUserFlowsDependency(content: string, proseBudget: number): string {
+    if (content.length <= proseBudget) return content;
+    if (!/^###\s+Flow:/m.test(content)) return content.slice(0, proseBudget);
+
+    const kept: string[] = [];
+    // Keep headings/prose until the first dropped label; labels toggle state.
+    let keeping = true;
+    for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (/^#{1,6}\s/.test(trimmed)) {
+            keeping = true;
+            kept.push(line);
+            continue;
+        }
+        if (FLOW_KEEP_LABELS.test(trimmed)) {
+            keeping = true;
+            kept.push(line);
+            continue;
+        }
+        if (FLOW_ANY_LABEL.test(trimmed)) {
+            keeping = false;
+            continue;
+        }
+        if (keeping && trimmed) kept.push(line);
+    }
+    return `${kept.join('\n')}\n…(flow detail truncated; every flow's steps, decisions, error paths, and edge cases are preserved above)`;
 }
 
 export function buildNarrativeGuardrails(prd: StructuredPRD): string {

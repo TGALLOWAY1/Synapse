@@ -1,6 +1,6 @@
 # The Experience Workspace (Screens)
 
-> Extracted from CLAUDE.md. The screen-centric Screens view: stable ids, join layer, readiness/review/downstream/handoff phases (2–5C), mockup variants (3A–3D), overlays, and URL-addressable selection.
+> Extracted from CLAUDE.md. The screen-centric Screens view: stable ids, join layer, readiness/review/downstream/handoff phases (2–5C), mockup variants (3A–3D), the Components section, overlays, and URL-addressable selection.
 
 ### The Experience workspace (Screens) — read-side consolidation
 
@@ -807,6 +807,72 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   (`DecisionBranches`) and the `decision_missing_branches` gap — an
   unparseable decision renders the raw text with an honest "branch outcomes
   not specified" nudge, never an invented branch.
+- **Components section (W4) — `component_inventory` is reviewable inside
+  Screens.** The `component_inventory` artifact ("UI Components") feeds every
+  mockup through `MOCKUP_DEPENDENCIES` but used to be a **hidden** artifact with
+  no renderer at all, so it shaped the product and could not be inspected. W4 of
+  [docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md)
+  built the renderer FIRST and only then unhid the artifact — never the reverse,
+  or the first thing a user sees is raw content.
+  - **Where it lives.** `ScreenComponentsSection`
+    (`src/components/experience/`) is a collapsible **Components** section
+    rendered by `ArtifactWorkspace`'s Screens branch **below `ScreenListView`**.
+    It is deliberately **NOT a new top-level sidebar row**: the inventory is a
+    bridge artifact between screens and implementation, and a separate row would
+    re-fragment the same surface (the same consolidation reasoning that folded
+    Screen Inventory + Mockups into Screens). So `component_inventory` stays out
+    of `ARTIFACT_GROUPS` — exactly like `screen_inventory`/`mockup`. Deep links,
+    Dependency-Graph "Open artifact", and workflow-checkpoint destinations naming
+    any of those three route to the Screens view via `SCREENS_HOSTED_SLOTS`
+    (`ArtifactWorkspace.tsx`). **"No sidebar row" is a layout choice;
+    `HIDDEN_ARTIFACT_SUBTYPES` is a visibility contract — do not conflate them.**
+  - **Status + Retry live here, and that is load-bearing.** Because the artifact
+    has no row, this section is the ONLY place its slot status
+    (`slotStatusFor('component_inventory')`) and Retry are reachable. That
+    affordance is what makes the two W4 behavior changes legitimate: the slot now
+    gates `ProjectWorkspace.assetsReady` and `resumeIfNeeded` auto-wakes for it
+    (see WORKSPACE_AND_ARTIFACTS.md). A failed or in-flight slot always renders
+    the section; nothing generated and nothing in flight renders nothing (no
+    empty nag).
+  - **Renderer.** `src/components/renderers/ComponentInventoryRenderer.tsx`,
+    dispatched from `ArtifactContentRenderer` (`renderers/index.tsx`) over the
+    existing `parseComponentInventoryMarkdown`. Per component: name +
+    complexity + preview archetype, purpose, props (name/type/required/
+    description), the accessibility contract, notes, and **which screens
+    reference it**. Every optional field degrades to "Not specified" and
+    unparseable content falls back to plain markdown — legacy artifacts always
+    render.
+  - **Screen back-references are DERIVED, and reuse the canonical Screens
+    join.** `src/lib/componentExperience.ts` (pure; no store/IDB/React;
+    unit-tested in `src/lib/__tests__/componentExperience.test.ts`) is the join
+    layer. It never re-derives screens: callers project the existing
+    `ScreenExperienceIndex` through **`componentJoinScreensFromIndex`** into the
+    narrow `ComponentJoinScreen` shape. There must never be a second screen join.
+    `buildComponentInventoryModel(inventory, screens)` matches in two directions
+    — a component's `usedIn` → screen slug (`slugifyScreenName`, the same key the
+    image stores use, so a display rename can't orphan a reference), and a
+    screen's **`handoff.primaryComponents`** → component name via
+    `normalizeComponentKey` (casing/spacing/dash-insensitive), with a containment
+    fallback tagged `confidence: 'partial'`. An exact match is never downgraded by
+    a later partial one. **Only `handoff.primaryComponents` counts as a screen's
+    component citation** — `coreUIElements` / the legacy `components` alias hold
+    prose UI regions ("Header with date filters"), so comparing them against
+    component names would manufacture contradictions that aren't real. It is a
+    NAME comparison, never a stored link: the UI says "derived … there is no
+    stored link", and `EMPTY_COMPONENT_INVENTORY_MODEL` is the stable
+    empty-state reference (Selector-stability rule).
+  - **Component/screen contradictions are ADVISORY** (cross-cutting rule 10) —
+    derived, labelled, capped, and gating nothing. `ComponentReferenceIssue`
+    kinds: **`screen_cites_unknown_component`** (severity `review` — a screen's
+    handoff contract names a component the inventory does not contain; the W4
+    contradiction), **`component_used_in_unknown_screen`** (`info` — a `usedIn`
+    entry naming no screen, also shown inline as a "no matching screen" chip
+    rather than dropped), and **`component_unreferenced`** (`info`). Review
+    issues sort first and open the panel; `info` alone stays collapsed. **No
+    issue is produced when no screens were supplied** (`joinAvailable: false`) —
+    with no evidence, the honest output is silence, never "everything is
+    unreferenced". Only `review`/`info` severities exist; there is no blocking
+    tier.
 - **Screen metadata edits are an overlay, never a content rewrite.** User
   edits (name / purpose / userIntent / priority / notes / **reviewStatus** —
   the readiness override above — / **mockupVariantStatus** — the per-variant

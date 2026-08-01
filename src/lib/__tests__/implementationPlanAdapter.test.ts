@@ -5,6 +5,7 @@ import {
     consolidatedPlanToMarkdown,
     promptPackToClipboardText,
 } from '../services/implementationPlanAdapter';
+import { deriveCrossCuttingObligations } from '../planning/crossCuttingObligations';
 import type { StructuredImplementationPlan } from '../../types';
 
 function fencePlan(plan: StructuredImplementationPlan): string {
@@ -28,7 +29,7 @@ const NATIVE_PLAN: StructuredImplementationPlan = {
             priority: 'critical',
             estimatedEffort: '2 days',
             dependencies: [],
-            linkedArtifacts: { screens: ['Landing'], dataModels: ['User'] },
+            linkedArtifacts: { screens: ['Landing'], dataModels: ['User'], userFlows: ['First-time Onboarding'] },
             tasks: [{ id: 't1', title: 'Initialize Vite app', status: 'todo' }],
             promptPacks: [
                 {
@@ -141,11 +142,13 @@ describe('buildConsolidatedPlan', () => {
         expect(plan!.milestones[0].promptPacks?.[0].id).toBe('pp_setup');
         expect(plan!.summary.buildStrategy).toBe('Ship a walking skeleton first, then layer features.');
         expect(plan!.globalQualityGates.map(g => g.id)).toEqual(['g1']);
-        // Traceability derives from milestone + task links.
+        // Traceability derives from milestone + task links (userFlows are
+        // milestone-level links — recorded since the plan sources flows, W2).
         expect(plan!.traceability[0]).toMatchObject({
             milestoneId: 'm_setup',
             screens: ['Landing'],
             dataModels: ['User'],
+            userFlows: ['First-time Onboarding'],
             promptPackIds: ['pp_setup'],
             qualityGateIds: ['qg1'],
         });
@@ -314,6 +317,100 @@ Some extra hand-written appendix prose.`;
     it('tolerates malformed plan content without throwing', () => {
         const plan = buildConsolidatedPlan({ planContent: 'just some prose\nno milestones here' });
         expect(plan).toBeNull();
+    });
+
+    // --- Conditional cross-cutting sections (W5) ----------------------------
+
+    it('round-trips the conditional security/privacy and measurement sections', () => {
+        const withSections: StructuredImplementationPlan = {
+            ...NATIVE_PLAN,
+            securityPrivacy: {
+                summary: 'PII is encrypted at rest.',
+                controls: [{
+                    id: 'sec_encrypt_pii',
+                    title: 'Encrypt PII at rest',
+                    obligation: 'GDPR requirement in the PRD constraints.',
+                    implementation: 'Column-level encryption.',
+                    requirementIds: ['f1'],
+                    taskIds: ['t1'],
+                    tests: ['Stored email is unreadable without the app key'],
+                }],
+                openQuestions: ['Which region stores EU data?'],
+            },
+            measurement: {
+                summary: 'Activation is instrumented from day one.',
+                metrics: [{
+                    id: 'mm_activation',
+                    metric: 'Day-1 activation rate',
+                    eventName: 'playlist_generated',
+                    properties: ['user_id: string'],
+                    trigger: 'A playlist finishes generating.',
+                    validation: 'Seen in the analytics debug view.',
+                    taskIds: ['t2'],
+                }],
+            },
+        };
+
+        const plan = buildConsolidatedPlan({ planContent: fencePlan(withSections) })!;
+        expect(plan.securityPrivacy?.controls?.[0]).toMatchObject({
+            id: 'sec_encrypt_pii',
+            requirementIds: ['f1'],
+            taskIds: ['t1'],
+        });
+        expect(plan.securityPrivacy?.openQuestions).toEqual(['Which region stores EU data?']);
+        expect(plan.measurement?.metrics?.[0]).toMatchObject({
+            metric: 'Day-1 activation rate',
+            eventName: 'playlist_generated',
+            validation: 'Seen in the analytics debug view.',
+        });
+
+        const md = consolidatedPlanToMarkdown(plan);
+        expect(md).toContain('## Security & Privacy Obligations');
+        expect(md).toContain('- **Encrypt PII at rest** — GDPR requirement in the PRD constraints.');
+        expect(md).toContain('  - Tasks: t1');
+        expect(md).toContain('## Measurement');
+        expect(md).toContain('- **Day-1 activation rate** → `playlist_generated`');
+        expect(md).toContain('  - Validation: Seen in the analytics debug view.');
+    });
+
+    it('leaves both conditional sections undefined for a plan that omits them', () => {
+        const plan = buildConsolidatedPlan({ planContent: fencePlan(NATIVE_PLAN) })!;
+        // Absence must stay absence — an empty object here would make an
+        // unresolved obligation look like a satisfied one.
+        expect(plan.securityPrivacy).toBeUndefined();
+        expect(plan.measurement).toBeUndefined();
+        const md = consolidatedPlanToMarkdown(plan);
+        expect(md).not.toContain('## Security & Privacy Obligations');
+        expect(md).not.toContain('## Measurement');
+    });
+
+    it('feeds the derived obligation report from the adapted sections', () => {
+        const withSecurityOnly: StructuredImplementationPlan = {
+            ...NATIVE_PLAN,
+            securityPrivacy: {
+                controls: [{
+                    id: 'sec_a',
+                    title: 'Encrypt PII at rest',
+                    requirementIds: ['f1'],
+                    taskIds: ['t1'],
+                    tests: ['Column is encrypted'],
+                }],
+            },
+        };
+        const plan = buildConsolidatedPlan({ planContent: fencePlan(withSecurityOnly) })!;
+        const report = deriveCrossCuttingObligations({
+            prd: {
+                vision: 'v', targetUsers: ['u'], coreProblem: 'p', features: [],
+                architecture: 'a', risks: [],
+                constraints: ['Must be GDPR compliant'],
+                successMetrics: [{ name: 'Day-1 activation rate' }],
+            },
+            plan,
+        });
+
+        expect(report.securityPrivacy.satisfied).toBe(true);
+        expect(report.measurement.absent).toBe(true);
+        expect(report.unresolved.map(s => s.key)).toEqual(['measurement']);
     });
 });
 

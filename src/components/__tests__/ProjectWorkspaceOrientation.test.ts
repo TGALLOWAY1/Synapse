@@ -25,6 +25,28 @@ describe('ProjectWorkspace orientation', () => {
         expect(decl).toContain('!isPRDActivelyGenerating');
     });
 
+    // Plan §W6: the outputs CTA used to read "Build outputs" off
+    // `planningReadiness.isReadyToBuild`, which answers whether the product
+    // REASONING is sound — never whether the implementation packet is complete.
+    it('never labels the outputs CTA from the planning-readiness projection', () => {
+        const start = workspace.indexOf('{showAssetsPill && (');
+        const cta = workspace.slice(start, workspace.indexOf('</button>', start));
+
+        expect(cta).not.toContain('planningReadiness.isReadyToBuild');
+        expect(cta).toContain("displaysCurrentCommitment ? 'Build outputs' : 'Explore outputs'");
+    });
+
+    it('sources the build-packet gate from the committed checkpoint, not the projection', () => {
+        const start = workspace.indexOf('const buildPacketReadiness = deriveBuildPacketReadiness(');
+        const call = workspace.slice(start, workspace.indexOf('});', start));
+
+        expect(call).toContain('committedReadiness: currentCommittedReadiness');
+        expect(call).toContain('commitmentUnverifiable: isCommitmentUnverifiable');
+        // The live projection is passed ONLY so blocker copy can say whether a
+        // commit action is on offer; the evaluator never treats it as approval.
+        expect(call).toContain('planningProjectionReadyToBuild: planningReadiness.isReadyToBuild');
+    });
+
     it('does not pass global primary props into PlanningStateBar', () => {
         const start = workspace.indexOf('<PlanningStateBar');
         const props = workspace.slice(start, workspace.indexOf('/>', start));
@@ -106,7 +128,12 @@ describe('ProjectWorkspace orientation', () => {
         expect(effect).toContain('setCompletedGenerationJobKey(assetJobKey)');
         expect(summaryRender).toBeLessThan(artifactWorkspace);
         expect(workspace).toContain('assetJobKey === completedGenerationJobKey');
-        expect(workspace).toContain('assetJobKey !== dismissedGenerationJobKey');
+        // Dismissal is remembered per generation-job key (localStorage, not a
+        // persisted store collection) so a closed banner stays closed across a
+        // remount instead of resurfacing on the next visit.
+        expect(workspace).toContain('useGenerationCheckpointDismissal(projectId)');
+        expect(workspace).toContain('!generationCheckpointDismissal.isDismissed(assetJobKey)');
+        expect(workspace).toContain('generationCheckpointDismissal.dismiss(assetJobKey)');
     });
 
     it('passes one current checkpoint to export without a planning-ready shortcut', () => {

@@ -1,14 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Layers, Sparkles } from 'lucide-react';
+import { Layers, ShieldCheck, Sparkles } from 'lucide-react';
 import type { DataModelContent } from '../../types';
 import {
     parseDataModelMarkdown,
     dataModelToMarkdown,
+    type ParsedApiEndpoint,
     type ParsedDataModel,
     type ParsedEntity,
 } from '../../lib/services/dataModelMarkdown';
+import {
+    evaluateApiContractCompleteness,
+    type ApiEndpointCompleteness,
+} from '../../lib/apiContractCompleteness';
 import {
     analyzeDataModel,
     entityAnchorId,
@@ -81,6 +86,153 @@ function MethodPill({ method }: { method: string }) {
                   : 'text-neutral-700 bg-neutral-50 border-neutral-200';
     return (
         <span className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border ${color}`}>{m}</span>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Review segmentation: Schema → API Contract → Privacy & Security.
+// Per-section completeness indicators are DERIVED on read (advisory only —
+// the API section scores through src/lib/apiContractCompleteness.ts); nothing
+// here gates rendering or generation, and legacy models without the newer
+// contract fields render as honest "stub"/"partial" states, never errors.
+// ---------------------------------------------------------------------------
+
+type SectionTone = 'complete' | 'partial' | 'stub' | 'none';
+
+function SectionStatusChip({ tone, label }: { tone: SectionTone; label: string }) {
+    const cls =
+        tone === 'complete'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : tone === 'partial'
+              ? 'border-amber-200 bg-amber-50 text-amber-700'
+              : 'border-neutral-200 bg-neutral-50 text-neutral-500';
+    return (
+        <span
+            title="Derived from the artifact content — advisory only"
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}
+        >
+            {label}
+        </span>
+    );
+}
+
+function ReviewSectionHeader({ step, title, chip }: { step: number; title: string; chip?: ReactNode }) {
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            <span
+                aria-hidden="true"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] font-bold text-white"
+            >
+                {step}
+            </span>
+            <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
+            {chip}
+        </div>
+    );
+}
+
+function ContractRow({ label, value }: { label: string; value?: string }) {
+    if (!value) return null;
+    return (
+        <div className="flex gap-2 text-xs">
+            <span className="w-28 shrink-0 font-medium text-neutral-500">{label}</span>
+            <span className="min-w-0 break-words text-neutral-700">{value}</span>
+        </div>
+    );
+}
+
+function ContractListRow({ label, items }: { label: string; items?: string[] }) {
+    if (!items?.length) return null;
+    return (
+        <div className="flex gap-2 text-xs">
+            <span className="w-28 shrink-0 font-medium text-neutral-500">{label}</span>
+            <ul className="min-w-0 flex-1 space-y-0.5 text-neutral-700">
+                {items.map((item, i) => (
+                    <li key={i} className="break-words">{item}</li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+const ENDPOINT_STATUS_LABEL: Record<ApiEndpointCompleteness['status'], string> = {
+    complete: 'Complete',
+    partial: 'Partial',
+    stub: 'Stub',
+};
+
+function EndpointContractCard({
+    endpoint,
+    completeness,
+}: {
+    endpoint: ParsedApiEndpoint;
+    completeness: ApiEndpointCompleteness;
+}) {
+    const hasContractDetail = completeness.status !== 'stub';
+    return (
+        <div className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+                <MethodPill method={endpoint.method} />
+                <span className="min-w-0 break-all font-mono text-xs font-semibold text-neutral-800">
+                    {endpoint.path}
+                </span>
+                {endpoint.entity && (
+                    <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-600">
+                        {endpoint.entity}
+                    </span>
+                )}
+                <span className="ml-auto">
+                    <SectionStatusChip
+                        tone={completeness.status}
+                        label={ENDPOINT_STATUS_LABEL[completeness.status]}
+                    />
+                </span>
+            </div>
+            {endpoint.description && (
+                <p className="mt-1.5 text-xs text-neutral-600">{endpoint.description}</p>
+            )}
+
+            {hasContractDetail && (
+                <div className="mt-2.5 space-y-1.5 border-t border-neutral-100 pt-2.5">
+                    <ContractRow label="Authentication" value={endpoint.auth?.authentication} />
+                    <ContractRow label="Authorization" value={endpoint.auth?.authorization} />
+                    <ContractRow label="Request" value={endpoint.requestSchema} />
+                    <ContractRow label="Response" value={endpoint.responseSchema} />
+                    <ContractListRow label="Errors" items={endpoint.errors} />
+                    <ContractRow label="Pagination" value={endpoint.pagination} />
+                    <ContractRow label="Idempotency" value={endpoint.idempotency} />
+                    <ContractRow label="Rate limit" value={endpoint.rateLimit} />
+                    {endpoint.requirementIds && endpoint.requirementIds.length > 0 && (
+                        <div className="flex gap-2 text-xs">
+                            <span className="w-28 shrink-0 font-medium text-neutral-500">Requirements</span>
+                            <span className="flex min-w-0 flex-wrap gap-1">
+                                {endpoint.requirementIds.map(id => (
+                                    <span
+                                        key={id}
+                                        className="rounded border border-fuchsia-200 bg-fuchsia-50 px-1.5 py-0.5 font-mono text-[11px] text-fuchsia-700"
+                                    >
+                                        {id}
+                                    </span>
+                                ))}
+                            </span>
+                        </div>
+                    )}
+                    <ContractListRow label="Tests" items={endpoint.tests} />
+                </div>
+            )}
+
+            {completeness.status === 'partial' && (
+                <p className="mt-2 text-[11px] text-amber-700">
+                    Missing: {completeness.missingFields.join(', ')}
+                </p>
+            )}
+            {completeness.status === 'stub' && (
+                <p className="mt-2 text-[11px] text-neutral-500">
+                    No contract details recorded (legacy format). Regenerate the data model to add
+                    auth, request/response schemas, errors, and tests.
+                </p>
+            )}
+        </div>
     );
 }
 
@@ -230,9 +382,77 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
         return out;
     }, [grouped, orderedPairs]);
 
+    // --- Per-section completeness (derived on read, advisory only) ---------
+
+    // Schema: every entity should define at least one field.
+    const fieldlessEntities = useMemo(
+        () => parsed.entities.filter(e => e.fieldGroups.every(g => g.fields.length === 0)),
+        [parsed],
+    );
+    const schemaChip: { tone: SectionTone; label: string } =
+        parsed.entities.length === 0
+            ? { tone: 'stub', label: 'No entities' }
+            : fieldlessEntities.length > 0
+              ? {
+                    tone: 'partial',
+                    label: `${fieldlessEntities.length} ${fieldlessEntities.length === 1 ? 'entity' : 'entities'} without fields`,
+                }
+              : {
+                    tone: 'complete',
+                    label: `${parsed.entities.length} ${parsed.entities.length === 1 ? 'entity' : 'entities'} defined`,
+                };
+
+    // API Contract: scored per endpoint by the shared completeness module.
+    const apiCompleteness = useMemo(
+        () => evaluateApiContractCompleteness(parsed.apiEndpoints),
+        [parsed],
+    );
+    const apiChip: { tone: SectionTone; label: string } =
+        apiCompleteness.status === 'empty'
+            ? { tone: 'none', label: 'No endpoints declared' }
+            : apiCompleteness.status === 'complete'
+              ? { tone: 'complete', label: 'Contract complete' }
+              : apiCompleteness.status === 'stub'
+                ? { tone: 'stub', label: 'Legacy format — no contract details' }
+                : {
+                      tone: 'partial',
+                      label: `${apiCompleteness.completeCount} of ${apiCompleteness.endpoints.length} complete`,
+                  };
+
+    // Privacy & Security: PII-bearing entities should each declare at least
+    // one privacy rule; endpoint auth coverage is reported alongside. Note
+    // `hasPII` already covers entities whose only signal is a PRIVACY callout
+    // (see dataModelGraph.entityHasPII), so `piiPairs` is the full population.
+    const piiPairs = useMemo(() => pairs.filter(p => p.node.hasPII), [pairs]);
+    const uncoveredPii = useMemo(
+        () => piiPairs.filter(p => !p.entity.callouts.some(c => c.kind === 'PRIVACY')),
+        [piiPairs],
+    );
+    const endpointsWithAuth = useMemo(
+        () => parsed.apiEndpoints.filter(ep => Boolean(ep.auth?.authentication?.trim() || ep.auth?.authorization?.trim())).length,
+        [parsed],
+    );
+    const privacyChip: { tone: SectionTone; label: string } =
+        piiPairs.length === 0
+            ? { tone: 'none', label: 'None declared' }
+            : uncoveredPii.length > 0
+              ? {
+                    tone: 'partial',
+                    label: `${uncoveredPii.length} PII ${uncoveredPii.length === 1 ? 'entity' : 'entities'} without rules`,
+                }
+              : { tone: 'complete', label: 'PII covered by rules' };
+
     return (
         <div className="space-y-6">
             <DataModelOverview summary={summary} onShowPii={showPiiEntities} />
+
+            {/* ── Review section 1 · Schema ─────────────────────────────── */}
+            <section aria-label="Schema" className="space-y-5">
+            <ReviewSectionHeader
+                step={1}
+                title="Schema"
+                chip={<SectionStatusChip tone={schemaChip.tone} label={schemaChip.label} />}
+            />
 
             {parsed.overview && (
                 <section className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">
@@ -343,40 +563,86 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
                     </div>
                 </section>
             )}
+            </section>
 
-            {parsed.apiEndpoints.length > 0 && (
-                <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">API Endpoints</h3>
-                    <div className="relative">
-                        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
-                            <table className="w-full min-w-[640px] text-xs">
-                                <thead>
-                                    <tr className="bg-neutral-50 text-neutral-500 uppercase tracking-wider text-[10px]">
-                                        <th className="text-left px-3 py-2 font-medium">Method</th>
-                                        <th className="text-left px-3 py-2 font-medium">Path</th>
-                                        <th className="text-left px-3 py-2 font-medium">Description</th>
-                                        <th className="text-left px-3 py-2 font-medium">Entity</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {parsed.apiEndpoints.map((ep, ei) => (
-                                        <tr key={ei} className="border-t border-neutral-100 align-top">
-                                            <td className="px-3 py-1.5 whitespace-nowrap"><MethodPill method={ep.method} /></td>
-                                            <td className="px-3 py-1.5 font-mono text-neutral-800 whitespace-nowrap">{ep.path}</td>
-                                            <td className="px-3 py-1.5 text-neutral-600">{ep.description}</td>
-                                            <td className="px-3 py-1.5 text-neutral-700 whitespace-nowrap">{ep.entity ?? ''}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div
-                            aria-hidden="true"
-                            className="pointer-events-none absolute inset-y-0 right-0 w-8 rounded-r-xl bg-gradient-to-l from-white to-transparent md:hidden"
-                        />
+            {/* ── Review section 2 · API Contract ───────────────────────── */}
+            <section aria-label="API Contract" className="space-y-2.5">
+                <ReviewSectionHeader
+                    step={2}
+                    title="API Contract"
+                    chip={<SectionStatusChip tone={apiChip.tone} label={apiChip.label} />}
+                />
+                {parsed.apiEndpoints.length > 0 ? (
+                    <div className="space-y-2.5">
+                        {parsed.apiEndpoints.map((ep, ei) => (
+                            <EndpointContractCard
+                                key={`${ep.method}-${ep.path}-${ei}`}
+                                endpoint={ep}
+                                completeness={apiCompleteness.endpoints[ei]}
+                            />
+                        ))}
                     </div>
-                </section>
-            )}
+                ) : (
+                    <p className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50/50 px-3 py-2.5 text-xs text-neutral-500">
+                        No API endpoints declared in this data model.
+                    </p>
+                )}
+            </section>
+
+            {/* ── Review section 3 · Privacy & Security ─────────────────── */}
+            <section aria-label="Privacy & Security" className="space-y-2.5">
+                <ReviewSectionHeader
+                    step={3}
+                    title="Privacy & Security"
+                    chip={<SectionStatusChip tone={privacyChip.tone} label={privacyChip.label} />}
+                />
+                {piiPairs.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50/50 px-3 py-2.5 text-xs text-neutral-500">
+                        No PII fields or privacy rules declared in this data model.
+                    </p>
+                ) : (
+                    <div className="space-y-2.5">
+                        {piiPairs.map(({ entity, node }) => {
+                            const rules = entity.callouts.filter(c => c.kind === 'PRIVACY');
+                            return (
+                                <div key={node.id} className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <ShieldCheck size={14} className="shrink-0 text-rose-600" aria-hidden="true" />
+                                        <button
+                                            type="button"
+                                            onClick={() => focusEntity(node.id)}
+                                            className="text-xs font-semibold text-neutral-800 hover:text-indigo-700 hover:underline"
+                                        >
+                                            {entity.name}
+                                        </button>
+                                        <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
+                                            Contains PII
+                                        </span>
+                                    </div>
+                                    {rules.length > 0 ? (
+                                        <ul className="mt-1.5 space-y-0.5 text-xs text-neutral-600">
+                                            {rules.map((rule, ri) => (
+                                                <li key={ri} className="break-words">{rule.text}</li>
+                                            ))}
+                                        </ul>
+                                    ) : (
+                                        <p className="mt-1.5 text-[11px] text-amber-700">
+                                            Contains PII but declares no privacy rules.
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+                {parsed.apiEndpoints.length > 0 && (
+                    <p className="text-[11px] text-neutral-500">
+                        {endpointsWithAuth} of {parsed.apiEndpoints.length}{' '}
+                        {parsed.apiEndpoints.length === 1 ? 'endpoint declares' : 'endpoints declare'} auth
+                        — details in the API Contract section above.
+                    </p>
+                )}
+            </section>
         </div>
     );
 }

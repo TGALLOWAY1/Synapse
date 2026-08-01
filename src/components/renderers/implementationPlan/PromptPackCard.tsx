@@ -104,9 +104,14 @@ export function PromptPackCard({
                         )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Always secondary: Final Review owns the plan
+                            surface's ONE primary action (plan §W7), so a filled
+                            copy button here would compete with it — and would
+                            invite building from an unapproved packet. */}
                         <CopyTextButton
                             text={promptPackToClipboardText(pack)}
                             label="Copy Prompt"
+                            variant="secondary"
                             onCopied={onCopied}
                         />
                         <button

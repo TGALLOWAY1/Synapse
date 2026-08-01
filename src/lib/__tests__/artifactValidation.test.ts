@@ -89,8 +89,13 @@ describe('validateArtifactContent', () => {
             apiEndpoints: [{ method: 'POST', path: '/api/v1/sync', description: 'Sync batch', entity: 'HabitCompletion' }],
         };
         const md = dataModelToMarkdown(model);
-        // Sanity: the emitter really produces no bullet/numbered list line.
-        expect(/^[-*]\s/m.test(md) || /^\d+\.\s/m.test(md)).toBe(false);
+        // Sanity: ENTITY detail is still tables + callouts, never bullet lists.
+        // (The API Endpoints section now emits per-endpoint contract blocks
+        // with labeled bullets — so scope the bullet-free assertion to the
+        // entity portion, keeping the tables+callouts "has detail" signal
+        // honest for the part of the document that has no bullets.)
+        const entityPortion = md.split('## API Endpoints')[0];
+        expect(/^[-*]\s/m.test(entityPortion) || /^\d+\.\s/m.test(entityPortion)).toBe(false);
         const result = validateArtifactContent('data_model', md);
         expect(result.warnings.some(w => /may lack detail/.test(w))).toBe(false);
     });

@@ -20,6 +20,11 @@
  * rewritten or migrated. Data is preserved: legacy Definition of Done items
  * become quality gates, Architecture feeds the summary, and Risks (milestone
  * or appendix) surface through `plan.risks` (their own overview card).
+ *
+ * The conditional cross-cutting sections (`securityPrivacy`, `measurement` —
+ * plan §W5) pass through **verbatim, and stay undefined when absent**: absence
+ * is what `src/lib/planning/crossCuttingObligations.ts` reads to tell an
+ * unresolved obligation apart from a section that was never owed.
  */
 
 import type {
@@ -380,6 +385,9 @@ function deriveTraceability(milestones: ImplementationPlanMilestone[]): Implemen
             screens: dedupe([...(links.screens ?? []), ...taskScreens]),
             dataModels: dedupe([...(links.dataModels ?? []), ...taskData]),
             components: dedupe(links.components ?? []),
+            // Flow links are milestone-level only (task linkedArtifacts has no
+            // userFlows field). Recorded since the plan sources user_flows (W2).
+            userFlows: dedupe(links.userFlows ?? []),
             promptPackIds: (m.promptPacks ?? []).map(p => p.id),
             qualityGateIds: (m.qualityGates ?? []).map(g => g.id),
         };
@@ -516,6 +524,13 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
         globalQualityGates,
         traceability: deriveTraceability(milestones),
         risks,
+        // Conditional cross-cutting sections pass through verbatim when the
+        // plan carries them; they stay `undefined` otherwise, because absence
+        // is what `deriveCrossCuttingObligations` reads to decide whether the
+        // obligation is unresolved or simply not applicable. Never substitute
+        // an empty object here.
+        securityPrivacy: structured?.securityPrivacy,
+        measurement: structured?.measurement,
         architecture: structured?.architecture ?? legacyAppendix?.architecture ?? [],
         appendixNotes: legacyAppendix?.notes,
         sources: { plan: planSource, promptPacks: packSource },
@@ -599,6 +614,40 @@ export function consolidatedPlanToMarkdown(plan: ConsolidatedImplementationPlan)
     if (plan.risks.length) {
         lines.push('## Risks', '');
         plan.risks.forEach(r => lines.push(`- ${r.description}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`));
+        lines.push('');
+    }
+    // Conditional sections — written only when the plan carries them, so a
+    // copied plan never shows an empty obligation heading.
+    if (plan.securityPrivacy) {
+        lines.push('## Security & Privacy Obligations', '');
+        if (plan.securityPrivacy.summary) lines.push(plan.securityPrivacy.summary, '');
+        plan.securityPrivacy.controls?.forEach(c => {
+            lines.push(`- **${c.title}**${c.obligation ? ` — ${c.obligation}` : ''}`);
+            if (c.implementation) lines.push(`  - Implementation: ${c.implementation}`);
+            if (c.requirementIds?.length) lines.push(`  - Requirements: ${c.requirementIds.join(', ')}`);
+            if (c.taskIds?.length) lines.push(`  - Tasks: ${c.taskIds.join(', ')}`);
+            if (c.tests?.length) lines.push(`  - Verification: ${c.tests.join('; ')}`);
+        });
+        if (plan.securityPrivacy.openQuestions?.length) {
+            lines.push('', '**Open Questions:**');
+            plan.securityPrivacy.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
+        lines.push('');
+    }
+    if (plan.measurement) {
+        lines.push('## Measurement', '');
+        if (plan.measurement.summary) lines.push(plan.measurement.summary, '');
+        plan.measurement.metrics?.forEach(m => {
+            lines.push(`- **${m.metric}**${m.eventName ? ` → \`${m.eventName}\`` : ''}`);
+            if (m.properties?.length) lines.push(`  - Properties: ${m.properties.join(', ')}`);
+            if (m.trigger) lines.push(`  - Trigger: ${m.trigger}`);
+            if (m.validation) lines.push(`  - Validation: ${m.validation}`);
+            if (m.taskIds?.length) lines.push(`  - Tasks: ${m.taskIds.join(', ')}`);
+        });
+        if (plan.measurement.openQuestions?.length) {
+            lines.push('', '**Open Questions:**');
+            plan.measurement.openQuestions.forEach(q => lines.push(`- ${q}`));
+        }
         lines.push('');
     }
     if (plan.appendixNotes) {

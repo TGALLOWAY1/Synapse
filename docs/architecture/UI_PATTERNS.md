@@ -245,11 +245,134 @@ interruptions:
   Finalize verdict and accepted risks; absent a current commitment it says
   **Working plan** once.
 
+#### Checkpoint severity follows the outcome, not the note count
+
+`deriveWorkflowCheckpointSummary` returns a `tone` and the card renders nothing
+but that tone — **never** branch chrome on "are there rows at all":
+
+| tone | when | chrome |
+|---|---|---|
+| `clean` | no rows, no accepted risks | emerald, check mark |
+| `advisory` | `attentionSignals === 0` and rows exist | neutral/white, check mark |
+| `attention` | any attention signal (failed/interrupted slot, blocking validation, build-blocking alignment, blocker/resolve-before-build critique) **or** a verdict carrying accepted planning risks | amber, warning triangle |
+
+A run that produced every output and carries only advisory notes **succeeded**
+and must read like it — a validation note is not a reason to paint the
+workspace amber. The reverse rule is equally load-bearing: an errored slot
+never degrades to advisory, and accepted planning risks never read as clean.
+
+The card is **compact by default**: line one is the outcome headline plus the
+plan-verdict chip; supporting text, rationale/containment, accepted risks, and
+the per-row signals sit behind a disclosure labelled from
+`summary.detailsLabel` ("1 note" / "3 items to review"). The disclosure starts
+**open** for `attention` (a failure is never hidden) and **closed** otherwise;
+once the user toggles it, their choice wins. Rows keep their per-row `Review`
+action inside the disclosure — dismissing or collapsing must never be the only
+way to get past a note.
+
+Dismissal of the post-generation banner is remembered per generation-job key
+(`spineVersionId:startedAt`) in `src/lib/generationCheckpointDismissal.ts` via
+the hook `useGenerationCheckpointDismissal`. It is browser-local UI state in
+plain localStorage — deliberately **not** a persisted store collection, which
+would drag in `ALL_PROJECT_COLLECTIONS` / snapshot / sync / demo-cleanup wiring
+(rule 6) for a closed banner. A new run has a new key, so it shows again.
+
 These cards are projections, not new persisted workflow state. Aggregate
 attention gets one global home in the next-action strip and one checkpoint
 echo; local surfaces use exact action labels instead of repeating counts.
 Cards and modal disclosures must retain keyboard reachability, visible focus,
 dialog labelling, Escape handling, focus restoration, and 44px mobile targets.
+
+### One-primary-action CTA hierarchy (Final Review, plan §W7)
+
+The Implementation Plan surface is the reference implementation of a rule worth
+copying: **a decision surface promotes exactly one primary action, and its label
+states the actual next step.**
+
+- The state machine is a **pure function**, not JSX branching:
+  `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`) returns one
+  `primary: FinalReviewAction` plus a `secondary: FinalReviewAction[]`, and the
+  component only renders what it is handed. That is what makes "exactly one
+  primary in every state" a unit test rather than a code review.
+- The label is **derived, never hardcoded per branch**: N in "Resolve N
+  blockers" comes from the evaluator's blocker list, so the count can never
+  disagree with the list underneath it.
+- **Demotion is permanent, not conditional.** Copy plan / Review prompts /
+  Convert to tasks are `kind: 'secondary'` in *all* states, including the ready
+  one, and sit behind a "More actions" disclosure. The prior design styled
+  "Copy next prompt" primary regardless of blockers — a filled CTA inviting a
+  user to start building from an incomplete packet.
+- **A secondary path is still a real path.** Copying a prompt before approval
+  remains possible — from a demoted control. Every prompt-copy button on the
+  surface (`PromptPackCard`, the Prompts tab's "Copy next prompt", "Copy all
+  prompt packs", "Copy milestone prompts") is permanently `variant="secondary"`,
+  *including after approval*, so no tab ever shows a second filled button. When
+  the packet is approved the primary in Final Review already offers that copy;
+  a duplicate filled button would just re-state it.
+- **An unavailable state is honest, not empty.** With no evaluator result the
+  primary renders disabled with a stated reason rather than falling back to
+  whichever action happens to be wireable.
+- **Blocking beats history.** A recorded approval never promotes a build action
+  while blockers exist; the approval is reported as *superseded* instead.
+- Disclosures that must be driven by tests or lazily mounted use a
+  **button + `aria-expanded` + conditional render**, not `<details>` — jsdom
+  does not toggle `<details>` on a summary click, and the collapsed content of a
+  `<details>` is still in the accessibility tree and the DOM.
+
+### Severity is expressed once; sections carry a flag, not a second verdict
+
+A problem that a readiness evaluator already blocks on has **one** loud home:
+the evaluator's blocker list. The place in the document where the problem lives
+gets a **compact flag** — a small chip naming the thing and its gap count, plus
+one action — and the flag points at the blocker instead of restating it. Two
+full-volume statements of one fact read as two problems, and a page of amber
+panels teaches users to ignore amber.
+
+The reference implementation is `CrossCuttingObligationsCard`
+(`src/components/artifacts/CrossCuttingObligationsCard.tsx`), the Implementation
+Plan's §W5 Security & Privacy / Measurement sections:
+
+| state | chip | action | detail |
+|---|---|---|---|
+| required, unsatisfied | `Not in the plan` (absent) or `N gaps` — amber chip | **Address in Decision Center** | collapsed |
+| required, satisfied | `Covered` — emerald chip | none | collapsed |
+| not required (content volunteered) | `Not required` — neutral chip | none | collapsed |
+| not required, no content | *renders nothing* | — | — |
+
+Rules this pattern holds to:
+
+- **The volume drops, the signal does not.** The obligation still blocks the
+  build packet through §W6; Final Review's status pill, its "Resolve N
+  blockers" primary, and its blocker list all still fire without any click. A
+  user who never opens the flag still learns the packet is incomplete.
+- **The flag never restates the consequence or the remedy** — those are the
+  blocker's fields. Its expanded detail names the gaps and then says
+  *"Counted in the Final Review blockers above"*.
+- **Collapsed by default in every state, including the unresolved one.** This is
+  the deliberate exception to the checkpoint-card rule above (where `attention`
+  opens the disclosure): a checkpoint card *is* the statement of severity, a
+  section flag is a pointer to one made elsewhere on the same screen.
+- **No full-width tinted panel and no nested tinted sub-panel.** The only
+  coloured surface is the chip; gap lists render as plain neutral lists.
+- The disclosure uses button + `aria-expanded` + conditional render, per above.
+
+**The action opens the Decision Center, it does not fix anything inline.** The
+flag calls one injected `onAddressObligation` handler, which routes through the
+existing flag→plan path — `flagCrossCuttingObligationConcern`
+(`src/lib/planning/flagToPlan.ts`) → the store's `flagPlanningConcern` → 
+`ProjectWorkspace.openDecisionCenter(recordId, returnTo)` — landing the user on
+the new record with a return target back to the plan. The card itself owns no
+store access and no navigation. Two constraints ride on that handler:
+
+- It is **capability-gated by the caller** (`ArtifactWorkspace` supplies it only
+  when `capabilities.canPersistWorkflowState` and it has a planning-record
+  opener). Absent handler → the flag renders with **no write action at all**, so
+  a demo/read-only project is never offered an action that would write. Never a
+  project-id check at the call site (rule 5).
+- It runs **only in the click handler** — never on render, never in a memo. The
+  derived report is computed on read; the `PlanningRecord` exists only after an
+  explicit user action (rule 13). A rejected flag (stale plan version) is
+  reported inline rather than silently navigating nowhere.
 
 ### Interactive product tour (`src/components/tour/`)
 

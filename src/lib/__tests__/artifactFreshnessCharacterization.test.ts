@@ -76,17 +76,25 @@ function healthyInput(): DependencyEvaluationInput {
     snapshots.user_flows = snapshot('user_flows', {
         sourceRefs: [spineRef(SPINE_V1), artifactRef('art-screen_inventory', 'ver-screen_inventory-1')],
     });
+    // component_inventory became a real graph node when W4 unhid it — as a
+    // mockup input it must be generated here or it propagates as impactedBy.
+    snapshots.component_inventory = snapshot('component_inventory', {
+        sourceRefs: [spineRef(SPINE_V1), artifactRef('art-screen_inventory', 'ver-screen_inventory-1')],
+    });
     snapshots.implementation_plan = snapshot('implementation_plan', {
         sourceRefs: [
             spineRef(SPINE_V1),
             artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
             artifactRef('art-data_model', 'ver-data_model-1'),
+            // Recorded since the plan gained the user_flows dep (W2).
+            artifactRef('art-user_flows', 'ver-user_flows-1'),
         ],
     });
     snapshots.mockup = snapshot('mockup', {
         sourceRefs: [
             spineRef(SPINE_V1),
             artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
+            artifactRef('art-component_inventory', 'ver-component_inventory-1'),
             artifactRef('art-design_system', 'ver-design_system-1', 'hash-a'),
         ],
     });
@@ -211,8 +219,13 @@ describe('artifact freshness characterization — Engine B subsumes Engine A (SY
             versionId: 'ver-design_system-2', versionNumber: 2, createdAt: 2000,
             sourceRefs: [spineRef(SPINE_V2)],
         });
-        // The rebased mockup: spine → v2, screen_inventory → v2, design_system
-        // → v2 with the refreshed hash-b anchor.
+        input.snapshots.component_inventory = snapshot('component_inventory', {
+            versionId: 'ver-component_inventory-2', versionNumber: 2, createdAt: 2000,
+            sourceRefs: [spineRef(SPINE_V2), artifactRef('art-screen_inventory', 'ver-screen_inventory-2')],
+        });
+        // The rebased mockup: spine → v2, screen_inventory → v2,
+        // component_inventory → v2, design_system → v2 with the refreshed hash-b
+        // anchor.
         input.snapshots.mockup = snapshot('mockup', {
             versionId: 'ver-mockup-2',
             versionNumber: 2,
@@ -220,6 +233,7 @@ describe('artifact freshness characterization — Engine B subsumes Engine A (SY
             sourceRefs: [
                 spineRef(SPINE_V2),
                 artifactRef('art-screen_inventory', 'ver-screen_inventory-2'),
+                artifactRef('art-component_inventory', 'ver-component_inventory-2'),
                 artifactRef('art-design_system', 'ver-design_system-2', 'hash-b'),
             ],
         });

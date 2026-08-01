@@ -3,6 +3,12 @@ import {
     CheckCircle2, Circle, Clock, Trash2, ExternalLink, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
+import {
+    isSelfReportedImplemented,
+    isSelfReportedStarted,
+    taskProgressCopy,
+    TASK_PROGRESS_SELF_REPORTED_NOTE,
+} from '../../lib/taskProgressLanguage';
 import type { ProjectTask, TaskStatus } from '../../types';
 
 // Stable empty reference for the tasks selector. A fresh `[]` literal each
@@ -23,7 +29,10 @@ const PRIORITY_STYLE: Record<string, string> = {
     low: 'bg-neutral-100 text-neutral-600 border-neutral-200',
 };
 
-/** Cycle order for the status toggle: todo → in_progress → done → todo.
+/** Cycle order for the status toggle: todo → in_progress → done → todo — i.e.
+ * planned → started → implemented (self-reported) → planned in the words the
+ * user sees (`lib/taskProgressLanguage.ts`). The STORED values are unchanged:
+ * §W8 relabelled these states, it did not migrate them.
  * `blocked` (only set by structured-plan imports, never by this UI) folds
  * back into the cycle at `todo`. */
 const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
@@ -34,15 +43,16 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
 };
 
 function StatusButton({ status, onClick, disabled = false }: { status: TaskStatus; onClick: () => void; disabled?: boolean }) {
-    const actionLabel =
-        status === 'done' ? 'Done — click to reset'
-            : status === 'in_progress' ? 'In progress — click to mark done'
-                : 'To do — click to start';
-    const label = disabled ? `${status.replace('_', ' ')} (read-only)` : actionLabel;
-    const Icon = status === 'done' ? CheckCircle2 : status === 'in_progress' ? Clock : Circle;
+    const copy = taskProgressCopy(status);
+    const label = disabled
+        ? `${copy.longLabel} (read-only)`
+        : `${copy.longLabel} — click to ${copy.nextAction}`;
+    const Icon = isSelfReportedImplemented(status)
+        ? CheckCircle2
+        : isSelfReportedStarted(status) ? Clock : Circle;
     const color =
-        status === 'done' ? 'text-green-600'
-            : status === 'in_progress' ? 'text-amber-500'
+        isSelfReportedImplemented(status) ? 'text-green-600'
+            : isSelfReportedStarted(status) ? 'text-amber-500'
                 : 'text-neutral-300 hover:text-neutral-500';
     return (
         <button
@@ -67,9 +77,9 @@ export function TaskChecklist({ projectId, sourceArtifactId, readOnly = false }:
     const mine: ProjectTask[] = tasks.filter(t => t.sourceArtifactId === sourceArtifactId);
     if (mine.length === 0) return null;
 
-    const done = mine.filter(t => t.status === 'done').length;
-    const inProgress = mine.filter(t => t.status === 'in_progress').length;
-    const pct = Math.round((done / mine.length) * 100);
+    const implemented = mine.filter(t => isSelfReportedImplemented(t.status)).length;
+    const started = mine.filter(t => isSelfReportedStarted(t.status)).length;
+    const pct = Math.round((implemented / mine.length) * 100);
 
     return (
         <section className="not-prose mb-6 rounded-xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
@@ -77,16 +87,28 @@ export function TaskChecklist({ projectId, sourceArtifactId, readOnly = false }:
                 <div className="flex items-center justify-between gap-3 mb-2">
                     <h3 className="text-sm font-semibold text-neutral-800">Implementation progress</h3>
                     <span className="text-xs text-neutral-500 shrink-0">
-                        {done} of {mine.length} done
-                        {inProgress > 0 && <span className="text-amber-600"> · {inProgress} in progress</span>}
+                        {implemented} of {mine.length} marked implemented
+                        {started > 0 && <span className="text-amber-600"> · {started} started</span>}
                     </span>
                 </div>
-                <div className="h-2 rounded-full bg-neutral-100 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                <div
+                    className="h-2 rounded-full bg-neutral-100 overflow-hidden"
+                    role="progressbar"
+                    aria-label="Self-reported implementation progress"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                >
                     <div
                         className="h-full bg-green-500 transition-all duration-300"
                         style={{ width: `${pct}%` }}
                     />
                 </div>
+                {/* §W8: the ONE place this surface says Synapse does not verify
+                    execution. Once, under the bar — not per row, not a modal. */}
+                <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
+                    {TASK_PROGRESS_SELF_REPORTED_NOTE}
+                </p>
             </header>
 
             <ul className="divide-y divide-neutral-100">
@@ -108,7 +130,7 @@ export function TaskChecklist({ projectId, sourceArtifactId, readOnly = false }:
                                         className="w-full flex items-center gap-1.5 text-left"
                                     >
                                         {expanded ? <ChevronDown size={13} className="shrink-0 text-neutral-400" /> : <ChevronRight size={13} className="shrink-0 text-neutral-400" />}
-                                        <span className={`text-sm font-medium truncate ${task.status === 'done' ? 'text-neutral-400 line-through' : 'text-neutral-800'}`}>
+                                        <span className={`text-sm font-medium truncate ${isSelfReportedImplemented(task.status) ? 'text-neutral-400 line-through' : 'text-neutral-800'}`}>
                                             {task.title}
                                         </span>
                                     </button>}

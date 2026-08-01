@@ -5,12 +5,15 @@ import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
 import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 import type { PlanningArtifactRegionTarget } from '../../lib/planning/planningNavigation';
+import type { ComponentJoinScreen } from '../../lib/componentExperience';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
+import { ComponentInventoryRenderer } from './ComponentInventoryRenderer';
 import { DataModelRenderer } from './DataModelRenderer';
 import { DesignSystemRenderer } from './DesignSystemRenderer';
 import { UserFlowsRenderer } from './UserFlowsRenderer';
 import { ImplementationPlanRenderer } from './ImplementationPlanRenderer';
+import type { PlanFinalReviewContext } from './implementationPlan/FinalReviewCard';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -38,8 +41,16 @@ interface DispatchProps {
     domainEntities?: DomainEntity[];
     featureSystems?: FeatureSystem[];
     implementationPlan?: ImplementationPlan;
-    /** Only consumed by `user_flows`: Experience-workspace wiring so screen
-     * journey nodes can open the matching Screen Detail view. */
+    /**
+     * Only consumed by `component_inventory`: screens projected from the
+     * canonical Screens index (`componentJoinScreensFromIndex`) so each
+     * component can show which screens reference it, and so component/screen
+     * contradictions can be surfaced as advisories. Omitted → the components
+     * render without back-references (there is no second screen join).
+     */
+    componentScreens?: readonly ComponentJoinScreen[];
+    /** Consumed by `user_flows` (journey nodes) and `component_inventory`
+     * (screen back-references): opens the matching Screen Detail view. */
     onNavigateToScreen?: (screenSlug: string) => void;
     availableScreenSlugs?: ReadonlySet<string>;
     /** Phase 5A region navigation. These values select and reveal the exact
@@ -73,6 +84,9 @@ interface DispatchProps {
      * duplicate of the page-level provenance/freshness strip.
      */
     staleness?: DependencyNodeStatus;
+    /** Only consumed by `implementation_plan`: build-packet context for the
+     * Final Review decision surface (plan §W7). */
+    planFinalReview?: PlanFinalReviewContext;
 }
 
 /**
@@ -82,21 +96,28 @@ interface DispatchProps {
  * Two subtypes (`screen_inventory`, `data_model`) are stored as JSON when
  * generation succeeds and rendered through structured renderers; the
  * structured renderers return `null` if the content turns out not to be
- * JSON, and we fall through. (`component_inventory` is also JSON but is a
- * hidden artifact with no reachable renderer — see below.)
+ * JSON, and we fall through.
  *
- * The markdown-only subtypes (`design_system`, `user_flows`,
- * `implementation_plan`) get bespoke layouts that parse
+ * The markdown-only subtypes (`component_inventory`, `design_system`,
+ * `user_flows`, `implementation_plan`) get bespoke layouts that parse
  * the conventional markdown shapes into rich visual presentations
  * (color swatches, milestone timeline, prompt cards, etc.). Each
  * gracefully falls back to ReactMarkdown if the conventions don't
  * match — older artifacts always remain readable.
  *
- * `component_inventory` and `prompt_pack` have no dispatch branch: both are
- * hidden/retired `CoreArtifactSubtype`s (see `coreArtifactPipeline.ts`) that
+ * `component_inventory` is reached from the **Components section inside the
+ * Screens experience** (`ScreenComponentsSection`), not from a sidebar row: it
+ * is a bridge artifact between screens and implementation, and per W4 of
+ * docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md a separate top-level row would
+ * re-fragment the same surface. It is deliberately absent from
+ * `ARTIFACT_GROUPS`, so `selected` never holds it — exactly like
+ * `screen_inventory`/`mockup`. It is no longer a *hidden* subtype.
+ *
+ * `prompt_pack` still has no dispatch branch: it is a retired
+ * `CoreArtifactSubtype` (see `coreArtifactPipeline.ts`) that
  * `ArtifactWorkspace`'s `slotMetas` filters out of the sidebar, so `selected`
- * can never hold either value and these subtypes fall through to the plain
- * ReactMarkdown renderer (unreachable in practice).
+ * can never hold it and it falls through to the plain ReactMarkdown renderer
+ * (its legacy content is consumed by the Implementation Plan adapter instead).
  */
 function isJsonString(str: string): boolean {
     try {
@@ -118,6 +139,7 @@ export function ArtifactContentRenderer({
     domainEntities,
     featureSystems,
     implementationPlan,
+    componentScreens,
     onNavigateToScreen,
     availableScreenSlugs,
     initialFlowId,
@@ -133,6 +155,7 @@ export function ArtifactContentRenderer({
     sourceVersions,
     prdVersionLabel,
     staleness,
+    planFinalReview,
 }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
@@ -147,6 +170,17 @@ export function ArtifactContentRenderer({
                 initialEntityName={initialDataEntityName}
                 initialMemberName={initialDataMemberName}
                 initialMemberAspect={initialDataMemberAspect}
+            />
+        );
+    }
+    if (subtype === 'component_inventory') {
+        // Falls back to plain markdown internally when the content isn't a
+        // parseable component inventory (legacy / free-form artifacts).
+        return (
+            <ComponentInventoryRenderer
+                content={content}
+                screens={componentScreens}
+                onNavigateToScreen={onNavigateToScreen}
             />
         );
     }
@@ -183,6 +217,7 @@ export function ArtifactContentRenderer({
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
                 initialNavigationTarget={initialImplementationTarget}
+                finalReview={planFinalReview}
             />
         );
     }
