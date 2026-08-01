@@ -33,7 +33,8 @@ const SLOT_PROJECT_ID = GALLERY_PROJECT_IDS[SLOT];
 const pointerState = (snapshotIds: string[]) => ({
     mode: 'gallery' as const,
     snapshotIds,
-    size: 6,
+    size: 12,
+    minLive: 2,
     updatedAt: null,
 });
 

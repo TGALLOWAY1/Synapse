@@ -49,7 +49,7 @@ const parseState = (body: unknown): PublicGalleryState => {
             && typeof (e as { snapshotId?: unknown }).snapshotId === 'string');
     return {
         mode: raw.mode === 'gallery' ? 'gallery' : 'demo',
-        size: typeof raw.size === 'number' ? raw.size : 6,
+        size: typeof raw.size === 'number' ? raw.size : 12,
         entries,
     };
 };

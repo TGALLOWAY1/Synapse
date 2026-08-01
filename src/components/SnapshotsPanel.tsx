@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw, Star, LayoutGrid } from 'lucide-react';
+import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw, Star, LayoutGrid, ChevronUp, ChevronDown } from 'lucide-react';
 import {
     getOwnerToken, setOwnerToken,
     saveSnapshot, listSnapshots, loadSnapshot, restoreSnapshot, deleteSnapshot,
     setDemoSnapshot, addGallerySnapshot, removeGallerySnapshot, setGalleryMode,
+    reorderGallerySnapshots,
     type GalleryInfo,
     type SnapshotListItem,
     type SnapshotProgress,
@@ -214,13 +215,14 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                 setError(gateError);
                 return;
             }
-        } else if (gallery?.mode === 'gallery') {
-            // Removing a slot from a LIVE gallery drops it below capacity, so
-            // the server demotes the showcase back to demo mode — make that
-            // consequence explicit before proceeding.
+        } else if (gallery?.mode === 'gallery' && gallery.snapshotIds.length - 1 < gallery.minLive) {
+            // Removing this slot drops a LIVE gallery below the go-live
+            // minimum, so the server demotes the showcase back to demo mode —
+            // make that consequence explicit before proceeding. Removals that
+            // stay at or above the minimum leave the gallery live.
             const confirmed = confirm(
                 'Removing this snapshot takes the live gallery below '
-                + `${gallery.size} slots, so the public showcase will switch back to the `
+                + `${gallery.minLive} projects, so the public showcase will switch back to the `
                 + 'single demo project. The remaining slots are kept — re-fill and go '
                 + 'live again when ready. Continue?',
             );
@@ -242,19 +244,39 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
 
     // The go-live switch. Flipping to gallery mode swaps the public
     // "View demo project" entry for the project gallery; the server refuses
-    // the flip until every slot is filled, so an accidental early toggle
-    // can't publish a half-empty gallery.
+    // the flip until at least `minLive` snapshots are pinned, so an
+    // accidental early toggle can't publish a near-empty gallery.
     const handleToggleGalleryMode = async () => {
         if (!gallery) return;
         const nextMode = gallery.mode === 'gallery' ? 'demo' : 'gallery';
         const confirmMsg = nextMode === 'gallery'
-            ? `Go live with the project gallery? Visitors will see the ${gallery.size}-project gallery instead of the single demo project.`
+            ? `Go live with the project gallery? Visitors will see the ${gallery.snapshotIds.length}-project gallery instead of the single demo project.`
             : 'Switch back to single-demo mode? Visitors will see the pinned demo project again; the gallery keeps its slots for the next go-live.';
         if (!confirm(confirmMsg)) return;
         setBusy('gallery-mode');
         setError(null);
         try {
             setGallery(await setGalleryMode(nextMode));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Move one gallery slot up or down. The server takes the full new order
+    // (an exact permutation of the current ids), so a stale panel gets a
+    // clean 400 instead of silently corrupting the slot list.
+    const handleMoveGallerySlot = async (index: number, direction: -1 | 1) => {
+        if (!gallery) return;
+        const target = index + direction;
+        if (target < 0 || target >= gallery.snapshotIds.length) return;
+        const order = [...gallery.snapshotIds];
+        [order[index], order[target]] = [order[target], order[index]];
+        setBusy(`gallery-order:${index}`);
+        setError(null);
+        try {
+            setGallery(await reorderGallerySnapshots(order));
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -358,20 +380,20 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                             </div>
                                             <p className="text-xs text-neutral-400">
                                                 {gallery.mode === 'gallery'
-                                                    ? `Visitors see the ${gallery.size}-project gallery. Switching back to demo mode keeps the slots.`
-                                                    : `Pin ${gallery.size} snapshots into gallery slots (${gallery.snapshotIds.length}/${gallery.size} filled), then go live to replace the single demo with the project gallery.`}
+                                                    ? `Visitors see the ${gallery.snapshotIds.length}-project gallery (room for ${gallery.size}). Switching back to demo mode keeps the slots.`
+                                                    : `Pin snapshots into gallery slots (${gallery.snapshotIds.length} pinned, up to ${gallery.size}). Go live once you have at least ${gallery.minLive} to replace the single demo with the project gallery.`}
                                             </p>
                                         </div>
                                         <button
                                             onClick={handleToggleGalleryMode}
-                                            disabled={busy !== null || (gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.size)}
+                                            disabled={busy !== null || (gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.minLive)}
                                             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition disabled:opacity-40 ${
                                                 gallery.mode === 'gallery'
                                                     ? 'text-neutral-200 bg-neutral-800 hover:bg-neutral-700'
                                                     : 'text-white bg-emerald-600 hover:bg-emerald-500'
                                             }`}
-                                            title={gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.size
-                                                ? `Fill all ${gallery.size} gallery slots to enable go-live`
+                                            title={gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.minLive
+                                                ? `Pin at least ${gallery.minLive} snapshots to enable go-live`
                                                 : undefined}
                                         >
                                             {busy === 'gallery-mode'
@@ -381,6 +403,42 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                                     : 'Go live with gallery'}
                                         </button>
                                     </div>
+                                    {gallery.snapshotIds.length > 0 && (
+                                        <ul className="mt-3 space-y-1">
+                                            {gallery.snapshotIds.map((snapshotId, index) => {
+                                                const snapshot = snapshots?.find((s) => s.id === snapshotId);
+                                                return (
+                                                    <li
+                                                        key={snapshotId}
+                                                        className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1"
+                                                    >
+                                                        <span className="text-[10px] font-semibold text-emerald-300 w-6 shrink-0">#{index + 1}</span>
+                                                        <span className="text-xs text-neutral-200 truncate flex-1">
+                                                            {snapshot?.title ?? snapshotId}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleMoveGallerySlot(index, -1)}
+                                                            disabled={busy !== null || index === 0}
+                                                            className="text-neutral-400 hover:text-neutral-100 disabled:opacity-30 p-0.5"
+                                                            title="Move up"
+                                                            aria-label={`Move gallery slot ${index + 1} up`}
+                                                        >
+                                                            <ChevronUp size={13} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleMoveGallerySlot(index, 1)}
+                                                            disabled={busy !== null || index === gallery.snapshotIds.length - 1}
+                                                            className="text-neutral-400 hover:text-neutral-100 disabled:opacity-30 p-0.5"
+                                                            title="Move down"
+                                                            aria-label={`Move gallery slot ${index + 1} down`}
+                                                        >
+                                                            <ChevronDown size={13} />
+                                                        </button>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
                                 </div>
                             )}
 

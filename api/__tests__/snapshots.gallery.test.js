@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Project-gallery channel: adding/removing slots, the go-live mode toggle
-// (which must refuse to flip to 'gallery' until every slot is filled), and
-// the public reads. We mock the auth/rate-limit seams and the Vercel Blob
-// SDK so we can drive the handlers against a controlled set of blobs.
+// Project-gallery channel: adding/removing/reordering slots, the go-live
+// mode toggle (which must refuse to flip to 'gallery' below the
+// GALLERY_MIN_LIVE minimum, and demote below it), and the public reads. We
+// mock the auth/rate-limit seams and the Vercel Blob SDK so we can drive
+// the handlers against a controlled set of blobs.
 const enforceRateLimit = vi.fn(() => false);
 const requireOwner = vi.fn(() => false); // false = authorized (no early return)
 const put = vi.fn(async () => ({}));
@@ -44,6 +45,8 @@ const SNAP_IDS = [
   'eeeeeeee5555',
   'ffffffff6666',
 ];
+// A full gallery at the raised capacity (12 slots).
+const FULL_IDS = [...SNAP_IDS, ...SNAP_IDS.map((id) => id.replace(/^./, '0'))];
 const NEW_ID = '9999999a0000';
 
 // Drive `list` by prefix: the gallery pointer path resolves to a pointer
@@ -110,8 +113,8 @@ describe('PUT /api/snapshots?gallery=1&id= — slot management', () => {
     expect(putPointerBody()?.snapshotIds).toEqual([...SNAP_IDS.slice(0, 2), NEW_ID]);
   });
 
-  it('rejects 409 gallery_full once all six slots are filled', async () => {
-    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS }, known: [NEW_ID] });
+  it('rejects 409 gallery_full once all twelve slots are filled', async () => {
+    stubBlobs({ pointer: { mode: 'demo', snapshotIds: FULL_IDS }, known: [NEW_ID] });
 
     const res = mockRes();
     await handler({ method: 'PUT', query: { gallery: '1', id: NEW_ID }, headers: {} }, res);
@@ -158,15 +161,26 @@ describe('PUT /api/snapshots?gallery=1&id= — slot management', () => {
     expect(parsed(res).snapshotIds).toEqual([SNAP_IDS[0], ...SNAP_IDS.slice(2)]);
   });
 
-  it('demotes a LIVE gallery back to demo mode when a removal drops it below capacity', async () => {
+  it('keeps a LIVE gallery live when a removal stays at or above the minimum', async () => {
     stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS }, known: SNAP_IDS });
 
     const res = mockRes();
     await handler({ method: 'PUT', query: { gallery: '1', id: SNAP_IDS[0], remove: '1' }, headers: {} }, res);
 
     expect(res.statusCode).toBe(200);
+    expect(parsed(res).mode).toBe('gallery');
+    expect(putPointerBody()).toMatchObject({ mode: 'gallery', snapshotIds: SNAP_IDS.slice(1) });
+  });
+
+  it('demotes a LIVE gallery back to demo mode when a removal drops it below the minimum', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 2) }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'PUT', query: { gallery: '1', id: SNAP_IDS[0], remove: '1' }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
     expect(parsed(res).mode).toBe('demo');
-    expect(putPointerBody()).toMatchObject({ mode: 'demo', snapshotIds: SNAP_IDS.slice(1) });
+    expect(putPointerBody()).toMatchObject({ mode: 'demo', snapshotIds: [SNAP_IDS[1]] });
   });
 
   it('keeps demo mode as-is when removing from a not-yet-live gallery', async () => {
@@ -181,7 +195,17 @@ describe('PUT /api/snapshots?gallery=1&id= — slot management', () => {
 });
 
 describe('DELETE /api/snapshots?id= — gallery pointer scrub', () => {
-  it('scrubs the deleted snapshot from the pointer and demotes a live gallery below capacity', async () => {
+  it('scrubs the deleted snapshot from the pointer and demotes a live gallery below the minimum', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 2) }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'DELETE', query: { id: SNAP_IDS[1] }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(putPointerBody()).toMatchObject({ mode: 'demo', snapshotIds: [SNAP_IDS[0]] });
+  });
+
+  it('scrub keeps a live gallery live while it stays at or above the minimum', async () => {
     stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS }, known: SNAP_IDS });
 
     const res = mockRes();
@@ -189,22 +213,47 @@ describe('DELETE /api/snapshots?id= — gallery pointer scrub', () => {
 
     expect(res.statusCode).toBe(200);
     expect(putPointerBody()).toMatchObject({
-      mode: 'demo',
+      mode: 'gallery',
       snapshotIds: SNAP_IDS.filter((s) => s !== SNAP_IDS[2]),
     });
   });
 });
 
+describe('PUT /api/snapshots?gallery=1&order= — slot reordering', () => {
+  it('accepts an exact permutation of the pinned ids', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 3) }, known: SNAP_IDS });
+    const order = [SNAP_IDS[2], SNAP_IDS[0], SNAP_IDS[1]];
+
+    const res = mockRes();
+    await handler({ method: 'PUT', query: { gallery: '1', order: order.join(',') }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res).snapshotIds).toEqual(order);
+    expect(putPointerBody()).toMatchObject({ mode: 'gallery', snapshotIds: order });
+  });
+
+  it('rejects an order that is not a permutation of the current ids', async () => {
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 3) }, known: SNAP_IDS });
+
+    const res = mockRes();
+    await handler({ method: 'PUT', query: { gallery: '1', order: `${SNAP_IDS[0]},${SNAP_IDS[1]}` }, headers: {} }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(parsed(res).error).toBe('invalid_order');
+    expect(putPointerBody()).toBeNull();
+  });
+});
+
 describe('PUT /api/snapshots?gallery=1&mode= — the go-live switch', () => {
-  it('refuses to flip to gallery mode while slots are unfilled (422 gallery_not_ready)', async () => {
-    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS.slice(0, 4) }, known: SNAP_IDS });
+  it('refuses to flip to gallery mode below the minimum (422 gallery_not_ready)', async () => {
+    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS.slice(0, 1) }, known: SNAP_IDS });
 
     const res = mockRes();
     await handler({ method: 'PUT', query: { gallery: '1', mode: 'gallery' }, headers: {} }, res);
 
     expect(res.statusCode).toBe(422);
     expect(parsed(res).error).toBe('gallery_not_ready');
-    expect(parsed(res).message).toMatch(/4\/6/);
+    expect(parsed(res).message).toMatch(/at least 2/);
     expect(putPointerBody()).toBeNull();
   });
 
@@ -219,8 +268,8 @@ describe('PUT /api/snapshots?gallery=1&mode= — the go-live switch', () => {
     expect(parsed(res).error).toBe('gallery_not_ready');
   });
 
-  it('goes live once all six slots hold existing snapshots', async () => {
-    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS }, known: SNAP_IDS });
+  it('goes live once at least the minimum number of slots hold existing snapshots', async () => {
+    stubBlobs({ pointer: { mode: 'demo', snapshotIds: SNAP_IDS.slice(0, 2) }, known: SNAP_IDS });
 
     const res = mockRes();
     await handler({ method: 'PUT', query: { gallery: '1', mode: 'gallery' }, headers: {} }, res);
@@ -231,7 +280,7 @@ describe('PUT /api/snapshots?gallery=1&mode= — the go-live switch', () => {
   });
 
   it('flips back to demo mode without any readiness requirement', async () => {
-    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 3) }, known: SNAP_IDS });
+    stubBlobs({ pointer: { mode: 'gallery', snapshotIds: SNAP_IDS.slice(0, 1) }, known: SNAP_IDS });
 
     const res = mockRes();
     await handler({ method: 'PUT', query: { gallery: '1', mode: 'demo' }, headers: {} }, res);
@@ -252,7 +301,7 @@ describe('GET /api/snapshots?gallery=1 — public reads', () => {
     await handler({ method: 'GET', query: { gallery: '1', pointer: '1' }, headers: {} }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(parsed(res)).toMatchObject({ mode: 'gallery', snapshotIds: SNAP_IDS, size: 6 });
+    expect(parsed(res)).toMatchObject({ mode: 'gallery', snapshotIds: SNAP_IDS, size: 12, minLive: 2 });
     expect(requireOwner).not.toHaveBeenCalled();
   });
 

@@ -135,7 +135,7 @@ afterEach(() => {
 describe('gallery slot routes — public, gate-hydrated like the demo', () => {
     it('hydrates a gallery slot at the route boundary before mounting the workspace', async () => {
         mockedGalleryPointer.mockResolvedValue({
-            mode: 'gallery', snapshotIds: ['s0', 's1'], size: 6, updatedAt: null,
+            mode: 'gallery', snapshotIds: ['s0', 's1'], size: 12, minLive: 2, updatedAt: null,
         });
         mockedGalleryPublic.mockResolvedValue(fakePayload('s1', GALLERY_PROJECT_IDS[1]));
 
@@ -149,7 +149,7 @@ describe('gallery slot routes — public, gate-hydrated like the demo', () => {
 
     it('does not require authentication for a gallery slot (signed-out visitor)', async () => {
         mockedGalleryPointer.mockResolvedValue({
-            mode: 'gallery', snapshotIds: ['s0'], size: 6, updatedAt: null,
+            mode: 'gallery', snapshotIds: ['s0'], size: 12, minLive: 2, updatedAt: null,
         });
         mockedGalleryPublic.mockResolvedValue(fakePayload('s0', GALLERY_PROJECT_IDS[0]));
 

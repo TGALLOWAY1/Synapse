@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_PROJECT_ID, GALLERY_PROJECT_IDS, GALLERY_SIZE } from '../../data/demoProject';
+import { DEMO_PROJECT_ID, GALLERY_PROJECT_IDS, GALLERY_MAX_SIZE } from '../../data/demoProject';
 import {
     ProjectCapabilityError,
     assertProjectCapability,
@@ -27,7 +27,7 @@ describe('project capabilities', () => {
     });
 
     it('applies the same read-only policy to every gallery slot project', () => {
-        expect(GALLERY_PROJECT_IDS).toHaveLength(GALLERY_SIZE);
+        expect(GALLERY_PROJECT_IDS).toHaveLength(GALLERY_MAX_SIZE);
         for (const galleryId of GALLERY_PROJECT_IDS) {
             const capabilities = getProjectCapabilities({ id: galleryId });
             expect(capabilities.isReadOnly).toBe(true);

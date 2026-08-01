@@ -136,14 +136,18 @@ export type SnapshotListItem = SnapshotManifest & { isDemo?: boolean };
 
 // The public showcase is either the single pinned demo ('demo', the default)
 // or the project gallery ('gallery'). The mode toggle is the owner's go-live
-// switch — the server refuses to flip to 'gallery' until every slot is full.
+// switch — the server refuses to flip to 'gallery' until at least `minLive`
+// snapshots are pinned (the gallery is flexible-size up to `size`).
 export type GalleryMode = 'demo' | 'gallery';
 
 export type GalleryInfo = {
     mode: GalleryMode;
     // Ordered snapshot ids; the array index is the gallery slot.
     snapshotIds: string[];
+    // Maximum capacity (room to grow, not a target).
     size: number;
+    // Minimum pinned snapshots before gallery mode can go live.
+    minLive: number;
 };
 
 export type SnapshotListResult = {
@@ -390,13 +394,16 @@ export const saveSnapshot = async (
 };
 
 const parseGalleryInfo = (raw: unknown): GalleryInfo => {
-    const body = (raw ?? {}) as { mode?: unknown; snapshotIds?: unknown; size?: unknown };
+    const body = (raw ?? {}) as {
+        mode?: unknown; snapshotIds?: unknown; size?: unknown; minLive?: unknown;
+    };
     return {
         mode: body.mode === 'gallery' ? 'gallery' : 'demo',
         snapshotIds: Array.isArray(body.snapshotIds)
             ? body.snapshotIds.filter((id): id is string => typeof id === 'string')
             : [],
-        size: typeof body.size === 'number' ? body.size : 6,
+        size: typeof body.size === 'number' ? body.size : 12,
+        minLive: typeof body.minLive === 'number' ? body.minLive : 2,
     };
 };
 
@@ -441,12 +448,24 @@ export const removeGallerySnapshot = async (snapshotId: string): Promise<Gallery
 };
 
 // Owner-only: the go-live switch. Flipping to 'gallery' is rejected by the
-// server (422 gallery_not_ready) until every slot holds a live snapshot.
+// server (422 gallery_not_ready) until at least `minLive` snapshots are
+// pinned and every pinned snapshot still exists.
 export const setGalleryMode = async (mode: GalleryMode): Promise<GalleryInfo> => {
     const resp = await fetch(`${API_BASE}?gallery=1&mode=${encodeURIComponent(mode)}`, {
         method: 'PUT', headers: authHeaders(),
     });
     if (!resp.ok) throw await errorFromResponse(resp, 'gallery_mode_failed');
+    return parseGalleryInfo(await resp.json());
+};
+
+// Owner-only: reorder the gallery slots. `order` must be an exact
+// permutation of the currently pinned snapshot ids (the server rejects
+// anything else so a stale panel can't drop or resurrect a slot).
+export const reorderGallerySnapshots = async (order: string[]): Promise<GalleryInfo> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&order=${encodeURIComponent(order.join(','))}`, {
+        method: 'PUT', headers: authHeaders(),
+    });
+    if (!resp.ok) throw await errorFromResponse(resp, 'gallery_reorder_failed');
     return parseGalleryInfo(await resp.json());
 };
 

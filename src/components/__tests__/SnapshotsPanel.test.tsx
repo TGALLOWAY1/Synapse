@@ -43,7 +43,7 @@ async function renderWith(snapshot: SnapshotListItem, demoSnapshotId: string | n
     mockedList.mockResolvedValue({
         snapshots: [snapshot],
         demoSnapshotId,
-        gallery: { mode: 'demo', snapshotIds: [], size: 6 },
+        gallery: { mode: 'demo', snapshotIds: [], size: 12, minLive: 2 },
     });
     render(<SnapshotsPanel projectId="p1" onClose={() => {}} />);
     await screen.findByText('My Snapshot');

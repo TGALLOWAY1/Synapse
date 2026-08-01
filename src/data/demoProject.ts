@@ -9,7 +9,7 @@
  * stable id below.
  *
  * The project gallery is the multi-project upgrade of the single demo: the
- * owner pins up to GALLERY_SIZE snapshots into ordered slots (via the
+ * owner pins up to GALLERY_MAX_SIZE snapshots into ordered slots (via the
  * `?gallery=1` channel) and each slot hydrates under its own stable project
  * id so `/p/<slot id>` URLs are shareable and cacheable exactly like the
  * demo. Gallery projects are read-only showcase copies — every rule that
@@ -23,9 +23,14 @@
 
 export const DEMO_PROJECT_ID = '00000000-0000-4000-8000-000000000d01';
 
-/** How many projects the gallery holds when fully configured. Must match the
- * server's GALLERY_SIZE in `api/snapshots.js`. */
-export const GALLERY_SIZE = 6;
+/** Maximum gallery capacity (room to grow, not a target). Must match the
+ * server's GALLERY_MAX_SIZE in `api/snapshots.js`. */
+export const GALLERY_MAX_SIZE = 12;
+
+/** Minimum pinned projects before the gallery can go live. A one-card grid
+ * is a worse experience than the single demo, so launch needs at least two.
+ * Must match the server's GALLERY_MIN_LIVE in `api/snapshots.js`. */
+export const GALLERY_MIN_LIVE = 2;
 
 /** Stable local project id for each gallery slot (slot = array index). */
 export const GALLERY_PROJECT_IDS: readonly string[] = Object.freeze([
@@ -35,6 +40,12 @@ export const GALLERY_PROJECT_IDS: readonly string[] = Object.freeze([
     '00000000-0000-4000-8000-000000000d14',
     '00000000-0000-4000-8000-000000000d15',
     '00000000-0000-4000-8000-000000000d16',
+    '00000000-0000-4000-8000-000000000d17',
+    '00000000-0000-4000-8000-000000000d18',
+    '00000000-0000-4000-8000-000000000d19',
+    '00000000-0000-4000-8000-000000000d1a',
+    '00000000-0000-4000-8000-000000000d1b',
+    '00000000-0000-4000-8000-000000000d1c',
 ]);
 
 export const galleryProjectIdForSlot = (slot: number): string | null =>

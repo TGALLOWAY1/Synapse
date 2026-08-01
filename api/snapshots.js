@@ -22,9 +22,10 @@ import { requireOwner } from './_lib/ownerAuth.js';
 //   PUT    /api/snapshots?demo=1              -> clear the demo pointer (owner)
 //
 // Project gallery (the multi-project upgrade of the single demo). The owner
-// pins up to GALLERY_SIZE snapshots into an ordered list and then flips the
-// showcase mode from 'demo' to 'gallery' — the mode toggle is the go-live
-// switch, and the server refuses to flip it until every slot is filled:
+// pins up to GALLERY_MAX_SIZE snapshots into an ordered list and then flips
+// the showcase mode from 'demo' to 'gallery' — the mode toggle is the
+// go-live switch, and the server refuses to flip it until at least
+// GALLERY_MIN_LIVE slots are filled:
 //
 //   GET    /api/snapshots?gallery=1                    -> gallery state + entry summaries (PUBLIC)
 //   GET    /api/snapshots?gallery=1&pointer=1          -> raw gallery pointer, no manifest joins (PUBLIC)
@@ -32,8 +33,10 @@ import { requireOwner } from './_lib/ownerAuth.js';
 //   GET    /api/snapshots?gallery=1&slot=N&image=<key> -> load one gallery image (PUBLIC)
 //   PUT    /api/snapshots?gallery=1&id=<id>            -> add a snapshot to the gallery (owner)
 //   PUT    /api/snapshots?gallery=1&id=<id>&remove=1   -> remove a snapshot from the gallery (owner)
+//   PUT    /api/snapshots?gallery=1&order=<id,id,...>  -> reorder gallery slots (owner; exact
+//                                                        permutation of the current ids)
 //   PUT    /api/snapshots?gallery=1&mode=<demo|gallery>-> switch showcase mode (owner; 'gallery'
-//                                                        requires all GALLERY_SIZE slots filled)
+//                                                        requires >= GALLERY_MIN_LIVE slots filled)
 //
 // Schema v2 stores mockup images as separate per-image blobs under
 // `snapshots/<id>/images/<hash>.json` so a single project with N large
@@ -51,10 +54,13 @@ const SNAPSHOT_PREFIX = 'snapshots/';
 const DEMO_POINTER_PATH = 'snapshots/_demo.json';
 const GALLERY_POINTER_PATH = 'snapshots/_gallery.json';
 // The public showcase is either the single pinned demo ('demo', the default)
-// or the project gallery ('gallery'). Gallery mode only goes live when the
-// owner has pinned a full set of GALLERY_SIZE snapshots and explicitly
-// toggled the mode — handlePutGalleryMode enforces the "full set" half.
-const GALLERY_SIZE = 6;
+// or the project gallery ('gallery'). The gallery is flexible-size: up to
+// GALLERY_MAX_SIZE pinned snapshots, and gallery mode only goes live when
+// the owner has pinned at least GALLERY_MIN_LIVE of them and explicitly
+// toggled the mode — handlePutGalleryMode enforces the minimum (a one-card
+// grid is a worse experience than the single demo, hence min 2).
+const GALLERY_MAX_SIZE = 12;
+const GALLERY_MIN_LIVE = 2;
 const GALLERY_MODES = ['demo', 'gallery'];
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
 const IMAGE_KEY_MAX = 512;
@@ -149,7 +155,7 @@ async function readGalleryPointer() {
     const mode = GALLERY_MODES.includes(body?.mode) ? body.mode : 'demo';
     const snapshotIds = (Array.isArray(body?.snapshotIds) ? body.snapshotIds : [])
       .filter((id) => typeof id === 'string' && ID_RE.test(id))
-      .slice(0, GALLERY_SIZE);
+      .slice(0, GALLERY_MAX_SIZE);
     return { mode, snapshotIds, updatedAt: body?.updatedAt ?? null };
   } catch {
     return fallback;
@@ -342,7 +348,7 @@ async function handleList(_req, res) {
   return json(res, 200, {
     snapshots: summaries,
     demoSnapshotId: demoId,
-    gallery: { mode: gallery.mode, snapshotIds: gallery.snapshotIds, size: GALLERY_SIZE },
+    gallery: { mode: gallery.mode, snapshotIds: gallery.snapshotIds, size: GALLERY_MAX_SIZE, minLive: GALLERY_MIN_LIVE },
   });
 }
 
@@ -459,25 +465,26 @@ async function handlePutGalleryEntry(id, remove, res) {
     const idx = snapshotIds.indexOf(id);
     if (idx === -1) return json(res, 404, { error: 'not_in_gallery' });
     snapshotIds.splice(idx, 1);
-    // A LIVE gallery must never fall below its full slot count — go-live is
-    // explicitly gated on all GALLERY_SIZE slots being filled, and visitors
-    // must not see a partial gallery. Removing below capacity while live
-    // demotes the showcase back to demo mode; the slots that remain are kept
-    // so the owner can re-fill and flip go-live again.
-    const mode = pointer.mode === 'gallery' && snapshotIds.length < GALLERY_SIZE
+    // A LIVE gallery must never fall below the go-live minimum — visitors
+    // must not see a one-card (or empty) gallery. Removing below
+    // GALLERY_MIN_LIVE while live demotes the showcase back to demo mode;
+    // the slots that remain are kept so the owner can re-fill and flip
+    // go-live again. Removals that stay at or above the minimum leave a
+    // live gallery live.
+    const mode = pointer.mode === 'gallery' && snapshotIds.length < GALLERY_MIN_LIVE
       ? 'demo'
       : pointer.mode;
     await writeGalleryPointer(mode, snapshotIds);
-    return json(res, 200, { mode, snapshotIds, size: GALLERY_SIZE });
+    return json(res, 200, { mode, snapshotIds, size: GALLERY_MAX_SIZE, minLive: GALLERY_MIN_LIVE });
   }
 
   if (snapshotIds.includes(id)) {
     return json(res, 409, { error: 'already_in_gallery' });
   }
-  if (snapshotIds.length >= GALLERY_SIZE) {
+  if (snapshotIds.length >= GALLERY_MAX_SIZE) {
     return json(res, 409, {
       error: 'gallery_full',
-      message: `The gallery already holds ${GALLERY_SIZE} snapshots. Remove one before adding another.`,
+      message: `The gallery already holds ${GALLERY_MAX_SIZE} snapshots. Remove one before adding another.`,
     });
   }
   // Same existence + SYN-003 completeness gate as pinning the demo — a
@@ -487,7 +494,31 @@ async function handlePutGalleryEntry(id, remove, res) {
 
   snapshotIds.push(id);
   await writeGalleryPointer(pointer.mode, snapshotIds);
-  return json(res, 200, { mode: pointer.mode, snapshotIds, size: GALLERY_SIZE });
+  return json(res, 200, { mode: pointer.mode, snapshotIds, size: GALLERY_MAX_SIZE, minLive: GALLERY_MIN_LIVE });
+}
+
+// PUT /api/snapshots?gallery=1&order=<id,id,...>
+// Reorder the gallery slots. The order param must be an EXACT permutation of
+// the currently pinned ids — anything else (missing id, unknown id, dupes)
+// is rejected so a stale panel can't silently drop or resurrect a slot.
+async function handlePutGalleryOrder(orderQuery, res) {
+  const pointer = await readGalleryPointer();
+  const order = String(orderQuery)
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+  const isPermutation =
+    order.length === pointer.snapshotIds.length
+    && new Set(order).size === order.length
+    && order.every((id) => pointer.snapshotIds.includes(id));
+  if (!isPermutation) {
+    return json(res, 400, {
+      error: 'invalid_order',
+      message: 'The order must contain exactly the currently pinned snapshot ids. Refresh and try again.',
+    });
+  }
+  await writeGalleryPointer(pointer.mode, order);
+  return json(res, 200, { mode: pointer.mode, snapshotIds: order, size: GALLERY_MAX_SIZE, minLive: GALLERY_MIN_LIVE });
 }
 
 // PUT /api/snapshots?gallery=1&mode=<demo|gallery>
@@ -501,12 +532,12 @@ async function handlePutGalleryMode(mode, res) {
   }
   const pointer = await readGalleryPointer();
   if (mode === 'gallery') {
-    if (pointer.snapshotIds.length < GALLERY_SIZE) {
+    if (pointer.snapshotIds.length < GALLERY_MIN_LIVE) {
       return json(res, 422, {
         error: 'gallery_not_ready',
         message:
-          `Gallery mode needs all ${GALLERY_SIZE} slots filled before it can go live `
-          + `(currently ${pointer.snapshotIds.length}/${GALLERY_SIZE}).`,
+          `Gallery mode needs at least ${GALLERY_MIN_LIVE} pinned snapshots before it can go live `
+          + `(currently ${pointer.snapshotIds.length}).`,
       });
     }
     // Verify every pinned snapshot still resolves — a slot whose snapshot was
@@ -522,7 +553,7 @@ async function handlePutGalleryMode(mode, res) {
     }
   }
   await writeGalleryPointer(mode, pointer.snapshotIds);
-  return json(res, 200, { mode, snapshotIds: pointer.snapshotIds, size: GALLERY_SIZE });
+  return json(res, 200, { mode, snapshotIds: pointer.snapshotIds, size: GALLERY_MAX_SIZE, minLive: GALLERY_MIN_LIVE });
 }
 
 // Public, lightweight: the raw gallery pointer with no manifest joins. The
@@ -534,7 +565,8 @@ async function handleGetGalleryPointer(res) {
   return json(res, 200, {
     mode: pointer.mode,
     snapshotIds: pointer.snapshotIds,
-    size: GALLERY_SIZE,
+    size: GALLERY_MAX_SIZE,
+    minLive: GALLERY_MIN_LIVE,
     updatedAt: pointer.updatedAt,
   });
 }
@@ -569,7 +601,8 @@ async function handleGetGallery(res) {
   }));
   return json(res, 200, {
     mode: pointer.mode,
-    size: GALLERY_SIZE,
+    size: GALLERY_MAX_SIZE,
+    minLive: GALLERY_MIN_LIVE,
     entries,
     updatedAt: pointer.updatedAt,
   });
@@ -580,7 +613,7 @@ async function handleGetGallery(res) {
 // ordered id list.
 async function resolveGallerySlot(slotQuery) {
   const slot = Number(slotQuery);
-  if (!Number.isInteger(slot) || slot < 0 || slot >= GALLERY_SIZE) return null;
+  if (!Number.isInteger(slot) || slot < 0 || slot >= GALLERY_MAX_SIZE) return null;
   const pointer = await readGalleryPointer();
   return pointer.snapshotIds[slot] ?? null;
 }
@@ -648,7 +681,7 @@ async function handleDelete(id, res) {
     const gallery = await readGalleryPointer();
     if (gallery.snapshotIds.includes(id)) {
       const snapshotIds = gallery.snapshotIds.filter((s) => s !== id);
-      const mode = gallery.mode === 'gallery' && snapshotIds.length < GALLERY_SIZE
+      const mode = gallery.mode === 'gallery' && snapshotIds.length < GALLERY_MIN_LIVE
         ? 'demo'
         : gallery.mode;
       await writeGalleryPointer(mode, snapshotIds);
@@ -729,6 +762,8 @@ export default async function handler(req, res) {
       if (req.method === 'PUT') {
         const mode = typeof req.query?.mode === 'string' ? req.query.mode : null;
         if (mode !== null) return await handlePutGalleryMode(mode, res);
+        const order = typeof req.query?.order === 'string' ? req.query.order : null;
+        if (order !== null) return await handlePutGalleryOrder(order, res);
         if (id === null) return json(res, 400, { error: 'missing_id' });
         const remove = req.query?.remove === '1' || req.query?.remove === 'true';
         return await handlePutGalleryEntry(id, remove, res);
