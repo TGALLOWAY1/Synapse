@@ -217,6 +217,15 @@ const PROJECTS_KEY_DEV_USER = 'synapse-projects-storage::u:dev-user';
 const LZ_STRING_SOURCE = readFileSync(
     join(repoRoot, 'node_modules', 'lz-string', 'libs', 'lz-string.min.js'), 'utf8');
 const DECODE_HELPER_SOURCE = `
+    // Playwright evaluates addInitScript content inside a function wrapper, so
+    // the UMD bundle's top-level "var LZString" above stays in this closure and
+    // never becomes a window property on its own. Publish it explicitly: the
+    // settle polls run through page.evaluate and can only reach window globals.
+    // Without this line __e2eDecodeBlob throws on every compressed blob, both
+    // settle polls read nothing (phase null / 0 ready artifacts), and the run
+    // burns the full generation timeout even though the app finished minutes
+    // earlier — exactly the failure the DOM fallbacks below also guard against.
+    window.LZString = LZString;
     window.__e2eDecodeBlob = (raw) => {
         if (raw === null || raw === undefined) return null;
         if (!raw.startsWith('__SYNLZ1__')) return raw;
@@ -1073,16 +1082,27 @@ try {
                 const t0 = Date.now();
                 let lastShotAt = t0;
                 let result = { phase: null, error: null };
+                let domSettleSeen = false;
                 for (;;) {
                     result = await page.evaluate((projectId) => {
                         // Read the app's own persisted store. Keys are per-user
                         // namespaced (synapse-projects-storage::u:<id>), so scan.
+                        // `storeBlind` is DIRECT evidence the poll cannot see the
+                        // store — a matching key whose decode fails, or no
+                        // matching key at all (prefix drift). It gates the DOM
+                        // fallback below: a store that decodes fine but simply
+                        // has nothing settled yet must keep polling, never
+                        // shortcut through the banner.
+                        let sawAnyKey = false;
+                        let decodeFailures = 0;
                         for (let i = 0; i < localStorage.length; i++) {
                             const k = localStorage.key(i);
                             if (!k || !k.startsWith('synapse-projects-storage')) continue;
+                            sawAnyKey = true;
                             try {
                                 const json = window.__e2eDecodeBlob(localStorage.getItem(k));
-                                const state = JSON.parse(json || '{}').state;
+                                if (json === null) { decodeFailures += 1; continue; }
+                                const state = JSON.parse(json).state;
                                 const spines = state?.spineVersions?.[projectId];
                                 if (!spines?.length) continue;
                                 const latest = spines[spines.length - 1];
@@ -1091,13 +1111,35 @@ try {
                                     error: latest.generationError?.message ?? null,
                                     hasStructuredPRD: Boolean(latest.structuredPRD),
                                     safetyStatus: latest.safetyReview?.status ?? null,
+                                    storeBlind: false,
                                 };
-                            } catch { /* ignore malformed blobs */ }
+                            } catch { decodeFailures += 1; }
                         }
-                        return { phase: null, error: null };
+                        return { phase: null, error: null, storeBlind: !sawAnyKey || decodeFailures > 0 };
                     }, report.projectId);
 
                     if (result.phase === 'complete') break;
+                    // DOM fallback: the success banner ("Your working plan is
+                    // drafted") only renders once the run settled, so a blind
+                    // store poll (e.g. a decode-helper regression — see
+                    // DECODE_HELPER_SOURCE) must not burn the whole timeout.
+                    // Gated on `storeBlind` — direct decode-failure evidence —
+                    // so a store that reads fine but has nothing settled can
+                    // never shortcut through the banner. Two consecutive
+                    // sightings, because the persist write is debounced
+                    // (~500ms) and a healthy store may lag the banner by one
+                    // poll. Settle on the banner but flag the blindness
+                    // loudly: the store poll is also the state.json contract.
+                    if (result.storeBlind && await page.getByText('Your working plan is drafted').first()
+                        .isVisible().catch(() => false)) {
+                        if (domSettleSeen) {
+                            console.warn('  WARNING: PRD settled per the DOM banner but the store poll saw nothing — '
+                                + 'the persisted-blob decode path is broken (check window.__e2eDecodeBlob / the persist key prefix).');
+                            result = { ...result, phase: 'complete', settleSignal: 'dom-fallback' };
+                            break;
+                        }
+                        domSettleSeen = true;
+                    }
                     if (Date.now() - t0 > GENERATION_TIMEOUT_MS) {
                         await shot(page, 'generation-TIMEOUT');
                         throw new Error(`generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
@@ -1108,7 +1150,7 @@ try {
                     }
                     await settle(5000);
                 }
-                report.generation = { ms: Date.now() - t0, ...result };
+                report.generation = { ms: Date.now() - t0, settleSignal: 'store', ...result };
                 console.log(`  settled in ${Math.round((Date.now() - t0) / 1000)}s`, result);
                 if (result.error) throw new Error(`generation settled with error: ${result.error}`);
             });
@@ -1223,21 +1265,31 @@ try {
                         let lastChangeAt = t0;
                         let settleReason = 'timeout';
                         let subtypes = [];
+                        let domCompleteSeen = false;
                         for (;;) {
                             const info = await page.evaluate((projectId) => {
+                                // `storeBlind` mirrors the PRD poll: direct
+                                // evidence the store is unreadable (a matching
+                                // key that fails to decode, or none at all) —
+                                // NOT merely "zero ready artifacts", which is
+                                // also what a fully failed bundle looks like.
+                                let sawAnyKey = false;
+                                let decodeFailures = 0;
                                 for (let i = 0; i < localStorage.length; i++) {
                                     const k = localStorage.key(i);
                                     if (!k || !k.startsWith('synapse-projects-storage')) continue;
+                                    sawAnyKey = true;
                                     try {
                                         const json = window.__e2eDecodeBlob(localStorage.getItem(k));
-                                        const state = JSON.parse(json || '{}').state;
+                                        if (json === null) { decodeFailures += 1; continue; }
+                                        const state = JSON.parse(json).state;
                                         const arr = state?.artifacts?.[projectId];
                                         if (!arr?.length) continue;
                                         const ready = arr.filter((a) => a.currentVersionId);
-                                        return { ready: ready.length, subtypes: ready.map((a) => a.subtype || a.type) };
-                                    } catch { /* ignore malformed blobs */ }
+                                        return { ready: ready.length, subtypes: ready.map((a) => a.subtype || a.type), storeBlind: false };
+                                    } catch { decodeFailures += 1; }
                                 }
-                                return { ready: 0, subtypes: [] };
+                                return { ready: 0, subtypes: [], storeBlind: !sawAnyKey || decodeFailures > 0 };
                             }, report.projectId);
                             subtypes = info.subtypes;
                             // In-flight signals in the workspace: spinning StatusDots in
@@ -1250,6 +1302,27 @@ try {
 
                             if (info.ready !== lastReady) { lastReady = info.ready; lastChangeAt = Date.now(); }
                             if (haveAllRequiredOutputs && domIdle) { settleReason = 'all-required-done'; break; }
+                            // DOM fallback, mirroring the PRD loop: the workspace's
+                            // "Generation complete" checkpoint only renders when the
+                            // bundle settled, so a blind store poll (decode-helper
+                            // regression) must not burn the timeout and report a false
+                            // all-missing bundle. Gated on `storeBlind`, NOT on a zero
+                            // ready-count: an all-slots-failed bundle also reads as
+                            // zero ready artifacts and still shows a "Generation
+                            // complete" checkpoint — that state must fall through to
+                            // the timeout failure, not pass as settled. Two
+                            // consecutive sightings ride out the ~500ms persist
+                            // debounce.
+                            if (domIdle && info.storeBlind && await page
+                                .getByText(/Generation complete/).first().isVisible().catch(() => false)) {
+                                if (domCompleteSeen) {
+                                    console.warn('  WARNING: assets settled per the DOM banner but the store poll saw nothing — '
+                                        + 'the persisted-blob decode path is broken (check window.__e2eDecodeBlob / the persist key prefix).');
+                                    settleReason = 'dom-fallback';
+                                    break;
+                                }
+                                domCompleteSeen = true;
+                            }
                             // A required slot that errored writes no artifact. Stop after a
                             // stable idle minute, record the exact missing outputs, and fail
                             // below instead of reporting a false-green partial bundle.
@@ -1281,7 +1354,11 @@ try {
                             report.assets.readySubtypes);
                         // A timeout means the asset path did not complete — fail the run
                         // (report.assets is already recorded above) rather than exit 0 and
-                        // mask the regression this harness exists to catch.
+                        // mask the regression this harness exists to catch. 'dom-fallback'
+                        // deliberately passes: the app finished (the completion banner is
+                        // authoritative for that) and the blind store poll was already
+                        // warned about above — readySubtypes/missingSubtypes then reflect
+                        // the store VIEW, not the bundle.
                         if (settleReason === 'timeout') {
                             throw new Error(`asset generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
                         }

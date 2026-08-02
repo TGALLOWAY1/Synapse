@@ -256,7 +256,21 @@ update the script in the same change (treat drift here like docs drift):
   16KB are lz-string compressed with an `__SYNLZ1__` prefix
   (`src/store/persistCodec.ts`) — the driver injects lz-string into every
   page and decodes through `window.__e2eDecodeBlob` in both settle polls;
-  parsing localStorage directly goes blind mid-generation.
+  parsing localStorage directly goes blind mid-generation. Playwright wraps
+  `addInitScript` content in a function scope, so the UMD bundle's top-level
+  `var LZString` must be published as `window.LZString` explicitly (the
+  helper does this) — without it both polls silently read nothing. As a
+  drift guard, each settle loop also accepts the app's own completion banner
+  ("Your working plan is drafted" / "Generation complete") seen on two
+  consecutive polls — but only with direct store-blindness evidence (a
+  matching persist key that fails to decode, or no matching key at all).
+  A store that decodes fine but holds zero ready artifacts never takes the
+  fallback: that is also what a fully failed bundle looks like (the
+  checkpoint headline still says "Generation complete"), and it must fail
+  the run, not pass as settled. A legitimate fallback settles with a
+  `dom-fallback` settle signal and a loud console warning instead of
+  burning the full timeout, and `report.generation.settleSignal` /
+  `report.assets.settleReason` record which signal fired.
 - Commit-to-build path: the top-bar `Review readiness` button
   (`ProjectWorkspace.tsx`), the `Finalize plan` / `Finalize with accepted
   risk` / `Finalize with N accepted blockers` buttons and the

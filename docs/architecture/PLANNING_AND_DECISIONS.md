@@ -187,7 +187,13 @@ impact previews / the write-barrier apply path in
   artifact's current version for explicitly labelled `**Open Questions:**` /
   `**Assumptions:**` blocks and for unambiguous markers (TBD/TODO/"to be
   determined"/"needs a decision" — deliberately NOT "missing"/"unresolved",
-  which are ordinary words in designed behavior). Every item carries a locator
+  which are ordinary words in designed behavior). The generic markdown pass
+  treats **data as data, never prose**: fenced code blocks are skipped
+  outright (the Implementation Plan embeds JSON task blocks whose
+  `"status": "todo",` lines otherwise surface as "Marked open" items — the
+  live defect that motivated the rule), a fence boundary ends any labelled
+  block in progress, and a content that is a whole JSON document (the
+  screen-inventory and mockup-spec artifacts) is not scanned at all. Every item carries a locator
   back to its source region, and for user-flow assets that means a `flowId`
   (slugged identically to `UserFlowsRenderer`'s `flowId()`) plus an optional
   `flowStepIndex`. `AssetOpenItemsPanel` renders the list at the foot of the

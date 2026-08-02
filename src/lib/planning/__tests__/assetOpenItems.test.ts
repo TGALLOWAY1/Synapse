@@ -97,6 +97,63 @@ Accepts an image plus the source prompt. Retention policy TBD.
     });
 });
 
+describe('deriveAssetOpenItems — data is not prose', () => {
+    const planSource = (content: string): AssetOpenItemSource => ({
+        artifactId: 'artifact-plan',
+        artifactVersionId: 'v1',
+        slot: 'implementation_plan',
+        subtype: 'implementation_plan',
+        artifactTitle: 'Implementation Plan',
+        content,
+    });
+
+    it('never lifts lines out of a fenced code block', () => {
+        // The exact leak seen live: the Implementation Plan embeds JSON task
+        // blocks, and `"status": "todo",` surfaced in the Decision Center as
+        // a "Marked open" item.
+        const items = deriveAssetOpenItems([planSource(`## Definition of Done
+Each task carries a machine-readable status.
+
+\`\`\`json
+{
+  "task": "Implement SwiftData schema",
+  "status": "todo",
+  "notes": "decide later whether to shard"
+}
+\`\`\`
+
+## Security & Privacy Obligations
+
+**Open Questions:**
+- Data retention on unpairing is not declared. Hard delete, or orphan?
+`)]);
+        expect(items).toHaveLength(1);
+        expect(items[0].kind).toBe('open_question');
+        expect(items[0].locationLabel).toBe('Security & Privacy Obligations');
+    });
+
+    it('ends a labelled block at a fence instead of swallowing the code', () => {
+        const items = deriveAssetOpenItems([planSource(`**Open Questions:**
+- Real question before the code
+\`\`\`
+"status": "todo",
+\`\`\`
+`)]);
+        expect(items.map(i => i.text)).toEqual(['Real question before the code']);
+    });
+
+    it('skips whole-JSON artifact contents entirely', () => {
+        const items = deriveAssetOpenItems([{
+            artifactId: 'artifact-mockup',
+            artifactVersionId: 'v1',
+            slot: 'mockup',
+            artifactTitle: 'UI Mockups',
+            content: '{"version":"mockup_spec_v1","screens":[{"id":"s1","status":"todo"}]}',
+        }]);
+        expect(items).toEqual([]);
+    });
+});
+
 describe('deriveAssetOpenItems — identity', () => {
     it('keeps ids stable across a regeneration of the same artifact', () => {
         const a = deriveAssetOpenItems([flowSource(FLOWS)]);
