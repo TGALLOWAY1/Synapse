@@ -46,6 +46,8 @@ interface Props {
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
+    /** Exact review segment requested by a Final Review blocker. */
+    initialSection?: 'api_contract';
 }
 
 function tryParseAsJson(content: string): DataModelContent | null {
@@ -236,7 +238,7 @@ function EndpointContractCard({
     );
 }
 
-export function DataModelRenderer({ content, initialEntityName, initialMemberName, initialMemberAspect }: Props) {
+export function DataModelRenderer({ content, initialEntityName, initialMemberName, initialMemberAspect, initialSection }: Props) {
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -261,11 +263,12 @@ export function DataModelRenderer({ content, initialEntityName, initialMemberNam
     const signature = parsed.entities.map(e => e.name).join('|');
     return (
         <DataModelBody
-            key={`${signature}:${initialEntityName ?? ''}:${initialMemberAspect ?? ''}:${initialMemberName ?? ''}`}
+            key={`${signature}:${initialEntityName ?? ''}:${initialMemberAspect ?? ''}:${initialMemberName ?? ''}:${initialSection ?? ''}`}
             parsed={parsed}
             initialEntityName={initialEntityName}
             initialMemberName={initialMemberName}
             initialMemberAspect={initialMemberAspect}
+            initialSection={initialSection}
         />
     );
 }
@@ -275,9 +278,10 @@ interface BodyProps {
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
+    initialSection?: 'api_contract';
 }
 
-function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMemberAspect }: BodyProps) {
+function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMemberAspect, initialSection }: BodyProps) {
     const isMobile = useIsMobile();
     const { graph, summary } = useMemo(() => analyzeDataModel(parsed), [parsed]);
 
@@ -329,11 +333,14 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
     const { scrollTo } = useArtifactOutline(outlineIds);
 
     useEffect(() => {
-        if (!initialEntityName) return;
-        const target = document.getElementById(exactMemberAnchor ?? entityAnchorId(initialEntityName));
+        const target = initialSection === 'api_contract'
+            ? document.getElementById('data-model-api-contract')
+            : initialEntityName
+                ? document.getElementById(exactMemberAnchor ?? entityAnchorId(initialEntityName))
+                : null;
         target?.scrollIntoView?.({ block: 'center' });
         target?.focus({ preventScroll: true });
-    }, [exactMemberAnchor, initialEntityName]);
+    }, [exactMemberAnchor, initialEntityName, initialSection]);
 
     const toggleEntity = (nodeId: string) =>
         setExpandedIds(prev => {
@@ -566,7 +573,12 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
             </section>
 
             {/* ── Review section 2 · API Contract ───────────────────────── */}
-            <section aria-label="API Contract" className="space-y-2.5">
+            <section
+                id="data-model-api-contract"
+                tabIndex={-1}
+                aria-label="API Contract"
+                className="space-y-2.5"
+            >
                 <ReviewSectionHeader
                     step={2}
                     title="API Contract"

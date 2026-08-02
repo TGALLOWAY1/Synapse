@@ -14,8 +14,8 @@ describe('planSlotRetry', () => {
         expect(plan.slots).toEqual(['mockup']);
     });
 
-    it('queues an errored HIDDEN dependency before the downstream slot (mockup ← component_inventory)', () => {
-        // component_inventory is a hidden dependency the mockup consumes.
+    it('queues an errored dependency before the downstream slot (mockup ← component_inventory)', () => {
+        // component_inventory is a reviewable hosted dependency the mockup consumes.
         const plan = planSlotRetry('mockup', healthyExcept('component_inventory'));
         expect(plan.unhealthyDeps).toContain('component_inventory');
         expect(plan.slots).toContain('component_inventory');

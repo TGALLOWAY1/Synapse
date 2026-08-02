@@ -11,11 +11,12 @@ order to regenerate them. Sidebar: **Project Map → Dependency Graph**.
 the feature keys off.)
 
 - **Node universe.** The PRD spine (`SpineVersion`) plus the artifact slots
-  (`ArtifactSlotKey = CoreArtifactSubtype | 'mockup'`). Visible subtypes
-  today: `design_system`, `screen_inventory`, `user_flows`, `data_model`,
-  `implementation_plan`, plus the `mockup` artifact. `component_inventory`
-  is **hidden** (generates, no UI row — `HIDDEN_ARTIFACT_SUBTYPES`);
-  `prompt_pack` is **retired** (`RETIRED_ARTIFACT_SUBTYPES`).
+  (`ArtifactSlotKey = CoreArtifactSubtype | 'mockup'`). Reviewable subtypes
+  today: `design_system`, `screen_inventory`, `user_flows`,
+  `component_inventory`, `data_model`, `implementation_plan`, plus the
+  `mockup` artifact. `component_inventory` has no sidebar row but is visible
+  inside Screens → Components and in this graph; `HIDDEN_ARTIFACT_SUBTYPES` is
+  empty. `prompt_pack` is **retired** (`RETIRED_ARTIFACT_SUBTYPES`).
 - **Real generation dependencies.** `CORE_ARTIFACT_PIPELINE[].dependsOn`:
   `user_flows ← screen_inventory`; `component_inventory ← screen_inventory`;
   `implementation_plan ← screen_inventory + data_model + user_flows` (the

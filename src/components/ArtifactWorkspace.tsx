@@ -96,6 +96,7 @@ import {
 import { deriveCrossCuttingObligations } from '../lib/planning/crossCuttingObligations';
 import type { CrossCuttingObligationStatus } from '../lib/planning/crossCuttingObligations';
 import type {
+    BuildPacketArtifactActionTarget,
     BuildPacketActionTarget,
     BuildPacketReadiness,
 } from '../lib/planning/buildPacketReadiness';
@@ -150,6 +151,8 @@ interface ArtifactWorkspaceProps {
      * different output merely because it is earlier in display order. */
     initialSelection?: ArtifactSlotKey;
     initialArtifactId?: string;
+    /** Exact Final Review destination within the selected artifact slot. */
+    initialBuildPacketTarget?: BuildPacketArtifactActionTarget;
     initialRegion?: PlanningArtifactRegionTarget;
     initialUpdatePlanId?: string;
     initialUpdatePlanItemId?: string;
@@ -359,7 +362,7 @@ function AssetLock() {
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
-    initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
+    initialBuildPacketTarget, initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
     onOpenPlanningRecord, onNavigatePlanning, buildBlocked, blockingPlanningItems,
     onResolveBuildBlockers, buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
 }: ArtifactWorkspaceProps) {
@@ -396,6 +399,7 @@ export function ArtifactWorkspace({
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
     const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
+    const [buildPacketArtifactTarget, setBuildPacketArtifactTarget] = useState<BuildPacketArtifactActionTarget | null>(null);
 
     useEffect(() => {
         if (!initialSelection) return;
@@ -408,10 +412,11 @@ export function ArtifactWorkspace({
         if (target === 'screens' || slotMetas.some(meta => meta.key === target)) {
             setSelected(target);
             setSelectedArtifactId(initialArtifactId);
+            setBuildPacketArtifactTarget(initialBuildPacketTarget ?? null);
             if (isMobile) setMobileSidebarOpen(false);
         }
         onInitialSelectionConsumed?.();
-    }, [initialSelection, initialArtifactId, isMobile, onInitialSelectionConsumed, slotMetas]);
+    }, [initialSelection, initialArtifactId, initialBuildPacketTarget, isMobile, onInitialSelectionConsumed, slotMetas]);
     // The scrollable content pane. Reset to the top whenever the user switches
     // pages so a new artifact never inherits the previous page's scroll offset.
     const mainRef = useRef<HTMLElement>(null);
@@ -1724,10 +1729,13 @@ export function ArtifactWorkspace({
                         new top-level sidebar row, and this is the only place its
                         slot status/retry is reachable. */}
                     <ScreenComponentsSection
+                        key={buildPacketArtifactTarget?.nodeId === 'component_inventory' ? 'components-targeted' : 'components'}
                         content={componentInventoryPreferred?.content}
                         screens={componentJoinScreens}
                         status={slotStatusFor('component_inventory')}
                         errorMessage={slotErrorFor('component_inventory')?.message}
+                        initiallyOpen={buildPacketArtifactTarget?.nodeId === 'component_inventory'}
+                        showWhenEmpty={buildPacketArtifactTarget?.nodeId === 'component_inventory'}
                         onRetry={
                             capabilities.canGenerateArtifacts
                                 ? () => handleRetrySlot('component_inventory')
@@ -2164,7 +2172,14 @@ export function ArtifactWorkspace({
                         initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
                         initialDataMemberName={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberName : undefined}
                         initialDataMemberAspect={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberAspect : undefined}
-                        initialImplementationTarget={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationTarget : undefined}
+                        initialImplementationTarget={
+                            subtype === 'implementation_plan'
+                            && !(buildPacketArtifactTarget?.nodeId === subtype && buildPacketArtifactTarget.section === 'first_milestone')
+                                ? updatePlanRegionTarget?.implementationTarget
+                                : undefined
+                        }
+                        initialBuildPacketSection={buildPacketArtifactTarget?.nodeId === subtype ? buildPacketArtifactTarget.section : undefined}
+                        initialBuildPacketMilestoneId={buildPacketArtifactTarget?.nodeId === subtype ? buildPacketArtifactTarget.milestoneId : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}
                         onConvertToTasks={handleConvertToTasks}
@@ -2193,6 +2208,7 @@ export function ArtifactWorkspace({
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
         setSelectedArtifactId(undefined);
+        setBuildPacketArtifactTarget(null);
         // Any sidebar selection (including re-clicking "Screens") lands on the
         // top of that view, closing an open Screen Detail (clears the URL
         // params, so Back can return to the screen).

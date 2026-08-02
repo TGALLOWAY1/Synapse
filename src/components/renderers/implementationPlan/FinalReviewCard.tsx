@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Files,
     History, Package, ShieldCheck, XCircle,
@@ -89,6 +89,8 @@ interface Props {
     onConvertToTasks?: () => void;
     onOpenMilestone: (milestoneId: string) => void;
     onOpenRoadmap: () => void;
+    /** Opens and focuses a precise Final Review subsection. */
+    initialSection?: 'coverage';
 }
 
 const STATUS_STYLE = {
@@ -142,6 +144,7 @@ export function FinalReviewCard({
     onConvertToTasks,
     onOpenMilestone,
     onOpenRoadmap,
+    initialSection,
 }: Props) {
     const [blockersOpen, setBlockersOpen] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -405,6 +408,7 @@ export function FinalReviewCard({
                 staleness={staleness}
                 sourceVersions={sourceVersions}
                 onOpenMilestone={onOpenMilestone}
+                initiallyOpen={initialSection === 'coverage'}
             />
         </section>
     );
@@ -422,24 +426,38 @@ function CoverageSummary({
     staleness,
     sourceVersions,
     onOpenMilestone,
+    initiallyOpen = false,
 }: {
     plan: ConsolidatedImplementationPlan;
     prdVersionLabel?: string;
     staleness?: DependencyNodeStatus;
     sourceVersions?: string[];
     onOpenMilestone: (milestoneId: string) => void;
+    initiallyOpen?: boolean;
 }) {
     const matrix = useMemo(() => buildCoverageMatrix(plan), [plan]);
     // Mount the matrix only once opened: it is a wide table plus a mobile card
     // list, and a permanently-mounted copy would also duplicate every milestone
     // label in the accessibility tree behind a collapsed detail.
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initiallyOpen);
+    const sectionRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!initiallyOpen) return;
+        sectionRef.current?.scrollIntoView?.({ block: 'center' });
+        sectionRef.current?.focus({ preventScroll: true });
+    }, [initiallyOpen]);
     const provenance = [
         ...(prdVersionLabel ? [`PRD ${prdVersionLabel}`] : []),
         ...(sourceVersions ?? []),
     ];
     return (
-        <div data-testid="final-review-coverage" className="rounded-lg border border-neutral-200">
+        <div
+            ref={sectionRef}
+            id="implementation-plan-coverage"
+            tabIndex={-1}
+            data-testid="final-review-coverage"
+            className="rounded-lg border border-neutral-200"
+        >
             <button
                 type="button"
                 data-testid="final-review-coverage-toggle"

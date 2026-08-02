@@ -52,6 +52,8 @@ interface Props {
     initialMilestoneId?: string;
     /** Opens an exact architecture or delivery-plan region when it can be resolved safely. */
     initialNavigationTarget?: ImplementationPlanNavigationTarget;
+    /** Opens an exact Final Review subsection selected by a packet blocker. */
+    initialFinalReviewSection?: 'coverage';
     /** Build-packet context for the Final Review surface (plan §W7). */
     finalReview?: PlanFinalReviewContext;
 }
@@ -98,6 +100,7 @@ export function ImplementationPlanRenderer({
     onUpdatePlanProgress,
     initialMilestoneId,
     initialNavigationTarget,
+    initialFinalReviewSection,
     finalReview,
 }: Props) {
     const consolidated = useMemo(
@@ -116,7 +119,7 @@ export function ImplementationPlanRenderer({
     if (consolidated) {
         return (
             <ConsolidatedPlanView
-                key={initialNavigationTarget?.anchorId ?? initialMilestoneId ?? 'implementation-plan'}
+                key={initialNavigationTarget?.anchorId ?? initialMilestoneId ?? initialFinalReviewSection ?? 'implementation-plan'}
                 plan={consolidated}
                 prdVersionLabel={prdVersionLabel}
                 staleness={staleness}
@@ -127,6 +130,7 @@ export function ImplementationPlanRenderer({
                 onUpdateProgress={onUpdatePlanProgress}
                 initialMilestoneId={initialMilestoneId}
                 initialNavigationTarget={initialNavigationTarget}
+                initialFinalReviewSection={initialFinalReviewSection}
                 finalReview={finalReview}
             />
         );

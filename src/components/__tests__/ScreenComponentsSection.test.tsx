@@ -79,4 +79,22 @@ describe('ScreenComponentsSection', () => {
         render(<ScreenComponentsSection screens={screens} status="generating" />);
         expect(screen.getByText(/Generating the component inventory/)).toBeTruthy();
     });
+
+    it('opens a missing inventory with a concrete action for an exact blocker target', () => {
+        const onRetry = vi.fn();
+        render(
+            <ScreenComponentsSection
+                screens={screens}
+                status="idle"
+                initiallyOpen
+                showWhenEmpty
+                onRetry={onRetry}
+            />,
+        );
+        expect(screen.getByRole('button', { name: /Components/ })).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByText('Component inventory not generated')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+        expect(onRetry).toHaveBeenCalledTimes(1);
+        expect(document.activeElement).toBe(document.getElementById('screens-components'));
+    });
 });

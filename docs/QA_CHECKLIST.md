@@ -197,9 +197,14 @@ tests** — problems here will only be caught by this section.
 
 - [ ] **Generate build foundation** → the visual direction picker appears →
       choose a preset → **Continue with …**.
-- [ ] All five artifacts generate: **Design System**, **User Flows**,
-      **Screens**, **Data Model**, **Implementation Plan**.
-- [ ] Sidebar status dots progress and **all settle** — nothing stuck spinning.
+- [ ] All five workspace destinations populate: **Design System**, **User
+      Flows**, **Screens**, **Data Model**, **Implementation Plan**. Under the
+      hood this means all six active core outputs — including **Component
+      Inventory** inside Screens — plus the **Mockup** spec reach a terminal,
+      successful state.
+- [ ] Sidebar status dots and the hosted **Components** status progress and
+      **all settle** — nothing stuck spinning, silently missing, or reported
+      complete while a required hosted slot is still running.
 - [ ] The sidebar groups read Project Foundation · Experience · Architecture ·
       Development · Project Map.
 
@@ -211,8 +216,14 @@ Then check each output is usable:
 - [ ] **Screens** — the list is populated; opening one shows **Overview / Flow /
       Mockups** tabs; **All screens** returns. Screens reference the features
       they serve.
-- [ ] **Data Model** — entities, fields and relationships; the entities named
-      in the plan actually appear here.
+- [ ] **Screens → Components** — the section expands, lists reusable components,
+      shows screen back-references and contradiction advisories, and a failed or
+      missing inventory has a visible Retry/Generate path.
+- [ ] **Data Model** — the three review segments **Schema / API Contract /
+      Privacy & Security** render. Entities, fields and relationships are
+      present; first-slice endpoints identify auth, schemas, errors, pagination,
+      idempotency, rate limits, linked requirements, and tests. Legacy endpoints
+      remain readable and are labelled as stubs rather than errors.
 - [ ] **Implementation Plan** — the **Final Review** card renders above the tab
       strip with **exactly one** primary action, and the three tabs **Build
       Brief / Roadmap / Prompts** all render with content.
@@ -221,6 +232,18 @@ Then check each output is usable:
       *Approve build packet*, or *Copy first implementation prompt* once
       approved. Copy plan / Review prompts / Convert to tasks stay inside
       **More actions** in all three states.
+- [ ] The eight build-packet criteria appear in order and agree with their
+      evidence: **Required outputs generated**, **Packet inputs current**,
+      **Output validation clear**, **In-scope requirements covered**,
+      **First-slice API contracts complete**, **Cross-cutting obligations
+      discharged**, **First slice is executable**, **Product reasoning
+      committed**.
+- [ ] Every blocker action lands on the named destination, including **API
+      Contract**, the expanded **Traceability matrix**, the requested first
+      milestone, and the hosted **Components** section.
+- [ ] A project with privacy/safety or success-metric triggers requires the
+      matching **Security & Privacy** or **Measurement** obligation; a project
+      with no trigger omits it without inventing a blocker.
 - [ ] **Artifact versions this approval covers** lists every output; after
       regenerating one, that row reads *Changed since approval* and the CTA asks
       to re-approve.
@@ -228,6 +251,8 @@ Then check each output is usable:
       features and screens; it is not empty.
 - [ ] Tasks state objective completion conditions. Flag vague ones — *"improve
       the page"*, *"build the backend"*, *"make it intuitive"*.
+- [ ] Task progress reads **Planned → Started → Implemented (self-reported)**.
+      It never claims Verified or treats a checked task as build-packet evidence.
 - [ ] **Dependency Graph** renders and shows the relationships between outputs.
 
 - [ ] Pick one feature and trace it end to end: **feature → flow → screen →

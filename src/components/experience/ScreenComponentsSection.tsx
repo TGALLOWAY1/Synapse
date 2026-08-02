@@ -19,7 +19,7 @@
 // Presentation only — the content, back-references and advisories all come from
 // existing artifact contents and the derived `componentExperience` join.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Blocks, ChevronDown, ChevronUp, Loader2, RefreshCcw } from 'lucide-react';
 import type { GenerationStatus } from '../../types';
 import { parseComponentInventoryMarkdown } from '../../lib/componentInventoryParse';
@@ -38,6 +38,10 @@ interface Props {
     status: GenerationStatus;
     /** Slot error message, when the slot failed. */
     errorMessage?: string;
+    /** Opens and focuses this hosted slot for an exact navigation action. */
+    initiallyOpen?: boolean;
+    /** Keeps the slot visible when an action is explaining that it is missing. */
+    showWhenEmpty?: boolean;
     /** Retry the slot. Omitted when the project can't generate (demo/keyless). */
     onRetry?: () => void;
     /** Open a screen by slug (the Screens view's navigation key). */
@@ -49,6 +53,8 @@ export function ScreenComponentsSection({
     screens,
     status,
     errorMessage,
+    initiallyOpen = false,
+    showWhenEmpty = false,
     onRetry,
     onNavigateToScreen,
 }: Props) {
@@ -59,12 +65,19 @@ export function ScreenComponentsSection({
     const summary = model.summary;
     const inFlight = status === 'generating' || status === 'queued';
     const failed = status === 'error' || status === 'interrupted';
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initiallyOpen);
+    const sectionRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!initiallyOpen) return;
+        sectionRef.current?.scrollIntoView?.({ block: 'center' });
+        sectionRef.current?.focus({ preventScroll: true });
+    }, [initiallyOpen]);
 
     // Nothing generated and nothing happening → render nothing rather than an
     // empty nag. A failed/in-flight slot always shows, so the status is never
     // invisible (that was the defect that justified hiding this artifact).
-    if (!content && !inFlight && !failed) return null;
+    if (!content && !inFlight && !failed && !showWhenEmpty) return null;
 
     const headline = inFlight
         ? 'Generating the component inventory…'
@@ -73,12 +86,17 @@ export function ScreenComponentsSection({
             : summary.componentCount > 0
                 ? `${summary.componentCount} component${summary.componentCount === 1 ? '' : 's'}`
                     + (summary.joinAvailable ? ` · ${summary.referencedCount} referenced by a screen` : '')
-                : 'Reusable components and patterns';
+                : content ? 'Reusable components and patterns' : 'Component inventory not generated';
 
     const advisoryCount = model.issues.filter(issue => issue.severity === 'review').length;
 
     return (
-        <div className="mx-auto max-w-3xl xl:max-w-5xl">
+        <div
+            ref={sectionRef}
+            id="screens-components"
+            tabIndex={-1}
+            className="mx-auto max-w-3xl xl:max-w-5xl"
+        >
             <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
                 <button
                     type="button"
@@ -133,6 +151,22 @@ export function ScreenComponentsSection({
                             <p className="text-xs text-neutral-500">
                                 The component inventory is still being generated — it will appear here when it lands.
                             </p>
+                        )}
+                        {!content && !inFlight && !failed && (
+                            <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                                <p className="text-xs text-neutral-600">
+                                    Generate the component inventory to review reusable UI patterns and their screen references.
+                                </p>
+                                {onRetry && (
+                                    <button
+                                        type="button"
+                                        onClick={onRetry}
+                                        className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                                    >
+                                        <RefreshCcw size={13} /> Generate
+                                    </button>
+                                )}
+                            </div>
                         )}
                         {content && (
                             <ArtifactContentRenderer
