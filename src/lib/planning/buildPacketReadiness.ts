@@ -144,15 +144,17 @@ export type BuildPacketArtifactSection = 'api_contract' | 'coverage' | 'first_mi
  * SLOT that may not have an artifact id yet (a missing output has none), and
  * the readiness checkpoint where a commitment is recorded.
  */
+export interface BuildPacketArtifactActionTarget {
+    kind: 'artifact_slot';
+    nodeId: ArtifactSlotKey;
+    artifactId?: string;
+    section?: BuildPacketArtifactSection;
+    milestoneId?: string;
+}
+
 export type BuildPacketActionTarget =
     | ReadinessActionTarget
-    | {
-        kind: 'artifact_slot';
-        nodeId: ArtifactSlotKey;
-        artifactId?: string;
-        section?: BuildPacketArtifactSection;
-        milestoneId?: string;
-    }
+    | BuildPacketArtifactActionTarget
     | { kind: 'readiness_commitment' };
 
 export type BuildPacketEvidenceSourceType =

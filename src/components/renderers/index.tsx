@@ -5,6 +5,7 @@ import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
 import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 import type { PlanningArtifactRegionTarget } from '../../lib/planning/planningNavigation';
+import type { BuildPacketArtifactSection } from '../../lib/planning/buildPacketReadiness';
 import type { ComponentJoinScreen } from '../../lib/componentExperience';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
@@ -61,6 +62,9 @@ interface DispatchProps {
     initialDataMemberName?: string;
     initialDataMemberAspect?: PlanningArtifactRegionTarget['dataMemberAspect'];
     initialImplementationTarget?: ImplementationPlanNavigationTarget;
+    /** Exact sub-surface requested by a Final Review blocker action. */
+    initialBuildPacketSection?: BuildPacketArtifactSection;
+    initialBuildPacketMilestoneId?: string;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
@@ -148,6 +152,8 @@ export function ArtifactContentRenderer({
     initialDataMemberName,
     initialDataMemberAspect,
     initialImplementationTarget,
+    initialBuildPacketSection,
+    initialBuildPacketMilestoneId,
     promptPackContent,
     savedTasks,
     onConvertToTasks,
@@ -170,6 +176,7 @@ export function ArtifactContentRenderer({
                 initialEntityName={initialDataEntityName}
                 initialMemberName={initialDataMemberName}
                 initialMemberAspect={initialDataMemberAspect}
+                initialSection={initialBuildPacketSection === 'api_contract' ? 'api_contract' : undefined}
             />
         );
     }
@@ -217,6 +224,12 @@ export function ArtifactContentRenderer({
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
                 initialNavigationTarget={initialImplementationTarget}
+                initialMilestoneId={
+                    initialBuildPacketSection === 'first_milestone'
+                        ? initialBuildPacketMilestoneId
+                        : undefined
+                }
+                initialFinalReviewSection={initialBuildPacketSection === 'coverage' ? 'coverage' : undefined}
                 finalReview={planFinalReview}
             />
         );

@@ -163,14 +163,25 @@ const PORT = args.port || 5181; // dedicated port; 5173 dev / 5179 tour / 5180 d
 const BASE_URL = `http://localhost:${PORT}`;
 const GENERATION_TIMEOUT_MS = (args.timeoutMin || 12) * 60_000;
 const PROGRESS_SHOT_EVERY_MS = 45_000;
-// Downstream asset generation (the 7-core artifact bundle + mockup spec) is a
+// Downstream asset generation (six active core artifacts + mockup spec) is a
 // much larger token spend than the PRD alone, so it's opt-outable. Default: on
 // in live mode. It requires committing the plan through the readiness gate.
 const GENERATE_ASSETS = args.assets ?? true;
 const INTERACTIONS = args.interactions && MODE === 'live';
-// The 5 *visible* core subtypes a fresh bundle produces (component_inventory is
-// hidden but generates; prompt_pack is retired and does not). Used for settle.
-const VISIBLE_CORE_SUBTYPES = ['design_system', 'user_flows', 'screen_inventory', 'data_model', 'implementation_plan'];
+// Every required output a fresh bundle produces. `component_inventory` is a
+// reviewable hosted section under Screens (not hidden), and the mockup spec is
+// a required artifact even when local Vite cannot generate its image files.
+// Keep this contract aligned with CORE_ARTIFACT_PIPELINE minus retired slots,
+// plus the mockup slot.
+const REQUIRED_OUTPUT_SUBTYPES = [
+    'design_system',
+    'user_flows',
+    'screen_inventory',
+    'component_inventory',
+    'data_model',
+    'implementation_plan',
+    'mockup',
+];
 
 const IDEA_PROMPT = args.prompt ||
     'A simple habit tracker for busy parents: log daily habits in one tap, ' +
@@ -683,6 +694,15 @@ async function captureViews(page, viewport, wantedViews) {
                         await page.getByRole('button', { name: 'All screens' }).click({ timeout: 4000 }).catch(() => {});
                         await settle(500);
                     }
+                    // component_inventory is hosted below the screen list, so
+                    // walking only screen cards misses an entire required slot.
+                    const components = page.locator('main').getByRole('button', { name: /Components/ });
+                    await components.waitFor({ state: 'visible', timeout: 5000 });
+                    if (await components.getAttribute('aria-expanded') !== 'true') {
+                        await components.click();
+                    }
+                    await settle(1200);
+                    await fullShot(page, `artifact-screens-components${suffix}`);
                 }, { optional: true });
             }
 
@@ -899,6 +919,16 @@ try {
     if (USE_RELAY) await attachFetchRelay(context);
 
     const page = await context.newPage();
+    const activeGenerationRequests = new Set();
+    const isGenerationRequest = (req) => (
+        /generativelanguage\.googleapis\.com\/.*(?:stream)?generateContent/.test(req.url())
+    );
+    page.on('request', (req) => {
+        if (isGenerationRequest(req)) activeGenerationRequests.add(req);
+    });
+    page.on('requestfinished', (req) => {
+        activeGenerationRequests.delete(req);
+    });
     page.on('console', (msg) => {
         const rec = { type: msg.type(), text: redact(msg.text()).slice(0, 2000), url: page.url() };
         if (msg.type() === 'error') report.consoleErrors.push(rec);
@@ -915,6 +945,7 @@ try {
         (isLocalApi ? report.expectedLocalApiErrors : report.httpErrors).push(rec);
     });
     page.on('requestfailed', (req) => {
+        activeGenerationRequests.delete(req);
         const failure = req.failure()?.errorText || 'unknown';
         const url = redact(req.url());
         // Known environmental noise: blocked Vercel Analytics, and aborted
@@ -1214,13 +1245,18 @@ try {
                             const spinners = await page.locator('nav[aria-label="Artifacts"] .animate-spin').count().catch(() => 0);
                             const building = await page.getByText('Creating your build assets…').isVisible().catch(() => false);
                             const domIdle = spinners === 0 && !building;
-                            const haveAllVisibleCore = VISIBLE_CORE_SUBTYPES.every((s) => info.subtypes.includes(s));
+                            const generationNetworkIdle = activeGenerationRequests.size === 0;
+                            const haveAllRequiredOutputs = REQUIRED_OUTPUT_SUBTYPES.every((s) => info.subtypes.includes(s));
 
                             if (info.ready !== lastReady) { lastReady = info.ready; lastChangeAt = Date.now(); }
-                            if (haveAllVisibleCore && domIdle) { settleReason = 'all-core-done'; break; }
-                            // Fallback: some slot errored (no artifact written) but the run
-                            // is quiescent and most assets are present — don't hang.
-                            if (domIdle && info.ready >= 3 && Date.now() - lastChangeAt > 60_000) { settleReason = 'quiescent'; break; }
+                            if (haveAllRequiredOutputs && domIdle) { settleReason = 'all-required-done'; break; }
+                            // A required slot that errored writes no artifact. Stop after a
+                            // stable idle minute, record the exact missing outputs, and fail
+                            // below instead of reporting a false-green partial bundle.
+                            if (domIdle && generationNetworkIdle && info.ready >= 3 && Date.now() - lastChangeAt > 60_000) {
+                                settleReason = 'incomplete';
+                                break;
+                            }
                             if (Date.now() - t0 > GENERATION_TIMEOUT_MS) { settleReason = 'timeout'; await shot(page, 'assets-TIMEOUT', { fullPage: false }); break; }
                             if (Date.now() - lastShotAt >= PROGRESS_SHOT_EVERY_MS) {
                                 lastShotAt = Date.now();
@@ -1232,6 +1268,7 @@ try {
                             ms: Date.now() - t0,
                             settleReason,
                             readySubtypes: [...new Set(subtypes)].sort(),
+                            missingSubtypes: REQUIRED_OUTPUT_SUBTYPES.filter((subtype) => !subtypes.includes(subtype)),
                             // Mockup *images* come from the /api/image/generate backend proxy
                             // (server-side, gated by the provider-key status endpoint), and
                             // hasOpenAIKey() reflects that server status — NOT any shell env
@@ -1247,6 +1284,9 @@ try {
                         // mask the regression this harness exists to catch.
                         if (settleReason === 'timeout') {
                             throw new Error(`asset generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
+                        }
+                        if (settleReason === 'incomplete') {
+                            throw new Error(`asset generation settled without required outputs: ${report.assets.missingSubtypes.join(', ')}`);
                         }
                     }); // non-optional: a stalled/failed asset bundle must fail `npm run e2e`
                 }

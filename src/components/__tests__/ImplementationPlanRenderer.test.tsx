@@ -216,6 +216,20 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.getAllByText(/PRD changes/).length).toBeGreaterThan(0);
     });
 
+    it('opens and focuses Coverage for an exact Final Review blocker target', () => {
+        render(
+            <ImplementationPlanRenderer
+                content={fencePlan(NATIVE_PLAN)}
+                initialFinalReviewSection="coverage"
+            />,
+        );
+        const coverage = screen.getByTestId('final-review-coverage');
+        expect(screen.getByTestId('final-review-coverage-toggle')).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByText(/Change Impact/)).toBeInTheDocument();
+        expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+        expect(document.activeElement).toBe(coverage);
+    });
+
     it('adapts a legacy markdown plan + legacy prompt_pack into the consolidated view', () => {
         render(
             <ImplementationPlanRenderer

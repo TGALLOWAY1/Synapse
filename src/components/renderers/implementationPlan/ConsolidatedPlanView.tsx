@@ -48,6 +48,7 @@ interface Props {
     onUpdateProgress?: (next: ImplementationPlanProgress) => void;
     initialMilestoneId?: string;
     initialNavigationTarget?: ImplementationPlanNavigationTarget;
+    initialFinalReviewSection?: 'coverage';
     /**
      * Build-packet context for the Final Review surface (plan §W7). Absent in
      * isolated renders (previews, unit tests) — Final Review then reports the
@@ -80,6 +81,7 @@ export function ConsolidatedPlanView({
     onUpdateProgress,
     initialMilestoneId,
     initialNavigationTarget,
+    initialFinalReviewSection,
     finalReview,
 }: Props) {
     const legacyMilestoneTarget = initialMilestoneId ? {
@@ -189,6 +191,7 @@ export function ConsolidatedPlanView({
                 onConvertToTasks={onConvertToTasks}
                 onOpenMilestone={openMilestone}
                 onOpenRoadmap={() => setTab('milestones')}
+                initialSection={initialFinalReviewSection}
             />
 
             {/* --- Tab nav (scrolls horizontally on mobile; right-edge fade

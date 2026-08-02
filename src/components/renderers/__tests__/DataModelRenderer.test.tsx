@@ -56,6 +56,7 @@ function renderModel(content: DataModelContent, props: Partial<{
     initialEntityName: string;
     initialMemberName: string;
     initialMemberAspect: 'field' | 'relationship' | 'constraint' | 'data_expectation';
+    initialSection: 'api_contract';
 }> = {}) {
 
     return render(<DataModelRenderer content={JSON.stringify(content)} {...props} />);
@@ -460,6 +461,14 @@ const completeEndpoint = {
 };
 
 describe('DataModelRenderer — review segmentation (Schema → API Contract → Privacy & Security)', () => {
+    it('opens and focuses the API Contract segment for an exact blocker target', () => {
+        const { getByRole } = renderModel(modelWithApi, { initialSection: 'api_contract' });
+        const api = getByRole('region', { name: 'API Contract' });
+        expect(api).toHaveAttribute('id', 'data-model-api-contract');
+        expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+        expect(document.activeElement).toBe(api);
+    });
+
     it('renders the three explicit review sections with completeness indicators', () => {
         const { getByRole } = renderModel(modelWithApi);
         const schema = getByRole('region', { name: 'Schema' });

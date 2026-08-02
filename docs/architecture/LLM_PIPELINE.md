@@ -786,20 +786,18 @@
       Any edit to the trigger wording in the fragment must move the predicate
       (and the promptSurfaces snapshot) in the same change. See
       `docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md`.
-    `component_inventory` (UI Components) is a **hidden artifact** (see
-    "Post-finalization transition" below) with no reachable render UI — the
-    old mobile-first searchable component-library renderer (sticky search +
-    category/complexity/used-in filters, expandable cards with live previews,
-    under `src/components/renderers/componentInventory/`) was removed as dead
-    code (`ArtifactWorkspace`'s `slotMetas` filters hidden subtypes out of the
-    sidebar, so `selected` can never hold `component_inventory` and the
-    dispatch branch was unreachable). Generation, storage, and parsing are
-    unaffected: the artifact still generates (mockups softly consume it for
-    per-screen `componentRefs`) and its schema/types (optional `accessibility`,
-    `previewType`, per-prop `required` fields, all backward-compatible) still
-    round-trip through markdown via `src/lib/componentInventoryParse.ts`, which
-    remains in place for that purpose even with no renderer left to consume it
-    directly.
+    `component_inventory` (UI Components) is a **reviewable hosted artifact**.
+    It deliberately has no top-level sidebar row: `ArtifactWorkspace` routes
+    its slot into the **Components** section of the Screens experience through
+    `ScreenComponentsSection`, where generation status, missing/error states,
+    Retry, screen back-references, and component/screen contradiction
+    advisories are visible. `HIDDEN_ARTIFACT_SUBTYPES` is currently empty, so
+    Component Inventory legitimately participates in output completion,
+    auto-resume, export, the dependency graph, and build-packet readiness.
+    Generation and storage still use the same `component_inventory` slot;
+    mockups consume its per-screen `componentRefs`, and the backward-compatible
+    schema round-trips through `src/lib/componentInventoryParse.ts` before the
+    structured renderer consumes it.
     **Artifact in-page navigation** is a shared, collapsible **Artifact
     Outline** — `src/components/ArtifactOutlineNav.tsx` (presentational/
     controlled) + `src/lib/useArtifactOutline.ts` (scroll-spy via

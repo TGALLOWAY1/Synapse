@@ -6,6 +6,10 @@ const workspace = readFileSync(
     resolve(process.cwd(), 'src/components/ProjectWorkspace.tsx'),
     'utf8',
 );
+const artifactWorkspaceSource = readFileSync(
+    resolve(process.cwd(), 'src/components/ArtifactWorkspace.tsx'),
+    'utf8',
+);
 
 describe('ProjectWorkspace orientation', () => {
     it('does not render the retired global next-action strip', () => {
@@ -45,6 +49,18 @@ describe('ProjectWorkspace orientation', () => {
         // The live projection is passed ONLY so blocker copy can say whether a
         // commit action is on offer; the evaluator never treats it as approval.
         expect(call).toContain('planningProjectionReadyToBuild: planningReadiness.isReadyToBuild');
+    });
+
+    it('preserves exact Final Review artifact targets through the workspace renderer', () => {
+        const handlerStart = workspace.indexOf('const navigateBuildPacketTarget');
+        const handler = workspace.slice(handlerStart, workspace.indexOf('const handleReadinessConcern', handlerStart));
+        const artifactStart = workspace.indexOf('<ArtifactWorkspace');
+        const artifactProps = workspace.slice(artifactStart, workspace.indexOf('/>', artifactStart));
+
+        expect(handler).toContain('setWorkspaceInitialBuildPacketTarget(target)');
+        expect(artifactProps).toContain('initialBuildPacketTarget={workspaceInitialBuildPacketTarget}');
+        expect(artifactWorkspaceSource).toContain('initialBuildPacketSection={buildPacketArtifactTarget?.nodeId === subtype');
+        expect(artifactWorkspaceSource).toContain("initiallyOpen={buildPacketArtifactTarget?.nodeId === 'component_inventory'}");
     });
 
     it('does not pass global primary props into PlanningStateBar', () => {

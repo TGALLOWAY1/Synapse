@@ -80,6 +80,7 @@ import {
 } from '../lib/planning';
 import {
     deriveBuildPacketReadiness,
+    type BuildPacketArtifactActionTarget,
     type BuildPacketActionTarget,
 } from '../lib/planning/buildPacketReadiness';
 import { useBuildPacketInputs } from '../hooks/useBuildPacketInputs';
@@ -418,6 +419,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     const [reviewInitialFindingId, setReviewInitialFindingId] = useState<string>();
     const [workspaceInitialNode, setWorkspaceInitialNode] = useState<ArtifactSlotKey>();
     const [workspaceInitialArtifactId, setWorkspaceInitialArtifactId] = useState<string>();
+    const [workspaceInitialBuildPacketTarget, setWorkspaceInitialBuildPacketTarget] = useState<BuildPacketArtifactActionTarget>();
     const [workspaceInitialRegion, setWorkspaceInitialRegion] = useState<PlanningArtifactRegionTarget>();
     const [workspaceInitialUpdatePlanId, setWorkspaceInitialUpdatePlanId] = useState<string>();
     const [workspaceInitialUpdatePlanItemId, setWorkspaceInitialUpdatePlanItemId] = useState<string>();
@@ -1741,6 +1743,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
             setFinalizeAutoOpen(false);
             setWorkspaceInitialNode(destination.nodeId);
             setWorkspaceInitialArtifactId(destination.artifactId);
+            setWorkspaceInitialBuildPacketTarget(undefined);
             setWorkspaceInitialUpdatePlanId(destination.updatePlanId);
             setWorkspaceInitialUpdatePlanItemId(destination.updatePlanItemId);
             writePlanningIntent({
@@ -1774,6 +1777,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         setFinalizeAutoOpen(false);
         setWorkspaceInitialNode(target.nodeId);
         setWorkspaceInitialArtifactId(target.artifactId);
+        // Preserve the exact section/milestone destination. The artifact slot
+        // alone is not enough for API-contract, coverage, first-slice, or the
+        // Components-hosted-under-Screens actions.
+        setWorkspaceInitialBuildPacketTarget(target);
         setWorkspaceInitialUpdatePlanId(undefined);
         setWorkspaceInitialUpdatePlanItemId(undefined);
         writePlanningIntent({
@@ -2360,6 +2367,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                             initialSelection={workspaceInitialNode}
                             initialArtifactId={workspaceInitialArtifactId}
+                            initialBuildPacketTarget={workspaceInitialBuildPacketTarget}
                             initialRegion={workspaceInitialRegion}
                             initialUpdatePlanId={workspaceInitialUpdatePlanId}
                             initialUpdatePlanItemId={workspaceInitialUpdatePlanItemId}
@@ -2374,6 +2382,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);
+                                setWorkspaceInitialBuildPacketTarget(undefined);
                                 setWorkspaceInitialRegion(undefined);
                                 setWorkspaceInitialUpdatePlanId(undefined);
                                 setWorkspaceInitialUpdatePlanItemId(undefined);
