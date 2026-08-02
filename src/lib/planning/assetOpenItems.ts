@@ -143,11 +143,19 @@ function deriveFromFlows(source: AssetOpenItemSource): AssetOpenItem[] {
 
 const LABELLED_BLOCK_RE = /^\s*(?:\*\*|##+\s*)?(open questions?|assumptions?)\s*[:*]*\s*$/i;
 const HEADING_RE = /^#{1,4}\s+(.*\S)\s*$/;
+const CODE_FENCE_RE = /^\s*(?:```|~~~)/;
 
 /** Generic markdown pass for every other asset type. */
 function deriveFromMarkdown(source: AssetOpenItemSource): AssetOpenItem[] {
     const out: AssetOpenItem[] = [];
+    // A whole-JSON content (the screen-inventory and mockup-spec artifacts
+    // persist structured specs, not prose) has no labelled blocks to find, and
+    // running the marker regex over serialized data is pure noise — a literal
+    // `"status": "todo"` field is data, not an unresolved decision.
+    const first = source.content.trimStart()[0];
+    if (first === '{' || first === '[') return out;
     let heading = source.artifactTitle;
+    let inCodeFence = false;
     let blockKind: AssetOpenItemKind | null = null;
     let blockLines: string[] = [];
     let blockHeading = heading;
@@ -163,6 +171,17 @@ function deriveFromMarkdown(source: AssetOpenItemSource): AssetOpenItem[] {
     };
 
     for (const line of source.content.split('\n')) {
+        // Fenced code is data, not prose: the Implementation Plan embeds JSON
+        // blocks whose lines (`"status": "todo",`) would otherwise surface as
+        // Decision Center open items. Nothing inside a fence is scanned, and a
+        // fence boundary ends any labelled block in progress.
+        if (CODE_FENCE_RE.test(line)) {
+            flushBlock();
+            inCodeFence = !inCodeFence;
+            continue;
+        }
+        if (inCodeFence) continue;
+
         const headingMatch = line.match(HEADING_RE);
         if (headingMatch) {
             flushBlock();
