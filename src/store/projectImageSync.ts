@@ -22,7 +22,7 @@ import {
 } from '../lib/imageRefsClient';
 import { setProjectRefs } from '../lib/imageRefRegistry';
 import { projectsDebug } from '../lib/projectsDebug';
-import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { isShowcaseProjectId } from '../data/demoProject';
 
 const UPLOAD_CONCURRENCY = 3;
 
@@ -54,7 +54,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
  * retried on the next push; it never blocks text sync.
  */
 export async function pushProjectImages(userId: string, projectId: string, versionIds: string[]): Promise<void> {
-  if (!userId || projectId === DEMO_PROJECT_ID || versionIds.length === 0) return;
+  if (!userId || isShowcaseProjectId(projectId) || versionIds.length === 0) return;
   try {
     const records: MockupImageRecord[] = [];
     for (const versionId of versionIds) {
@@ -118,7 +118,7 @@ export async function pushProjectImages(userId: string, projectId: string, versi
 
 /** Pull a project's image refs into the registry for lazy hydration. Best-effort. */
 export async function pullProjectImageRefs(projectId: string): Promise<void> {
-  if (projectId === DEMO_PROJECT_ID) return;
+  if (isShowcaseProjectId(projectId)) return;
   try {
     const refs = await fetchImageRefs(projectId);
     setProjectRefs(projectId, refs);
@@ -137,13 +137,13 @@ export async function pullProjectImageRefs(projectId: string): Promise<void> {
  * unrelated bundle change to trigger a push. No-op when signed out.
  */
 export function notifyMockupImageGenerated(projectId: string, versionId: string): void {
-  if (!activeUserId || projectId === DEMO_PROJECT_ID) return;
+  if (!activeUserId || isShowcaseProjectId(projectId)) return;
   void pushProjectImages(activeUserId, projectId, [versionId]);
 }
 
 /** Delete specific image refs remotely (refcount-GCs orphan blobs server-side). */
 export async function deleteProjectImageRefs(projectId: string, keys: string[]): Promise<void> {
-  if (projectId === DEMO_PROJECT_ID || keys.length === 0) return;
+  if (isShowcaseProjectId(projectId) || keys.length === 0) return;
   try {
     await deleteImageRefsRemote(projectId, keys);
   } catch (error) {

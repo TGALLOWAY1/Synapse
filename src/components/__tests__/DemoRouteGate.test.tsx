@@ -208,7 +208,7 @@ describe('DemoRouteGate', () => {
         expect(mockedRestore).toHaveBeenCalledTimes(1);
     });
 
-    it('Reset & reload demo re-attempts hydration after a failure', async () => {
+    it('Reset & reload re-attempts hydration after a failure', async () => {
         mockedPointer.mockResolvedValue({ snapshotId: 'snap-A', updatedAt: null });
         mockedPublic.mockResolvedValue(null);
 
@@ -217,7 +217,7 @@ describe('DemoRouteGate', () => {
 
         // The transient failure clears — the reset+reload should succeed.
         mockedPublic.mockResolvedValue(fakePayload('snap-A'));
-        fireEvent.click(screen.getByRole('button', { name: 'Reset & reload demo' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Reset & reload' }));
 
         expect(await screen.findByText('demo-workspace')).toBeInTheDocument();
         expect(mockedRestore).toHaveBeenCalledTimes(1);

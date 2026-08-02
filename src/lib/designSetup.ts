@@ -2,7 +2,7 @@
 // ProjectWorkspace so the setup-flow state transitions are unit-testable.
 
 import type { Project, SpineVersion } from '../types';
-import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { isShowcaseProjectId } from '../data/demoProject';
 
 /**
  * Whether the workspace should render the design-selection setup step for
@@ -23,7 +23,7 @@ export function shouldShowDesignSetup(
     spine: SpineVersion | undefined,
 ): boolean {
     if (!project || !spine) return false;
-    if (project.id === DEMO_PROJECT_ID) return false;
+    if (isShowcaseProjectId(project.id)) return false;
     if (!project.needsDesignSetup) return false;
     if (project.designSystemPreset) return false;
     if (spine.safetyReview?.status === 'blocked') return false;

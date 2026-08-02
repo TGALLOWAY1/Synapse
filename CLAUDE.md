@@ -247,7 +247,7 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 | [docs/architecture/SAFETY_AND_VALIDATION.md](docs/architecture/SAFETY_AND_VALIDATION.md) | The safety gate/classifier (`src/lib/safety/`), blocking vs advisory artifact validation, automatic traceability repair, dependency sufficiency gate | Safety policy, artifact validation, generation gating |
 | [docs/architecture/STATE_AND_AUTH.md](docs/architecture/STATE_AND_AUTH.md) | The store slices, generation lifecycle, interrupted-run recovery, persistence/quota, per-user project namespacing, legacy import, account linking, encrypted provider-key vault, key-resolution rules | `src/store/`, auth flows, anything reading/writing credentials |
 | [docs/architecture/PROJECT_SYNC.md](docs/architecture/PROJECT_SYNC.md) | Server-side project storage (`/api/projects`), revision/conflict model, sync orchestrator + UI, recovery bundle, cross-device mockup image sync (Blob refs) | Project sync, `api/projects.js`, `api/_lib/projectsStore.js`, image refs |
-| [docs/architecture/SNAPSHOTS_AND_DEMO.md](docs/architecture/SNAPSHOTS_AND_DEMO.md) | Owner snapshots (all image kinds + wire format), mockup-image audit, pin-time gate, demo capability boundary, demo hydration/reset/cache freshness | `api/snapshots.js`, `snapshotClient.ts`, anything demo (`DEMO_PROJECT_ID`) |
+| [docs/architecture/SNAPSHOTS_AND_DEMO.md](docs/architecture/SNAPSHOTS_AND_DEMO.md) | Owner snapshots (all image kinds + wire format), mockup-image audit, pin-time gate, showcase (demo + project gallery) capability boundary, demo/gallery hydration/reset/cache freshness, the gallery go-live mode toggle | `api/snapshots.js`, `snapshotClient.ts`, anything demo/gallery (`DEMO_PROJECT_ID`, `GALLERY_PROJECT_IDS`) |
 | [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph / freshness actions, build-packet readiness, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
 | [docs/architecture/SCREENS_EXPERIENCE.md](docs/architecture/SCREENS_EXPERIENCE.md) | The Screens view: stable screen ids, join layer, screen contracts, readiness/coverage, review workflow (4A), downstream impact (4B), handoff + trace bridge + export (5A–5C), mockup variants (3A–3D), overlays, URL-addressable selection | Anything under `src/components/experience/` or `src/lib/screen*` / `mockupVariant*` |
 | [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest + agent handoff, version history/compare/revert, change-aware staleness, provenance stamping, "Confirm aligned" | Exports, version history, revert, staleness UX |
@@ -285,12 +285,15 @@ rationale and detail.
    user. Pre-generation key gates call `hasGeminiKey()` (vault OR local), never
    a localStorage-only check. New provider call sites route through the vault
    and never log a key. → STATE_AND_AUTH.md
-5. **Demo is read-only via one capability policy** (`projectCapabilities.ts`):
-   UI surfaces read `getProjectCapabilities`/`useProjectCapabilities`, domain
-   boundaries call `assertProjectCapability`, and every persistent store action
-   belongs in `PERSISTENT_STORE_ACTIONS` so `guardProjectStoreActions` no-ops
-   it for `DEMO_PROJECT_ID`. Never add raw demo-id checks at call sites or a
-   second demo store. → SNAPSHOTS_AND_DEMO.md, PLANNING_AND_DECISIONS.md
+5. **Showcase projects (the demo + every gallery slot) are read-only via one
+   capability policy** (`projectCapabilities.ts`): UI surfaces read
+   `getProjectCapabilities`/`useProjectCapabilities`, domain boundaries call
+   `assertProjectCapability`, and every persistent store action belongs in
+   `PERSISTENT_STORE_ACTIONS` so `guardProjectStoreActions` no-ops it for
+   showcase ids. Never add raw demo/gallery-id checks at call sites or a
+   second demo store — use `isShowcaseProjectId` (`src/data/demoProject.ts`)
+   where an id-level guard is genuinely needed (e.g. sync exclusions).
+   → SNAPSHOTS_AND_DEMO.md, PLANNING_AND_DECISIONS.md
 6. **New persisted state must travel:** adding a persisted collection means
    wiring `ALL_PROJECT_COLLECTIONS` (`src/lib/projectBundle.ts` — the single
    list the bundle, sync, recovery, namespace switch, and legacy import all

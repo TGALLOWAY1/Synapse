@@ -3,11 +3,14 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
-import { DEMO_PROJECT_ID } from '../../data/demoProject';
+import { DEMO_PROJECT_ID, galleryProjectIdForSlot } from '../../data/demoProject';
 import {
     loadDemoSnapshotPointer,
     loadDemoSnapshotPublic,
+    loadGalleryPointerPublic,
+    loadGallerySnapshotPublic,
     restoreSnapshotAs,
+    type SnapshotPayload,
 } from '../../lib/snapshotClient';
 import { projectsDebug } from '../../lib/projectsDebug';
 import { resolveProjectStorageName } from '../userScope';
@@ -34,7 +37,247 @@ export type ProjectSlice = {
     loadDemoProject: ProjectState['loadDemoProject'];
     clearDemoProject: ProjectState['clearDemoProject'];
     resetDemoProject: ProjectState['resetDemoProject'];
+    loadGalleryProject: ProjectState['loadGalleryProject'];
+    resetGalleryProject: ProjectState['resetGalleryProject'];
 };
+
+// Narrow views of the zustand set/get pair, so the showcase (demo + gallery)
+// helpers below can live at module level instead of being duplicated per
+// action inside the slice.
+type ShowcaseSet = (updater: (state: ProjectState) => Partial<ProjectState>) => void;
+type ShowcaseGet = () => ProjectState;
+
+// Outcome of a showcase pointer probe. The two null-ish cases are NOT the
+// same thing and must stay distinguishable: a FAILED probe (offline / proxy
+// error) means "trust the cache — better stale than empty", while a
+// SUCCESSFUL probe that finds nothing pinned means the owner explicitly
+// removed the content — a cached copy is removed content, not a fallback.
+type ShowcasePointerProbe =
+    | { ok: true; snapshotId: string | null }
+    | { ok: false };
+
+// Wipe one showcase project's slice of every project-keyed store map and its
+// IDB images. Shared by `clearDemoProject` and the gallery cache-policy
+// discard — this is a session/route-level concern, not a durable mutation, so
+// it deliberately bypasses the read-only capability guards.
+async function clearShowcaseProject(
+    set: ShowcaseSet,
+    get: ShowcaseGet,
+    targetProjectId: string,
+): Promise<void> {
+    const versions = get().artifactVersions[targetProjectId] || [];
+    await Promise.all(versions.flatMap((version) => [
+        deleteImagesForVersion(version.id),
+        deleteScreenImagesForArtifactVersion(version.id),
+        deleteVariantImagesForVersion(version.id),
+    ]));
+    set((state) => {
+        const keys = [
+            'projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts',
+            'artifactVersions', 'feedbackItems', 'reviewRuns', 'specialistRuns',
+            'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
+            'readinessReviews', 'readinessCommitmentEvents',
+            'downstreamUpdatePlans', 'downstreamUpdatePlanEvents',
+            'downstreamArtifactUpdateProposals', 'downstreamArtifactUpdateReviewEvents',
+            'downstreamArtifactUpdateApplications', 'downstreamArtifactUpdateVerifications',
+            'downstreamArtifactUpdateVerificationEvents',
+        ] as const;
+        const next: Record<string, unknown> = {};
+        for (const key of keys) {
+            const copy = { ...state[key] };
+            delete copy[targetProjectId];
+            next[key] = copy;
+        }
+        return next as Partial<ProjectState>;
+    });
+}
+
+// Hydrate one showcase project (the demo or a gallery slot) from its pinned
+// cloud snapshot into the store at `targetProjectId`.
+//
+// Freshness: a previously cached copy is reused ONLY when its source snapshot
+// id still matches the live pointer (`probePointer`). Otherwise (the owner
+// pinned a newer snapshot) we re-fetch and overwrite the cache. The pointer
+// probe is a tiny, public JSON fetch and runs before any heavy bundle/image
+// download. If the probe itself fails (offline / proxy error), we fall back
+// to the cached copy so the showcase still opens — better stale than empty.
+//
+// Image completeness (SYN-003): a STAMPED cache (`demoSourceSnapshotId` set)
+// is provably known-complete — the stamp is only written when the restore was
+// NOT image-incomplete. So a fresh-but-partial fetch never overwrites a
+// stamped cache; fresh-partial still beats no cache or an un-stamped cache,
+// and it leaves the stamp off so the next open re-fetches and self-heals.
+async function loadShowcaseProject(
+    set: ShowcaseSet,
+    get: ShowcaseGet,
+    options: {
+        targetProjectId: string;
+        force: boolean;
+        // Resolves the live pinned snapshot id for this showcase target. See
+        // `ShowcasePointerProbe`: a failed probe and an explicitly empty
+        // pointer drive opposite cache decisions.
+        probePointer: () => Promise<ShowcasePointerProbe>;
+        // Fetches the full public snapshot payload, or null when unavailable.
+        fetchPayload: () => Promise<SnapshotPayload | null>;
+    },
+): Promise<{ available: boolean }> {
+    const { targetProjectId, probePointer, fetchPayload } = options;
+    let force = options.force;
+    let existing: Project | undefined = get().projects[targetProjectId];
+
+    // Old caches were writable. Discard them once; current baseline caches
+    // keep the normal pointer-based fast path.
+    if (existing && existing.demoCachePolicyVersion !== DEMO_CACHE_POLICY_VERSION) {
+        await clearShowcaseProject(set, get, targetProjectId);
+        existing = undefined;
+        force = true;
+    }
+
+    const probe = await probePointer();
+
+    if (probe.ok && !probe.snapshotId) {
+        // The probe SUCCEEDED and found nothing pinned for this target (e.g.
+        // the owner removed this gallery slot). A cached copy is removed
+        // content, not a network fallback — drop it and report unavailable
+        // rather than serving it indefinitely on this device.
+        if (existing) await clearShowcaseProject(set, get, targetProjectId);
+        return { available: false };
+    }
+
+    const pointerId = probe.ok ? probe.snapshotId : null;
+
+    if (!force && existing && pointerId && existing.demoSourceSnapshotId === pointerId) {
+        return { available: true };
+    }
+    if (!force && existing && !probe.ok) {
+        // Pointer probe failed — keep the cached copy rather than wiping it.
+        return { available: true };
+    }
+
+    const payload = await fetchPayload();
+    if (!payload) {
+        // Fetch failed and nothing is cached — surface unavailable. If a
+        // cache exists, keep serving it.
+        return { available: !!existing };
+    }
+
+    // SYN-003: don't overwrite a stamped (known-complete) cache with a
+    // fresh-but-partial fetch — the stale stamp already drives a re-fetch /
+    // self-heal on the next open.
+    if (payload.imagesComplete === false && existing?.demoSourceSnapshotId) {
+        return { available: true };
+    }
+
+    await restoreSnapshotAs(payload, targetProjectId);
+
+    // Stamp the source snapshot id so the next open can short-circuit when
+    // the pointer is unchanged — EXCEPT when the load dropped images
+    // (`imagesComplete === false`), so the "stamped cache is known-complete"
+    // invariant above holds and the partial copy self-heals next open.
+    const sourceId = payload.imagesComplete === false
+        ? null
+        : payload.manifest?.id ?? pointerId ?? null;
+    set((state) => {
+        const restored = state.projects[targetProjectId];
+        if (!restored) return {};
+        return {
+            projects: {
+                ...state.projects,
+                [targetProjectId]: {
+                    ...restored,
+                    ...(sourceId ? { demoSourceSnapshotId: sourceId } : {}),
+                    demoCachePolicyVersion: DEMO_CACHE_POLICY_VERSION,
+                },
+            },
+        };
+    });
+
+    return { available: true };
+}
+
+// Wipe every piece of local state a showcase project owns: the project-keyed
+// store maps, the transient job/progress slices, and all three IDB image
+// stores + their reactive Zustand caches. The caller falls through to the
+// matching load action for a full re-fetch + restore (deleting the project
+// also removes the `demoSourceSnapshotId` stamp, so that load can never
+// cache-short-circuit).
+async function wipeShowcaseProject(
+    set: ShowcaseSet,
+    get: ShowcaseGet,
+    targetProjectId: string,
+): Promise<void> {
+    const versionIds = (get().artifactVersions[targetProjectId] ?? []).map((v) => v.id);
+
+    // Best-effort IDB cleanup — a failed delete must never abort the
+    // reset; the full restore that follows repopulates IndexedDB regardless.
+    for (const versionId of versionIds) {
+        try {
+            await deleteImagesForVersion(versionId);
+        } catch (err) {
+            console.warn('[resetShowcaseProject] failed to delete mockup images for version', versionId, err);
+        }
+        try {
+            await deleteScreenImagesForArtifactVersion(versionId);
+        } catch (err) {
+            console.warn('[resetShowcaseProject] failed to delete screen-inventory images for version', versionId, err);
+        }
+        try {
+            await deleteVariantImagesForVersion(versionId);
+        } catch (err) {
+            console.warn('[resetShowcaseProject] failed to delete mockup variant images for version', versionId, err);
+        }
+    }
+
+    // Evict the reactive Zustand caches that mirror those IDB stores.
+    // `restoreSnapshotAs` never proactively clears these (the mockup /
+    // screen-inventory caches self-heal lazily via `loadForVersion`, and
+    // the variant cache only ever merges) — a full wipe needs an explicit
+    // clear so a stale in-memory record can never survive the reset.
+    useMockupImageStore.getState().clearVersions(versionIds);
+    useScreenInventoryImageStore.getState().clearVersions(versionIds);
+    useMockupVariantImageStore.getState().clearVersions(versionIds);
+
+    set((state) => {
+        const projects = { ...state.projects };
+        delete projects[targetProjectId];
+        const spineVersions = { ...state.spineVersions };
+        delete spineVersions[targetProjectId];
+        const historyEvents = { ...state.historyEvents };
+        delete historyEvents[targetProjectId];
+        const branches = { ...state.branches };
+        delete branches[targetProjectId];
+        const artifacts = { ...state.artifacts };
+        delete artifacts[targetProjectId];
+        const artifactVersions = { ...state.artifactVersions };
+        delete artifactVersions[targetProjectId];
+        const feedbackItems = { ...state.feedbackItems };
+        delete feedbackItems[targetProjectId];
+        const tasks = { ...state.tasks };
+        delete tasks[targetProjectId];
+        const workflowRuns = { ...state.workflowRuns };
+        delete workflowRuns[targetProjectId];
+        const jobs = { ...state.jobs };
+        delete jobs[targetProjectId];
+        const prdProgress = { ...state.prdProgress };
+        delete prdProgress[targetProjectId];
+        const prdSectionStatus = { ...state.prdSectionStatus };
+        delete prdSectionStatus[targetProjectId];
+        return {
+            projects,
+            spineVersions,
+            historyEvents,
+            branches,
+            artifacts,
+            artifactVersions,
+            feedbackItems,
+            tasks,
+            workflowRuns,
+            jobs,
+            prdProgress,
+            prdSectionStatus,
+        };
+    });
+}
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
     projects: {},
@@ -215,217 +458,86 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         });
     },
 
-    // Hydrates the store with the demo project. The demo is a cloud snapshot
-    // the owner has pinned via SnapshotsPanel — we fetch it from the public
-    // `/api/snapshots?demo=1` endpoint and splice it in at the stable
-    // DEMO_PROJECT_ID.
-    //
-    // Freshness: a previously cached demo is reused ONLY when its source
-    // snapshot id still matches the live pointer. Otherwise (owner pinned a
-    // newer snapshot) we re-fetch and overwrite the cache. This is why the
-    // desktop used to show a stale demo while mobile — with no cache — showed
-    // the latest one. The pointer probe is a tiny, public JSON fetch and runs
-    // before any heavy bundle/image download. If the pointer fetch itself
-    // fails (offline / proxy error), we fall back to the cached copy so the
-    // demo still opens.
+    // Wipes the demo project's local cache (store maps + IDB images) so the
+    // next `loadDemoProject()` performs a full re-fetch. Shared machinery in
+    // `clearShowcaseProject` above.
     clearDemoProject: async () => {
-        const versions = get().artifactVersions[DEMO_PROJECT_ID] || [];
-        await Promise.all(versions.flatMap((version) => [
-            deleteImagesForVersion(version.id),
-            deleteScreenImagesForArtifactVersion(version.id),
-            deleteVariantImagesForVersion(version.id),
-        ]));
-        set((state) => {
-            const keys = [
-                'projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts',
-                'artifactVersions', 'feedbackItems', 'reviewRuns', 'specialistRuns',
-                'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
-                'readinessReviews', 'readinessCommitmentEvents',
-                'downstreamUpdatePlans', 'downstreamUpdatePlanEvents',
-                'downstreamArtifactUpdateProposals', 'downstreamArtifactUpdateReviewEvents',
-                'downstreamArtifactUpdateApplications', 'downstreamArtifactUpdateVerifications',
-                'downstreamArtifactUpdateVerificationEvents',
-            ] as const;
-            const next: Record<string, unknown> = {};
-            for (const key of keys) {
-                const copy = { ...state[key] };
-                delete copy[DEMO_PROJECT_ID];
-                next[key] = copy;
-            }
-            return next as Partial<ProjectState>;
-        });
+        await clearShowcaseProject(set, get, DEMO_PROJECT_ID);
     },
 
+    // Hydrates the store with the demo project — the cloud snapshot the owner
+    // pinned via SnapshotsPanel, fetched from the public `?demo=1` endpoint
+    // and spliced in at the stable DEMO_PROJECT_ID. All freshness / image-
+    // completeness / cache-fallback policy lives in `loadShowcaseProject`.
     loadDemoProject: async ({ force = false } = {}) => {
-        const existing = get().projects[DEMO_PROJECT_ID];
-
-        // Old caches were writable. Discard them once; current baseline caches
-        // keep the normal pointer-based fast path.
-        if (existing && existing.demoCachePolicyVersion !== DEMO_CACHE_POLICY_VERSION) {
-            await get().clearDemoProject();
-            return get().loadDemoProject({ force: true });
-        }
-
-        const pointer = await loadDemoSnapshotPointer().catch((err) => {
-            console.error('[loadDemoProject] failed to read demo pointer', err);
-            return null;
+        const { available } = await loadShowcaseProject(set, get, {
+            targetProjectId: DEMO_PROJECT_ID,
+            force,
+            probePointer: async () => {
+                const pointer = await loadDemoSnapshotPointer().catch((err) => {
+                    console.error('[loadDemoProject] failed to read demo pointer', err);
+                    return null;
+                });
+                // `loadDemoSnapshotPointer` returns null for BOTH a transport
+                // failure and "no demo pinned", so the demo probe reports
+                // ok:false either way — a cached demo keeps serving, exactly
+                // the pre-gallery behavior.
+                return pointer?.snapshotId
+                    ? { ok: true as const, snapshotId: pointer.snapshotId }
+                    : { ok: false as const };
+            },
+            fetchPayload: () => loadDemoSnapshotPublic().catch((err) => {
+                console.error('[loadDemoProject] failed to fetch demo snapshot', err);
+                return null;
+            }),
         });
+        return { projectId: DEMO_PROJECT_ID, available };
+    },
 
-        if (!force && existing && pointer && existing.demoSourceSnapshotId === pointer.snapshotId) {
-            return { projectId: DEMO_PROJECT_ID, available: true };
-        }
-        if (!force && existing && !pointer) {
-            // Pointer probe failed — keep the cached demo rather than wiping
-            // it. Better stale than empty.
-            return { projectId: DEMO_PROJECT_ID, available: true };
-        }
-
-        const payload = await loadDemoSnapshotPublic().catch((err) => {
-            console.error('[loadDemoProject] failed to fetch demo snapshot', err);
-            return null;
+    // Hydrates one project-gallery slot from its pinned cloud snapshot into
+    // the slot's stable project id — the gallery counterpart of
+    // `loadDemoProject`, sharing the exact same freshness and completeness
+    // semantics. The pointer probe resolves the slot's snapshot id from the
+    // lightweight public gallery pointer.
+    loadGalleryProject: async (slot, { force = false } = {}) => {
+        const targetProjectId = galleryProjectIdForSlot(slot);
+        if (!targetProjectId) return { projectId: null, available: false };
+        const { available } = await loadShowcaseProject(set, get, {
+            targetProjectId,
+            force,
+            probePointer: async () => {
+                const pointer = await loadGalleryPointerPublic();
+                // A readable pointer whose slot is empty means the owner
+                // explicitly removed this slot — distinct from a failed probe
+                // (null), which keeps the cache.
+                if (!pointer) return { ok: false as const };
+                return { ok: true as const, snapshotId: pointer.snapshotIds[slot] ?? null };
+            },
+            fetchPayload: () => loadGallerySnapshotPublic(slot).catch((err) => {
+                console.error('[loadGalleryProject] failed to fetch gallery snapshot', err);
+                return null;
+            }),
         });
-        if (!payload) {
-            // Fetch failed and nothing is cached — surface unavailable. If a
-            // cache exists, keep serving it.
-            return { projectId: DEMO_PROJECT_ID, available: !!existing };
-        }
-
-        // SYN-003: a STAMPED cache is provably known-complete — `demoSourceSnapshotId`
-        // is only written when the restore was NOT image-incomplete (see the
-        // stamp guard below). So when the fresh fetch itself dropped images
-        // (`imagesComplete === false`) and we hold such a cache, DON'T overwrite
-        // a complete demo with a partial one — keep serving the cache. The stamp
-        // is now stale vs. the live pointer, which already drives a re-fetch /
-        // self-heal on the next open. (Fresh-partial still wins when there is no
-        // cache, or the cache is un-stamped — a partial demo beats an empty one.)
-        if (payload.imagesComplete === false && existing?.demoSourceSnapshotId) {
-            return { projectId: DEMO_PROJECT_ID, available: true };
-        }
-
-        await restoreSnapshotAs(payload, DEMO_PROJECT_ID);
-
-        // Stamp the source snapshot id so the next click can short-circuit
-        // when the pointer is unchanged. Pull from the freshly-restored
-        // payload's manifest, falling back to the pointer if the manifest
-        // didn't carry an id (defensive — older bundles always did).
-        //
-        // EXCEPT when the load dropped images (`imagesComplete === false`:
-        // some per-image fetches kept failing — flaky network / rate limit).
-        // We still restore what we have (fresh-partial beats an empty / un-stamped
-        // state) but leave the stamp off so the next demo open re-fetches and
-        // self-heals to the full image set instead of pinning the partial copy
-        // forever — AND so the "stamped cache is known-complete" invariant above
-        // holds.
-        const sourceId = payload.imagesComplete === false
-            ? null
-            : payload.manifest?.id ?? pointer?.snapshotId ?? null;
-        {
-            set((state) => {
-                const restored = state.projects[DEMO_PROJECT_ID];
-                if (!restored) return {};
-                return {
-                    projects: {
-                        ...state.projects,
-                        [DEMO_PROJECT_ID]: {
-                            ...restored,
-                            ...(sourceId ? { demoSourceSnapshotId: sourceId } : {}),
-                            demoCachePolicyVersion: DEMO_CACHE_POLICY_VERSION,
-                        },
-                    },
-                };
-            });
-        }
-
-        return { projectId: DEMO_PROJECT_ID, available: true };
+        return { projectId: targetProjectId, available };
     },
 
     // SYN-001: a deterministic "Reset Demo" for the public read-only demo
     // project. This is a session/route-level concern like `loadDemoProject`
     // itself — NOT a durable capability — so it deliberately bypasses the
     // read-only capability guards (`assertProjectCapability`) instead of
-    // extending them; the demo is the only project this ever touches
-    // (no projectId param).
-    //
-    // Sequence: wipe every piece of local state the demo namespace owns
-    // (the nine project-keyed store maps, the transient job/progress slices,
-    // and all three IDB image stores + their reactive Zustand caches), then
-    // fall through to `loadDemoProject()` for a full re-fetch + restore from
-    // the pinned snapshot. Deleting `projects[DEMO_PROJECT_ID]` also removes
-    // the `demoSourceSnapshotId` stamp, so the subsequent `loadDemoProject()`
-    // call can never cache-short-circuit — it always performs a full restore.
+    // extending them. Wipe-then-reload machinery in `wipeShowcaseProject`;
+    // deleting the project also removes the `demoSourceSnapshotId` stamp, so
+    // the follow-up load can never cache-short-circuit.
     resetDemoProject: async () => {
-        const versionIds = (get().artifactVersions[DEMO_PROJECT_ID] ?? []).map((v) => v.id);
-
-        // Best-effort IDB cleanup — a failed delete must never abort the
-        // reset; the full restore below repopulates IndexedDB regardless.
-        for (const versionId of versionIds) {
-            try {
-                await deleteImagesForVersion(versionId);
-            } catch (err) {
-                console.warn('[resetDemoProject] failed to delete mockup images for version', versionId, err);
-            }
-            try {
-                await deleteScreenImagesForArtifactVersion(versionId);
-            } catch (err) {
-                console.warn('[resetDemoProject] failed to delete screen-inventory images for version', versionId, err);
-            }
-            try {
-                await deleteVariantImagesForVersion(versionId);
-            } catch (err) {
-                console.warn('[resetDemoProject] failed to delete mockup variant images for version', versionId, err);
-            }
-        }
-
-        // Evict the reactive Zustand caches that mirror those IDB stores.
-        // `restoreSnapshotAs` never proactively clears these (the mockup /
-        // screen-inventory caches self-heal lazily via `loadForVersion`, and
-        // the variant cache only ever merges) — a full wipe needs an explicit
-        // clear so a stale in-memory record can never survive the reset.
-        useMockupImageStore.getState().clearVersions(versionIds);
-        useScreenInventoryImageStore.getState().clearVersions(versionIds);
-        useMockupVariantImageStore.getState().clearVersions(versionIds);
-
-        set((state) => {
-            const projects = { ...state.projects };
-            delete projects[DEMO_PROJECT_ID];
-            const spineVersions = { ...state.spineVersions };
-            delete spineVersions[DEMO_PROJECT_ID];
-            const historyEvents = { ...state.historyEvents };
-            delete historyEvents[DEMO_PROJECT_ID];
-            const branches = { ...state.branches };
-            delete branches[DEMO_PROJECT_ID];
-            const artifacts = { ...state.artifacts };
-            delete artifacts[DEMO_PROJECT_ID];
-            const artifactVersions = { ...state.artifactVersions };
-            delete artifactVersions[DEMO_PROJECT_ID];
-            const feedbackItems = { ...state.feedbackItems };
-            delete feedbackItems[DEMO_PROJECT_ID];
-            const tasks = { ...state.tasks };
-            delete tasks[DEMO_PROJECT_ID];
-            const workflowRuns = { ...state.workflowRuns };
-            delete workflowRuns[DEMO_PROJECT_ID];
-            const jobs = { ...state.jobs };
-            delete jobs[DEMO_PROJECT_ID];
-            const prdProgress = { ...state.prdProgress };
-            delete prdProgress[DEMO_PROJECT_ID];
-            const prdSectionStatus = { ...state.prdSectionStatus };
-            delete prdSectionStatus[DEMO_PROJECT_ID];
-            return {
-                projects,
-                spineVersions,
-                historyEvents,
-                branches,
-                artifacts,
-                artifactVersions,
-                feedbackItems,
-                tasks,
-                workflowRuns,
-                jobs,
-                prdProgress,
-                prdSectionStatus,
-            };
-        });
-
+        await wipeShowcaseProject(set, get, DEMO_PROJECT_ID);
         return get().loadDemoProject();
+    },
+
+    // Gallery counterpart of `resetDemoProject`, scoped to one slot.
+    resetGalleryProject: async (slot) => {
+        const targetProjectId = galleryProjectIdForSlot(slot);
+        if (!targetProjectId) return { projectId: null, available: false };
+        await wipeShowcaseProject(set, get, targetProjectId);
+        return get().loadGalleryProject(slot);
     },
 });

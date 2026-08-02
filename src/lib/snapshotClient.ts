@@ -134,9 +134,26 @@ export type SnapshotPayload = {
 
 export type SnapshotListItem = SnapshotManifest & { isDemo?: boolean };
 
+// The public showcase is either the single pinned demo ('demo', the default)
+// or the project gallery ('gallery'). The mode toggle is the owner's go-live
+// switch — the server refuses to flip to 'gallery' until at least `minLive`
+// snapshots are pinned (the gallery is flexible-size up to `size`).
+export type GalleryMode = 'demo' | 'gallery';
+
+export type GalleryInfo = {
+    mode: GalleryMode;
+    // Ordered snapshot ids; the array index is the gallery slot.
+    snapshotIds: string[];
+    // Maximum capacity (room to grow, not a target).
+    size: number;
+    // Minimum pinned snapshots before gallery mode can go live.
+    minLive: number;
+};
+
 export type SnapshotListResult = {
     snapshots: SnapshotListItem[];
     demoSnapshotId: string | null;
+    gallery: GalleryInfo;
 };
 
 // Progress callback shape. `phase` lets the UI render different messages
@@ -376,6 +393,20 @@ export const saveSnapshot = async (
     return manifest;
 };
 
+const parseGalleryInfo = (raw: unknown): GalleryInfo => {
+    const body = (raw ?? {}) as {
+        mode?: unknown; snapshotIds?: unknown; size?: unknown; minLive?: unknown;
+    };
+    return {
+        mode: body.mode === 'gallery' ? 'gallery' : 'demo',
+        snapshotIds: Array.isArray(body.snapshotIds)
+            ? body.snapshotIds.filter((id): id is string => typeof id === 'string')
+            : [],
+        size: typeof body.size === 'number' ? body.size : 12,
+        minLive: typeof body.minLive === 'number' ? body.minLive : 2,
+    };
+};
+
 export const listSnapshots = async (): Promise<SnapshotListResult> => {
     const resp = await fetch(API_BASE, { headers: authHeaders() });
     if (!resp.ok) throw await errorFromResponse(resp, 'list_failed');
@@ -383,7 +414,7 @@ export const listSnapshots = async (): Promise<SnapshotListResult> => {
     const snapshots: SnapshotListItem[] = Array.isArray(data?.snapshots) ? data.snapshots : [];
     const demoSnapshotId: string | null =
         typeof data?.demoSnapshotId === 'string' ? data.demoSnapshotId : null;
-    return { snapshots, demoSnapshotId };
+    return { snapshots, demoSnapshotId, gallery: parseGalleryInfo(data?.gallery) };
 };
 
 // Owner-only: pin a snapshot as the demo project. Pass null to clear.
@@ -395,6 +426,47 @@ export const setDemoSnapshot = async (snapshotId: string | null): Promise<string
     if (!resp.ok) throw await errorFromResponse(resp, 'set_demo_failed');
     const body = await resp.json();
     return typeof body?.demoSnapshotId === 'string' ? body.demoSnapshotId : null;
+};
+
+// Owner-only: add a snapshot to the project gallery (appends to the next free
+// slot; the server enforces the SYN-003 completeness gate and the slot cap).
+export const addGallerySnapshot = async (snapshotId: string): Promise<GalleryInfo> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&id=${encodeURIComponent(snapshotId)}`, {
+        method: 'PUT', headers: authHeaders(),
+    });
+    if (!resp.ok) throw await errorFromResponse(resp, 'gallery_add_failed');
+    return parseGalleryInfo(await resp.json());
+};
+
+// Owner-only: remove a snapshot from the gallery. Later slots shift down.
+export const removeGallerySnapshot = async (snapshotId: string): Promise<GalleryInfo> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&id=${encodeURIComponent(snapshotId)}&remove=1`, {
+        method: 'PUT', headers: authHeaders(),
+    });
+    if (!resp.ok) throw await errorFromResponse(resp, 'gallery_remove_failed');
+    return parseGalleryInfo(await resp.json());
+};
+
+// Owner-only: the go-live switch. Flipping to 'gallery' is rejected by the
+// server (422 gallery_not_ready) until at least `minLive` snapshots are
+// pinned and every pinned snapshot still exists.
+export const setGalleryMode = async (mode: GalleryMode): Promise<GalleryInfo> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&mode=${encodeURIComponent(mode)}`, {
+        method: 'PUT', headers: authHeaders(),
+    });
+    if (!resp.ok) throw await errorFromResponse(resp, 'gallery_mode_failed');
+    return parseGalleryInfo(await resp.json());
+};
+
+// Owner-only: reorder the gallery slots. `order` must be an exact
+// permutation of the currently pinned snapshot ids (the server rejects
+// anything else so a stale panel can't drop or resurrect a slot).
+export const reorderGallerySnapshots = async (order: string[]): Promise<GalleryInfo> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&order=${encodeURIComponent(order.join(','))}`, {
+        method: 'PUT', headers: authHeaders(),
+    });
+    if (!resp.ok) throw await errorFromResponse(resp, 'gallery_reorder_failed');
+    return parseGalleryInfo(await resp.json());
 };
 
 // True if the bundle still has every image dataUrl inline — i.e. a legacy
@@ -550,6 +622,101 @@ export const loadDemoSnapshotPointer = async (): Promise<DemoPointer | null> => 
     return {
         snapshotId: body.snapshotId,
         updatedAt: typeof body.updatedAt === 'string' ? body.updatedAt : null,
+    };
+};
+
+// Public, lightweight: the raw gallery pointer (mode + ordered snapshot ids).
+// Doubles as the per-slot freshness probe — the slot's pinned snapshot id is
+// the gallery counterpart of the demo pointer. Returns null when the probe
+// fails so callers fall back to their cache, mirroring
+// `loadDemoSnapshotPointer`.
+export type GalleryPointerState = GalleryInfo & { updatedAt: string | null };
+
+export const loadGalleryPointerPublic = async (): Promise<GalleryPointerState | null> => {
+    try {
+        const resp = await fetch(`${API_BASE}?gallery=1&pointer=1`);
+        if (!resp.ok) return null;
+        const body = await resp.json().catch(() => null);
+        if (!body) return null;
+        return {
+            ...parseGalleryInfo(body),
+            updatedAt: typeof (body as { updatedAt?: unknown }).updatedAt === 'string'
+                ? (body as { updatedAt: string }).updatedAt
+                : null,
+        };
+    } catch {
+        return null;
+    }
+};
+
+// Public: gallery state joined with each pinned snapshot's manifest summary,
+// for rendering the gallery cards. Throws on transport errors (the gallery
+// page owns its retry UI); returns entries in slot order.
+export type GalleryEntrySummary = {
+    slot: number;
+    snapshotId: string;
+    title?: string;
+    projectName?: string;
+    createdAt?: string;
+    imageCount?: number;
+    screenImageCount?: number;
+    mockupScreenCount?: number;
+    variantImageCount?: number;
+    sizeBytes?: number;
+};
+
+export type GalleryStatePublic = {
+    mode: GalleryMode;
+    size: number;
+    entries: GalleryEntrySummary[];
+};
+
+export const loadGalleryStatePublic = async (): Promise<GalleryStatePublic> => {
+    const resp = await fetch(`${API_BASE}?gallery=1`);
+    if (!resp.ok) throw await errorFromResponse(resp, 'load_gallery_failed');
+    const body = await resp.json() as { mode?: unknown; size?: unknown; entries?: unknown };
+    const entries = (Array.isArray(body.entries) ? body.entries : [])
+        .filter((e): e is GalleryEntrySummary =>
+            !!e && typeof e === 'object'
+            && typeof (e as { slot?: unknown }).slot === 'number'
+            && typeof (e as { snapshotId?: unknown }).snapshotId === 'string');
+    return {
+        mode: body.mode === 'gallery' ? 'gallery' : 'demo',
+        size: typeof body.size === 'number' ? body.size : 6,
+        entries,
+    };
+};
+
+// Public: fetch one gallery slot's snapshot bundle. Same failure-tolerant
+// image hydration as the public demo load — an image that keeps failing is
+// dropped and `imagesComplete` is set false so the caller skips stamping the
+// cache as known-complete. Returns null when the slot is empty (404).
+export const loadGallerySnapshotPublic = async (slot: number): Promise<SnapshotPayload | null> => {
+    const resp = await fetch(`${API_BASE}?gallery=1&slot=${encodeURIComponent(String(slot))}`);
+    if (resp.status === 404) return null;
+    if (!resp.ok) throw await errorFromResponse(resp, 'load_gallery_slot_failed');
+    const payload = await resp.json() as SnapshotPayload;
+    const fetchOne = (key: string) => fetch(
+        `${API_BASE}?gallery=1&slot=${encodeURIComponent(String(slot))}&image=${encodeURIComponent(key)}`,
+    );
+    const tolerate = { tolerateFailures: true };
+    const mockups = isFullyInlined(payload.images)
+        ? { images: payload.images, failedKeys: [] as string[] }
+        : await hydrateImages<MockupImageRecord>(
+            fetchOne,
+            payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+            tolerate,
+        );
+    const screens = await hydrateScreenImages(payload, fetchOne, tolerate);
+    const variantFailed = await hydrateVariantImages(payload, fetchOne, tolerate);
+    return {
+        ...payload,
+        images: mockups.images,
+        screenImages: screens.images,
+        imagesComplete:
+            mockups.failedKeys.length === 0
+            && screens.failedKeys.length === 0
+            && variantFailed.length === 0,
     };
 };
 

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Github, Linkedin, Loader2, Lock, Mail, User as UserIcon } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { usePublicGalleryMode } from '../lib/galleryStatus';
 
 type Tab = 'signin' | 'signup';
 type FieldName = 'email' | 'password' | 'name';
@@ -58,9 +59,13 @@ export function LoginPage() {
 
     // Demo hydration is route-owned (`DemoRouteGate` on /p/<DEMO_PROJECT_ID>),
     // so this button only navigates — direct links, bookmarks, refreshes, and
-    // button entry all share the same route-level loading path.
+    // button entry all share the same route-level loading path. When the
+    // owner's project gallery is live (showcase mode 'gallery'), the button
+    // routes to /gallery instead; until the mode is positively known the
+    // classic demo presentation holds.
+    const galleryLive = usePublicGalleryMode() === 'gallery';
     const handleOpenDemo = () => {
-        navigate(`/p/${DEMO_PROJECT_ID}`);
+        navigate(galleryLive ? '/gallery' : `/p/${DEMO_PROJECT_ID}`);
     };
 
     // Surface auth errors passed back from OAuth redirects via `?auth_error=...`.
@@ -147,7 +152,7 @@ export function LoginPage() {
                         onClick={handleOpenDemo}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
                     >
-                        Demo project
+                        {galleryLive ? 'Project gallery' : 'Demo project'}
                     </button>
                 </div>
 

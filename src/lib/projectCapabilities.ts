@@ -1,4 +1,4 @@
-import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { isShowcaseProjectId } from '../data/demoProject';
 
 export interface ProjectCapabilities {
     isReadOnly: boolean;
@@ -55,7 +55,9 @@ const UNAVAILABLE_CAPABILITIES: ProjectCapabilities = Object.freeze({
  */
 export function getProjectCapabilities(project: ProjectIdentity): ProjectCapabilities {
     if (!project?.id) return UNAVAILABLE_CAPABILITIES;
-    return project.id === DEMO_PROJECT_ID ? READ_ONLY_CAPABILITIES : EDITABLE_CAPABILITIES;
+    // Showcase projects — the public demo and every gallery slot — share one
+    // read-only policy; they are all hydrated from pinned cloud snapshots.
+    return isShowcaseProjectId(project.id) ? READ_ONLY_CAPABILITIES : EDITABLE_CAPABILITIES;
 }
 
 export class ProjectCapabilityError extends Error {
@@ -63,7 +65,7 @@ export class ProjectCapabilityError extends Error {
     readonly projectId?: string;
 
     constructor(project: ProjectIdentity, capability: DurableProjectCapability) {
-        super(project?.id === DEMO_PROJECT_ID
+        super(isShowcaseProjectId(project?.id)
             ? 'This example project is read-only.'
             : 'This project is unavailable or does not allow that action.');
         this.name = 'ProjectCapabilityError';
@@ -98,10 +100,10 @@ const ACTION_CAPABILITY: Record<ProjectAction, keyof ProjectCapabilities> = {
 };
 
 /** Unlike `getProjectCapabilities`, an unknown id is treated as a standard
- * project — call sites pass ids from live routes/stores, and the demo id is
- * the only read-only identity. */
+ * project — call sites pass ids from live routes/stores, and the showcase
+ * ids (demo + gallery slots) are the only read-only identities. */
 export function canPerformProjectAction(projectId: string | undefined, action: ProjectAction): boolean {
-    const capabilities = projectId === DEMO_PROJECT_ID ? READ_ONLY_CAPABILITIES : EDITABLE_CAPABILITIES;
+    const capabilities = isShowcaseProjectId(projectId) ? READ_ONLY_CAPABILITIES : EDITABLE_CAPABILITIES;
     return capabilities[ACTION_CAPABILITY[action]];
 }
 

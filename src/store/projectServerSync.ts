@@ -42,7 +42,7 @@ import {
   pushProjectImages,
   pullProjectImageRefs,
 } from './projectImageSync';
-import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { isShowcaseProjectId } from '../data/demoProject';
 
 const PUSH_DEBOUNCE_MS = 1500;
 
@@ -64,9 +64,10 @@ function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): Bun
   return pickBundleSource(state);
 }
 
-/** Project ids worth syncing (excludes the read-only public demo). */
+/** Project ids worth syncing (excludes the read-only showcase projects —
+ * the public demo and every gallery slot). */
 function syncableIds(state: ReturnType<typeof useProjectStore.getState>): string[] {
-  return Object.keys(state.projects).filter((id) => id !== DEMO_PROJECT_ID);
+  return Object.keys(state.projects).filter((id) => !isShowcaseProjectId(id));
 }
 
 /**
@@ -159,7 +160,7 @@ function markConflict(
 }
 
 async function pushProjectNow(projectId: string): Promise<void> {
-  if (activeUserId === null || projectId === DEMO_PROJECT_ID) return;
+  if (activeUserId === null || isShowcaseProjectId(projectId)) return;
   const userId = activeUserId;
   const sync = useProjectSyncStore.getState();
   const state = useProjectStore.getState();
@@ -223,7 +224,7 @@ async function pushProjectNow(projectId: string): Promise<void> {
 }
 
 function schedulePush(projectId: string): void {
-  if (activeUserId === null || projectId === DEMO_PROJECT_ID) return;
+  if (activeUserId === null || isShowcaseProjectId(projectId)) return;
   editSeqs.set(projectId, (editSeqs.get(projectId) ?? 0) + 1);
   // Durably mark unsynced edits so an offline/interrupted change isn't forgotten
   // across a reload, and so reconcile can tell a dirty project from a clean one.
@@ -243,7 +244,7 @@ function schedulePush(projectId: string): void {
 }
 
 async function deleteRemote(projectId: string): Promise<void> {
-  if (projectId === DEMO_PROJECT_ID) return;
+  if (isShowcaseProjectId(projectId)) return;
   try {
     await deleteProjectRemote(projectId);
     useProjectSyncStore.getState().removeProjectSync(projectId);
@@ -610,7 +611,7 @@ export function refreshProjectsFromServer(): void {
  */
 export async function resolveConflictUseCloud(projectId: string): Promise<boolean> {
   const userId = activeUserId;
-  if (!userId || projectId === DEMO_PROJECT_ID) return false;
+  if (!userId || isShowcaseProjectId(projectId)) return false;
   useProjectSyncStore.getState().patchProjectSync(projectId, { state: 'saving', updatedAt: Date.now() });
   try {
     const full = await fetchProject(projectId);
@@ -644,7 +645,7 @@ export async function resolveConflictUseCloud(projectId: string): Promise<boolea
  */
 export async function resolveConflictKeepLocal(projectId: string): Promise<boolean> {
   const userId = activeUserId;
-  if (!userId || projectId === DEMO_PROJECT_ID) return false;
+  if (!userId || isShowcaseProjectId(projectId)) return false;
   try {
     // Read the server's current revision so our next push expects it and wins.
     const full = await fetchProject(projectId);

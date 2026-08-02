@@ -15,6 +15,7 @@ import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { usePublicGalleryMode } from '../lib/galleryStatus';
 import { hasGeminiKey, primeGeminiKey } from '../lib/geminiKeyVault';
 import { ExamplePromptCarousel, type ExamplePrompt } from './ExamplePromptCarousel';
 
@@ -161,8 +162,14 @@ export function HomePage() {
     // Demo hydration is route-owned (`DemoRouteGate` on /p/<DEMO_PROJECT_ID>),
     // so this button only navigates — direct links, bookmarks, refreshes, and
     // button entry all share the same route-level loading path.
+    //
+    // Once the owner has pinned a full project gallery and flipped the
+    // showcase mode to 'gallery' (the go-live switch), the same button becomes
+    // "View project gallery" and navigates to /gallery instead. Until the mode
+    // is positively known to be 'gallery' the classic demo presentation holds.
+    const galleryLive = usePublicGalleryMode() === 'gallery';
     const handleOpenDemo = () => {
-        navigate(`/p/${DEMO_PROJECT_ID}`);
+        navigate(galleryLive ? '/gallery' : `/p/${DEMO_PROJECT_ID}`);
     };
 
     const [projectName, setProjectName] = useState('');
@@ -397,10 +404,12 @@ export function HomePage() {
                             type="button"
                             onClick={handleOpenDemo}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-300 bg-indigo-50 text-sm text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 cursor-pointer transition"
-                            title="Open the prepopulated demo project — no API key required"
+                            title={galleryLive
+                                ? 'Browse a gallery of prebuilt example projects — no API key required'
+                                : 'Open the prepopulated demo project — no API key required'}
                         >
                             <FolderOpen size={14} />
-                            <span>View demo project</span>
+                            <span>{galleryLive ? 'View project gallery' : 'View demo project'}</span>
                         </button>
                     </div>
 

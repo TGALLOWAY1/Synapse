@@ -6,7 +6,8 @@ import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { DemoRouteGate } from './components/DemoRouteGate';
-import { DEMO_PROJECT_ID } from './data/demoProject';
+import { GalleryPage } from './components/GalleryPage';
+import { DEMO_PROJECT_ID, gallerySlotForProjectId } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
 import { MetricsPage } from './components/metrics/MetricsPage';
 import { LlmTraceViewerPage } from './components/developer/LlmTraceViewerPage';
@@ -101,6 +102,16 @@ export function ProjectRoute() {
       </DemoRouteGate>
     );
   }
+  // Gallery slots are public showcase projects exactly like the demo — the
+  // same route gate hydrates the slot's pinned snapshot before mounting.
+  const gallerySlot = gallerySlotForProjectId(projectId);
+  if (gallerySlot !== null) {
+    return (
+      <DemoRouteGate gallerySlot={gallerySlot}>
+        <ProjectWorkspace />
+      </DemoRouteGate>
+    );
+  }
   return (
     <RequireAuth>
       <ProjectWorkspace />
@@ -149,6 +160,7 @@ function App() {
           <Route path="/about" element={<TourPage />} />
           <Route path="/tour" element={<TourPage />} />
           <Route path="/p/:projectId" element={<ProjectRoute />} />
+          <Route path="/gallery" element={<GalleryPage />} />
           <Route
             path="/metrics"
             element={

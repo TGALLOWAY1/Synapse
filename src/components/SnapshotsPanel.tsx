@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw, Star } from 'lucide-react';
+import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw, Star, LayoutGrid, ChevronUp, ChevronDown } from 'lucide-react';
 import {
     getOwnerToken, setOwnerToken,
     saveSnapshot, listSnapshots, loadSnapshot, restoreSnapshot, deleteSnapshot,
-    setDemoSnapshot,
+    setDemoSnapshot, addGallerySnapshot, removeGallerySnapshot, setGalleryMode,
+    reorderGallerySnapshots,
+    type GalleryInfo,
     type SnapshotListItem,
     type SnapshotProgress,
 } from '../lib/snapshotClient';
@@ -35,6 +37,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     const [tokenDraft, setTokenDraft] = useState<string>(token);
     const [snapshots, setSnapshots] = useState<SnapshotListItem[] | null>(null);
     const [demoSnapshotId, setDemoSnapshotIdState] = useState<string | null>(null);
+    const [gallery, setGallery] = useState<GalleryInfo | null>(null);
     const [busy, setBusy] = useState<string | null>(null);
     const [saveProgress, setSaveProgress] = useState<SnapshotProgress | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
             const result = await listSnapshots();
             setSnapshots(result.snapshots);
             setDemoSnapshotIdState(result.demoSnapshotId);
+            setGallery(result.gallery);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -132,42 +136,51 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         }
     };
 
+    // SYN-003 — pin-time completeness HARD GATE (no override; pre-launch, the
+    // owner's recourse is to regenerate the images + re-save). A publicly
+    // pinned snapshot whose mockup spec describes screens but carries 0
+    // rendered images would render "Generated" cards with no image — refuse
+    // to pin it, whether the target is the demo pointer or a gallery slot.
+    // (The server backstops this with a 422; this is the fast, explanatory
+    // client block.) `mockupScreenCount === 0` (a legitimate PRD-only
+    // showcase) pins cleanly. Returns null when the pin may proceed.
+    const completenessGateError = (id: string): string | null => {
+        const snapshot = snapshots?.find((s) => s.id === id);
+        const totalImages = snapshot
+            ? snapshot.imageCount + (snapshot.screenImageCount ?? 0) + (snapshot.variantImageCount ?? 0)
+            : 0;
+        const mockupScreenCount = snapshot?.mockupScreenCount;
+        if (mockupScreenCount !== undefined && mockupScreenCount > 0 && totalImages === 0) {
+            return (
+                `This snapshot's mockup spec describes ${mockupScreenCount} screen`
+                + `${mockupScreenCount === 1 ? '' : 's'} but contains 0 rendered images — `
+                + 'it would claim mockups it can’t show. Generate the images, save a '
+                + 'new snapshot, and pin that.'
+            );
+        }
+        if (mockupScreenCount === undefined && totalImages === 0) {
+            // Legacy snapshot with no completeness metadata and no images —
+            // block and ask for a re-save so Synapse can verify it.
+            return (
+                'This snapshot has 0 rendered images and predates image-completeness '
+                + 'tracking, so Synapse can’t verify its mockups. Re-save this snapshot '
+                + 'with the current app version, then pin the new snapshot.'
+            );
+        }
+        return null;
+    };
+
     // Pin (or unpin) a snapshot as the public demo project. The "Demo project"
     // button on the home page fetches whichever snapshot is pinned here via
     // the public `?demo=1` endpoint, so no owner token is needed to view it.
     const handleSetDemo = async (id: string) => {
         const willClear = demoSnapshotId === id;
 
-        // SYN-003 — pin-time completeness HARD GATE (no override; pre-launch,
-        // the owner's recourse is to regenerate the images + re-save). A demo
-        // whose mockup spec describes screens but carries 0 rendered images
-        // would render "Generated" cards with no image — refuse to pin it.
-        // (The server backstops this with a 422; this is the fast, explanatory
-        // client block.) Unpinning is never gated. `mockupScreenCount === 0`
-        // (a legitimate PRD-only demo) pins cleanly.
+        // Unpinning is never gated.
         if (!willClear) {
-            const snapshot = snapshots?.find((s) => s.id === id);
-            const totalImages = snapshot
-                ? snapshot.imageCount + (snapshot.screenImageCount ?? 0) + (snapshot.variantImageCount ?? 0)
-                : 0;
-            const mockupScreenCount = snapshot?.mockupScreenCount;
-            if (mockupScreenCount !== undefined && mockupScreenCount > 0 && totalImages === 0) {
-                setError(
-                    `This snapshot's mockup spec describes ${mockupScreenCount} screen`
-                    + `${mockupScreenCount === 1 ? '' : 's'} but contains 0 rendered images — `
-                    + 'the demo would claim mockups it can’t show. Generate the images, save a '
-                    + 'new snapshot, and pin that.',
-                );
-                return;
-            }
-            if (mockupScreenCount === undefined && totalImages === 0) {
-                // Legacy snapshot with no completeness metadata and no images —
-                // block and ask for a re-save so Synapse can verify it.
-                setError(
-                    'This snapshot has 0 rendered images and predates image-completeness '
-                    + 'tracking, so Synapse can’t verify its mockups. Re-save this snapshot '
-                    + 'with the current app version, then pin the new snapshot.',
-                );
+            const gateError = completenessGateError(id);
+            if (gateError) {
+                setError(gateError);
                 return;
             }
         }
@@ -184,6 +197,86 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
             setSnapshots((prev) =>
                 prev ? prev.map((s) => ({ ...s, isDemo: s.id === next })) : prev,
             );
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Add / remove a snapshot in the project gallery. Adding shares the same
+    // SYN-003 completeness gate as pinning the demo — a gallery slot is just
+    // as public. Removal is never gated.
+    const handleToggleGallery = async (id: string) => {
+        const inGallery = gallery?.snapshotIds.includes(id) ?? false;
+        if (!inGallery) {
+            const gateError = completenessGateError(id);
+            if (gateError) {
+                setError(gateError);
+                return;
+            }
+        } else if (gallery?.mode === 'gallery' && gallery.snapshotIds.length - 1 < gallery.minLive) {
+            // Removing this slot drops a LIVE gallery below the go-live
+            // minimum, so the server demotes the showcase back to demo mode —
+            // make that consequence explicit before proceeding. Removals that
+            // stay at or above the minimum leave the gallery live.
+            const confirmed = confirm(
+                'Removing this snapshot takes the live gallery below '
+                + `${gallery.minLive} projects, so the public showcase will switch back to the `
+                + 'single demo project. The remaining slots are kept — re-fill and go '
+                + 'live again when ready. Continue?',
+            );
+            if (!confirmed) return;
+        }
+        setBusy(`gallery:${id}`);
+        setError(null);
+        try {
+            const next = inGallery
+                ? await removeGallerySnapshot(id)
+                : await addGallerySnapshot(id);
+            setGallery(next);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // The go-live switch. Flipping to gallery mode swaps the public
+    // "View demo project" entry for the project gallery; the server refuses
+    // the flip until at least `minLive` snapshots are pinned, so an
+    // accidental early toggle can't publish a near-empty gallery.
+    const handleToggleGalleryMode = async () => {
+        if (!gallery) return;
+        const nextMode = gallery.mode === 'gallery' ? 'demo' : 'gallery';
+        const confirmMsg = nextMode === 'gallery'
+            ? `Go live with the project gallery? Visitors will see the ${gallery.snapshotIds.length}-project gallery instead of the single demo project.`
+            : 'Switch back to single-demo mode? Visitors will see the pinned demo project again; the gallery keeps its slots for the next go-live.';
+        if (!confirm(confirmMsg)) return;
+        setBusy('gallery-mode');
+        setError(null);
+        try {
+            setGallery(await setGalleryMode(nextMode));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Move one gallery slot up or down. The server takes the full new order
+    // (an exact permutation of the current ids), so a stale panel gets a
+    // clean 400 instead of silently corrupting the slot list.
+    const handleMoveGallerySlot = async (index: number, direction: -1 | 1) => {
+        if (!gallery) return;
+        const target = index + direction;
+        if (target < 0 || target >= gallery.snapshotIds.length) return;
+        const order = [...gallery.snapshotIds];
+        [order[index], order[target]] = [order[target], order[index]];
+        setBusy(`gallery-order:${index}`);
+        setError(null);
+        try {
+            setGallery(await reorderGallerySnapshots(order));
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -273,6 +366,82 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                 </div>
                             </div>
 
+                            {gallery && (
+                                <div className={`rounded-md border p-4 mb-4 ${
+                                    gallery.mode === 'gallery'
+                                        ? 'border-emerald-500/40 bg-emerald-500/5'
+                                        : 'border-neutral-700 bg-neutral-800/50'
+                                }`}>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 text-sm text-neutral-200 font-medium mb-1">
+                                                <LayoutGrid size={14} className={gallery.mode === 'gallery' ? 'text-emerald-400' : 'text-indigo-400'} />
+                                                Public showcase: {gallery.mode === 'gallery' ? 'project gallery (live)' : 'single demo project'}
+                                            </div>
+                                            <p className="text-xs text-neutral-400">
+                                                {gallery.mode === 'gallery'
+                                                    ? `Visitors see the ${gallery.snapshotIds.length}-project gallery (room for ${gallery.size}). Switching back to demo mode keeps the slots.`
+                                                    : `Pin snapshots into gallery slots (${gallery.snapshotIds.length} pinned, up to ${gallery.size}). Go live once you have at least ${gallery.minLive} to replace the single demo with the project gallery.`}
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={handleToggleGalleryMode}
+                                            disabled={busy !== null || (gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.minLive)}
+                                            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition disabled:opacity-40 ${
+                                                gallery.mode === 'gallery'
+                                                    ? 'text-neutral-200 bg-neutral-800 hover:bg-neutral-700'
+                                                    : 'text-white bg-emerald-600 hover:bg-emerald-500'
+                                            }`}
+                                            title={gallery.mode === 'demo' && gallery.snapshotIds.length < gallery.minLive
+                                                ? `Pin at least ${gallery.minLive} snapshots to enable go-live`
+                                                : undefined}
+                                        >
+                                            {busy === 'gallery-mode'
+                                                ? '…'
+                                                : gallery.mode === 'gallery'
+                                                    ? 'Switch to demo mode'
+                                                    : 'Go live with gallery'}
+                                        </button>
+                                    </div>
+                                    {gallery.snapshotIds.length > 0 && (
+                                        <ul className="mt-3 space-y-1">
+                                            {gallery.snapshotIds.map((snapshotId, index) => {
+                                                const snapshot = snapshots?.find((s) => s.id === snapshotId);
+                                                return (
+                                                    <li
+                                                        key={snapshotId}
+                                                        className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1"
+                                                    >
+                                                        <span className="text-[10px] font-semibold text-emerald-300 w-6 shrink-0">#{index + 1}</span>
+                                                        <span className="text-xs text-neutral-200 truncate flex-1">
+                                                            {snapshot?.title ?? snapshotId}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleMoveGallerySlot(index, -1)}
+                                                            disabled={busy !== null || index === 0}
+                                                            className="text-neutral-400 hover:text-neutral-100 disabled:opacity-30 p-0.5"
+                                                            title="Move up"
+                                                            aria-label={`Move gallery slot ${index + 1} up`}
+                                                        >
+                                                            <ChevronUp size={13} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleMoveGallerySlot(index, 1)}
+                                                            disabled={busy !== null || index === gallery.snapshotIds.length - 1}
+                                                            className="text-neutral-400 hover:text-neutral-100 disabled:opacity-30 p-0.5"
+                                                            title="Move down"
+                                                            aria-label={`Move gallery slot ${index + 1} down`}
+                                                        >
+                                                            <ChevronDown size={13} />
+                                                        </button>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="flex items-center justify-between mb-2">
                                 <h3 className="text-sm font-medium text-neutral-200">Saved snapshots</h3>
                                 <button
@@ -297,6 +466,8 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                 <ul className="space-y-2">
                                     {snapshots.map((s) => {
                                         const isDemo = s.id === demoSnapshotId;
+                                        const gallerySlot = gallery ? gallery.snapshotIds.indexOf(s.id) : -1;
+                                        const inGallery = gallerySlot !== -1;
                                         return (
                                             <li
                                                 key={s.id}
@@ -314,6 +485,12 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30">
                                                                     <Star size={9} className="fill-amber-300" />
                                                                     Demo
+                                                                </span>
+                                                            )}
+                                                            {inGallery && (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide text-emerald-300 bg-emerald-500/15 border border-emerald-500/30">
+                                                                    <LayoutGrid size={9} />
+                                                                    Gallery #{gallerySlot + 1}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -341,6 +518,28 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                                                 : isDemo
                                                                     ? 'Demo'
                                                                     : 'Set demo'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleToggleGallery(s.id)}
+                                                            disabled={busy !== null
+                                                                || (!inGallery && gallery !== null && gallery.snapshotIds.length >= gallery.size)}
+                                                            className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 ${
+                                                                inGallery
+                                                                    ? 'text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25'
+                                                                    : 'text-neutral-300 bg-neutral-800 hover:bg-neutral-700'
+                                                            }`}
+                                                            title={inGallery
+                                                                ? 'Remove from the project gallery'
+                                                                : gallery !== null && gallery.snapshotIds.length >= gallery.size
+                                                                    ? 'Gallery is full — remove a snapshot first'
+                                                                    : 'Add to the project gallery'}
+                                                        >
+                                                            <LayoutGrid size={12} />
+                                                            {busy === `gallery:${s.id}`
+                                                                ? '…'
+                                                                : inGallery
+                                                                    ? `#${gallerySlot + 1}`
+                                                                    : 'Gallery'}
                                                         </button>
                                                         <button
                                                             onClick={() => handleLoad(s.id)}
