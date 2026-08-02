@@ -1087,12 +1087,22 @@ try {
                     result = await page.evaluate((projectId) => {
                         // Read the app's own persisted store. Keys are per-user
                         // namespaced (synapse-projects-storage::u:<id>), so scan.
+                        // `storeBlind` is DIRECT evidence the poll cannot see the
+                        // store — a matching key whose decode fails, or no
+                        // matching key at all (prefix drift). It gates the DOM
+                        // fallback below: a store that decodes fine but simply
+                        // has nothing settled yet must keep polling, never
+                        // shortcut through the banner.
+                        let sawAnyKey = false;
+                        let decodeFailures = 0;
                         for (let i = 0; i < localStorage.length; i++) {
                             const k = localStorage.key(i);
                             if (!k || !k.startsWith('synapse-projects-storage')) continue;
+                            sawAnyKey = true;
                             try {
                                 const json = window.__e2eDecodeBlob(localStorage.getItem(k));
-                                const state = JSON.parse(json || '{}').state;
+                                if (json === null) { decodeFailures += 1; continue; }
+                                const state = JSON.parse(json).state;
                                 const spines = state?.spineVersions?.[projectId];
                                 if (!spines?.length) continue;
                                 const latest = spines[spines.length - 1];
@@ -1101,10 +1111,11 @@ try {
                                     error: latest.generationError?.message ?? null,
                                     hasStructuredPRD: Boolean(latest.structuredPRD),
                                     safetyStatus: latest.safetyReview?.status ?? null,
+                                    storeBlind: false,
                                 };
-                            } catch { /* ignore malformed blobs */ }
+                            } catch { decodeFailures += 1; }
                         }
-                        return { phase: null, error: null };
+                        return { phase: null, error: null, storeBlind: !sawAnyKey || decodeFailures > 0 };
                     }, report.projectId);
 
                     if (result.phase === 'complete') break;
@@ -1112,11 +1123,14 @@ try {
                     // drafted") only renders once the run settled, so a blind
                     // store poll (e.g. a decode-helper regression — see
                     // DECODE_HELPER_SOURCE) must not burn the whole timeout.
-                    // Two consecutive sightings, because the persist write is
-                    // debounced (~500ms) and a healthy store may lag the banner
-                    // by one poll. Settle on the banner but flag the blindness
+                    // Gated on `storeBlind` — direct decode-failure evidence —
+                    // so a store that reads fine but has nothing settled can
+                    // never shortcut through the banner. Two consecutive
+                    // sightings, because the persist write is debounced
+                    // (~500ms) and a healthy store may lag the banner by one
+                    // poll. Settle on the banner but flag the blindness
                     // loudly: the store poll is also the state.json contract.
-                    if (await page.getByText('Your working plan is drafted').first()
+                    if (result.storeBlind && await page.getByText('Your working plan is drafted').first()
                         .isVisible().catch(() => false)) {
                         if (domSettleSeen) {
                             console.warn('  WARNING: PRD settled per the DOM banner but the store poll saw nothing — '
@@ -1254,19 +1268,28 @@ try {
                         let domCompleteSeen = false;
                         for (;;) {
                             const info = await page.evaluate((projectId) => {
+                                // `storeBlind` mirrors the PRD poll: direct
+                                // evidence the store is unreadable (a matching
+                                // key that fails to decode, or none at all) —
+                                // NOT merely "zero ready artifacts", which is
+                                // also what a fully failed bundle looks like.
+                                let sawAnyKey = false;
+                                let decodeFailures = 0;
                                 for (let i = 0; i < localStorage.length; i++) {
                                     const k = localStorage.key(i);
                                     if (!k || !k.startsWith('synapse-projects-storage')) continue;
+                                    sawAnyKey = true;
                                     try {
                                         const json = window.__e2eDecodeBlob(localStorage.getItem(k));
-                                        const state = JSON.parse(json || '{}').state;
+                                        if (json === null) { decodeFailures += 1; continue; }
+                                        const state = JSON.parse(json).state;
                                         const arr = state?.artifacts?.[projectId];
                                         if (!arr?.length) continue;
                                         const ready = arr.filter((a) => a.currentVersionId);
-                                        return { ready: ready.length, subtypes: ready.map((a) => a.subtype || a.type) };
-                                    } catch { /* ignore malformed blobs */ }
+                                        return { ready: ready.length, subtypes: ready.map((a) => a.subtype || a.type), storeBlind: false };
+                                    } catch { decodeFailures += 1; }
                                 }
-                                return { ready: 0, subtypes: [] };
+                                return { ready: 0, subtypes: [], storeBlind: !sawAnyKey || decodeFailures > 0 };
                             }, report.projectId);
                             subtypes = info.subtypes;
                             // In-flight signals in the workspace: spinning StatusDots in
@@ -1280,12 +1303,17 @@ try {
                             if (info.ready !== lastReady) { lastReady = info.ready; lastChangeAt = Date.now(); }
                             if (haveAllRequiredOutputs && domIdle) { settleReason = 'all-required-done'; break; }
                             // DOM fallback, mirroring the PRD loop: the workspace's
-                            // "Generation complete — N of M outputs ready" banner only
-                            // renders when the bundle settled, so a blind store poll
-                            // (decode-helper regression) must not burn the timeout and
-                            // report a false all-missing bundle. Two consecutive
-                            // sightings ride out the ~500ms persist debounce.
-                            if (domIdle && info.ready === 0 && await page
+                            // "Generation complete" checkpoint only renders when the
+                            // bundle settled, so a blind store poll (decode-helper
+                            // regression) must not burn the timeout and report a false
+                            // all-missing bundle. Gated on `storeBlind`, NOT on a zero
+                            // ready-count: an all-slots-failed bundle also reads as
+                            // zero ready artifacts and still shows a "Generation
+                            // complete" checkpoint — that state must fall through to
+                            // the timeout failure, not pass as settled. Two
+                            // consecutive sightings ride out the ~500ms persist
+                            // debounce.
+                            if (domIdle && info.storeBlind && await page
                                 .getByText(/Generation complete/).first().isVisible().catch(() => false)) {
                                 if (domCompleteSeen) {
                                     console.warn('  WARNING: assets settled per the DOM banner but the store poll saw nothing — '
