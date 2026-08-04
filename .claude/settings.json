@@ -3,7 +3,8 @@
     "impeccable": {
       "source": {
         "source": "github",
-        "repo": "pbakaus/impeccable"
+        "repo": "pbakaus/impeccable",
+        "ref": "skill-v4.0.4"
       }
     }
   },
