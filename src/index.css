@@ -6,6 +6,15 @@
   body {
     @apply bg-neutral-900 text-neutral-100 antialiased;
   }
+
+  /* Structural keyboard-focus floor: every interactive element gets a visible
+     focus indicator without per-component classes. `:where()` keeps
+     specificity at zero so any component that styles its own focus
+     (e.g. `focus-visible:ring-2` + `focus-visible:outline-none`) wins. */
+  :where(button, [role='button'], [role='tab'], a, input, select, textarea, summary):focus-visible {
+    outline: 2px solid theme('colors.brand.500');
+    outline-offset: 2px;
+  }
 }
 
 /* Hide scrollbar for horizontal scroll areas */

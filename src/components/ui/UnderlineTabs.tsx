@@ -77,8 +77,8 @@ export function UnderlineTabs({ tabs, activeId, onChange, ariaLabel, size = 'md'
                         onClick={() => onChange(tab.id)}
                         className={`relative flex items-center justify-center gap-2 whitespace-nowrap ${minHeight} ${padding} font-semibold transition -mb-px border-b-2 ${
                             isActive
-                                ? 'text-indigo-700 border-indigo-600'
-                                : 'text-neutral-500 border-transparent hover:text-neutral-800'
+                                ? 'text-brand-700 border-brand-600'
+                                : 'text-muted border-transparent hover:text-neutral-800'
                         }`}
                     >
                         {tab.icon && <span className="shrink-0" aria-hidden>{tab.icon}</span>}
@@ -86,7 +86,7 @@ export function UnderlineTabs({ tabs, activeId, onChange, ariaLabel, size = 'md'
                         {typeof tab.count === 'number' && tab.count > 0 && (
                             <span
                                 className={`ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-bold ${
-                                    isActive ? 'bg-indigo-100 text-indigo-700' : 'bg-neutral-100 text-neutral-500'
+                                    isActive ? 'bg-brand-100 text-brand-700' : 'bg-neutral-100 text-muted'
                                 }`}
                             >
                                 {tab.count}
