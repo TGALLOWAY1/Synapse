@@ -12,6 +12,15 @@ export const PRIORITY_STYLES: Record<ScreenPriority, string> = {
     P3: 'bg-neutral-50 text-muted ring-1 ring-neutral-100',
 };
 
+/** Plain-language definition per priority, surfaced as the chip tooltip so a
+ * first-time PM never has to decode "P0" from context. */
+export const PRIORITY_DEFINITIONS: Record<ScreenPriority, string> = {
+    P0: 'P0 — must-have: the product does not work without this screen',
+    P1: 'P1 — important: build soon after the must-haves',
+    P2: 'P2 — nice-to-have: schedule when capacity allows',
+    P3: 'P3 — optional polish: fine to defer',
+};
+
 /** Coerce a possibly-legacy priority value to one that has a style entry. */
 export const stylablePriority = (priority: string): ScreenPriority =>
     (priority in PRIORITY_STYLES ? priority : 'P1') as ScreenPriority;

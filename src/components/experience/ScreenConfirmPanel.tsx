@@ -53,7 +53,15 @@ export function ScreenConfirmPanel({
                     ) : (
                         <>
                             <Circle size={16} className="text-neutral-300" aria-hidden />
-                            <div className="text-sm font-medium text-neutral-700">Needs review</div>
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium text-neutral-700">Needs review</div>
+                                {!readOnly && (
+                                    <div className="text-[11px] text-muted">
+                                        Confirming records your sign-off against the current PRD version
+                                        and counts this screen toward build readiness.
+                                    </div>
+                                )}
+                            </div>
                         </>
                     )}
                 </div>

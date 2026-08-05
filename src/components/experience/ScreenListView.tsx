@@ -46,7 +46,7 @@ import {
     type ScreenGroupMode,
 } from '../../lib/screenFlowView';
 import type { VariantTrustContext } from '../../lib/mockupVariantTrust';
-import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
+import { PRIORITY_DEFINITIONS, PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreensHandoffExportManifestInput } from '../../lib/screenHandoffExport';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ScreenPreflightPanel } from './ScreenPreflightPanel';
@@ -506,7 +506,10 @@ function ScreenCard({
                     <div className="flex items-center gap-1.5 shrink-0">
                         {/* Priority is the one prominent badge; the EDITED chip
                             moved into "Show details" (audit L1). */}
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}>
+                        <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}
+                            title={PRIORITY_DEFINITIONS[priority]}
+                        >
                             {priority}
                         </span>
                     </div>

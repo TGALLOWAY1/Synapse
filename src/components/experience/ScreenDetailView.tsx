@@ -54,7 +54,7 @@ import {
 } from './ScreenReviewNotes';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import type { FlagPlanningConcernResult } from '../../lib/planning/flagToPlan';
-import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
+import { PRIORITY_DEFINITIONS, PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreenImageGalleryContext } from '../renderers/ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 import { MockupScreenImage } from '../mockups/MockupScreenImage';
@@ -340,7 +340,10 @@ export function ScreenDetailView({
                             </p>
                         )}
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${PRIORITY_STYLES[priority]}`}>
+                    <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${PRIORITY_STYLES[priority]}`}
+                        title={PRIORITY_DEFINITIONS[priority]}
+                    >
                         {priority}
                     </span>
                 </div>
