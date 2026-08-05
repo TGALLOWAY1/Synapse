@@ -95,6 +95,60 @@ function deriveDefaultActiveStep(input: JourneyPresentationInput): JourneyStepId
     return 'refine';
 }
 
+// ---------------------------------------------------------------------------
+// Phase layer: the rail presents FOUR top-level phases (working-memory budget)
+// while the six step ids stay the routing/deep-link vocabulary. `plan` groups
+// define/refine/finalize as sub-states; the other phases map 1:1 to steps.
+
+export type JourneyPhaseId = 'plan' | 'generate' | 'review' | 'build';
+
+export type JourneyPhasePresentation = {
+    id: JourneyPhaseId;
+    label: string;
+    description: string;
+    status: JourneyStepStatus;
+    enabled: boolean;
+    /** The step to activate when the phase itself is clicked. */
+    targetStep: JourneyStepId;
+    /** Plan's sub-states (define/refine/finalize); single-step phases are empty. */
+    substeps: JourneyStepPresentation[];
+};
+
+const PLAN_STEP_IDS: readonly JourneyStepId[] = ['define', 'refine', 'finalize'];
+
+const PHASE_DEFINITIONS: readonly { id: JourneyPhaseId; label: string; description: string }[] = [
+    { id: 'plan', label: 'Plan', description: 'Define the product, refine the plan, and record the readiness checkpoint.' },
+    { id: 'generate', label: 'Generate', description: 'Create downstream product and implementation outputs.' },
+    { id: 'review', label: 'Review', description: 'Inspect generated outputs and synchronize any changes.' },
+    { id: 'build', label: 'Build', description: 'Export the reviewed handoff and continue into implementation.' },
+];
+
+export function deriveJourneyPhases(presentation: JourneyPresentation): JourneyPhasePresentation[] {
+    const byId = new Map(presentation.steps.map(step => [step.id, step]));
+    return PHASE_DEFINITIONS.map(def => {
+        if (def.id !== 'plan') {
+            const step = byId.get(def.id as JourneyStepId)!;
+            return { ...def, status: step.status, enabled: step.enabled, targetStep: step.id, substeps: [] };
+        }
+        const substeps = PLAN_STEP_IDS.map(id => byId.get(id)!);
+        const current = substeps.find(step => step.status === 'current');
+        const status: JourneyStepStatus = current
+            ? 'current'
+            : substeps.every(step => step.status === 'complete')
+                ? 'complete'
+                : substeps.some(step => step.enabled)
+                    ? 'available'
+                    : 'unavailable';
+        // Clicking Plan lands on the step with live work: the active substep,
+        // else the first enabled unfinished one, else the furthest enabled.
+        const targetStep = (current
+            ?? substeps.find(step => step.enabled && step.status !== 'complete')
+            ?? [...substeps].reverse().find(step => step.enabled)
+            ?? substeps[0]).id;
+        return { ...def, status, enabled: substeps.some(step => step.enabled), targetStep, substeps };
+    });
+}
+
 export function deriveJourneyPresentation(
     input: JourneyPresentationInput,
 ): JourneyPresentation {

@@ -69,8 +69,8 @@ still clip.
    assets…" pane). Progress screenshots are captured every ~45s.
 7. **The full view/tab inventory walk**, per requested viewport:
    - PRD **Overview** and **Features** tabs (`#prd-tab-*`), reached via the
-     journey rail's **Define** step.
-   - The **Challenge** surface (journey **Define** → PlanningStateBar's
+     journey rail's **Plan** phase (Define sub-step).
+   - The **Challenge** surface (journey **Plan → Define** → PlanningStateBar's
      **Challenge this plan**): the review workspace, **Review findings**,
      **Review history** — plus the **Decision Center slide-over** (overflow
      menu entry; queue + first record detail).
@@ -225,12 +225,14 @@ update the script in the same change (treat drift here like docs drift):
 - Start-mode dialog: "How would you like to start?", the "Draft a working
   plan" option, the `Cancel` aria-label.
 - Journey nav: `JourneyRail.tsx` — the `nav[aria-label="Product journey"]`
-  buttons. Accessible names concatenate `"<n> · <status> <label>
-  <description>"` and label words collide with description words ("Review"
-  appears inside Finalize's description), so the driver matches each step by
-  a unique snippet of its description (`JOURNEY_STEP_PATTERNS`, sourced from
-  `src/lib/journeyPresentation.ts`). The Challenge surface is reached via
-  Define + the PlanningStateBar's `Challenge this plan` button; the
+  buttons. The rail presents four phases (Plan · Generate · Review · Build);
+  Plan's define/refine/finalize sub-pills render only while Plan is current.
+  Phase accessible names concatenate `"<n> · <status> <label> <description>"`
+  and label words collide with description words, so the driver matches each
+  phase by a unique snippet of its description (`JOURNEY_PHASE_PATTERNS`,
+  sourced from `src/lib/journeyPresentation.ts`) and sub-pills by exact
+  label. The Challenge surface is reached via
+  Plan → Define + the PlanningStateBar's `Challenge this plan` button; the
   Decision Center and Project history are slide-overs behind the top-bar
   `More actions` overflow menu (`Decision Center` / `Project History`
   entries, `Close Decision Center` / `Close project history` buttons). The

@@ -497,26 +497,36 @@ const redact = (s) => (GEMINI_KEY ? String(s).replaceAll(GEMINI_KEY, '<gemini-ke
 // Navigation helpers (see the Maintenance list in docs/E2E_LIVE_TESTING.md —
 // selector drift here should be fixed alongside the UI change that caused it)
 //
-// The old 4-stage PipelineStageBar ("Plan:/Challenge:/Explore:/History:") was
-// replaced by the 6-step JourneyRail (nav[aria-label="Product journey"]).
-// Journey buttons' accessible names concatenate "<n> · <status> <label>
-// <description>", and some labels collide with description words ("Review"
-// appears in Finalize's description), so steps are matched by a unique
-// snippet of their sr-only description (source: src/lib/journeyPresentation.ts).
+// The JourneyRail (nav[aria-label="Product journey"]) presents FOUR top-level
+// phases — Plan · Generate · Review · Build — where Plan groups the
+// define/refine/finalize steps as sub-pills that render only while Plan is
+// the current phase. Phase buttons' accessible names concatenate "<n> ·
+// <status> <label> <description>", and label words collide with description
+// words, so phases are matched by a unique snippet of their sr-only
+// description (source: src/lib/journeyPresentation.ts). Plan sub-pills are
+// plain label buttons, matched exactly.
 // ---------------------------------------------------------------------------
-const JOURNEY_STEP_PATTERNS = {
-    define: /Describe the product/,
-    refine: /challenge its reasoning/,
-    finalize: /record the plan checkpoint/,
+const JOURNEY_PHASE_PATTERNS = {
+    plan: /readiness checkpoint/,
     generate: /implementation outputs/,
     review: /Inspect generated outputs/,
     build: /Export the reviewed handoff/,
 };
 
+const PLAN_SUBSTEP_LABELS = { define: 'Define', refine: 'Refine', finalize: 'Finalize' };
+
 async function gotoJourneyStep(page, step) {
-    await page.getByRole('navigation', { name: 'Product journey' })
-        .getByRole('button', { name: JOURNEY_STEP_PATTERNS[step] })
-        .click({ timeout: 6000 });
+    const nav = page.getByRole('navigation', { name: 'Product journey' });
+    if (step in PLAN_SUBSTEP_LABELS) {
+        // Enter the Plan phase first so its sub-pill row is rendered, then
+        // pick the exact sub-step (exact match keeps "Define" from colliding
+        // with Plan's own description text).
+        await nav.getByRole('button', { name: JOURNEY_PHASE_PATTERNS.plan }).click({ timeout: 6000 });
+        await settle(400);
+        await nav.getByRole('button', { name: PLAN_SUBSTEP_LABELS[step], exact: true }).click({ timeout: 6000 });
+    } else {
+        await nav.getByRole('button', { name: JOURNEY_PHASE_PATTERNS[step] }).click({ timeout: 6000 });
+    }
     await settle(800);
 }
 

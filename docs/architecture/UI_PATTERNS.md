@@ -227,6 +227,20 @@ emitted via `onProgress` for the indicator to track. Don't include
 mutable detail (char counts, timestamps) in progress messages — that
 defeats the store's consecutive-dedupe and floods the history list.
 
+### Journey rail (4-phase presentation over 6 step ids)
+
+`JourneyRail` presents **four top-level phases** — Plan · Generate · Review ·
+Build — derived by `deriveJourneyPhases` (`src/lib/journeyPresentation.ts`)
+from the six-step presentation. The six `JourneyStepId`s
+(define/refine/finalize/generate/review/build) remain the routing,
+deep-link, and `explicitStep` vocabulary; **do not add a parallel phase-id
+routing layer**. `plan` groups define/refine/finalize as sub-pills that
+render only while Plan is the current phase; clicking the Plan phase button
+activates its `targetStep` (the active sub-step, else the first enabled
+unfinished one). The four-phase top level is a deliberate working-memory
+budget (≤4 chunks) — new workspace surfaces get a home inside an existing
+phase, not a fifth phase.
+
 ### Advisory checkpoint cards
 
 Workflow checkpoints are inline, non-blocking cards rather than modal

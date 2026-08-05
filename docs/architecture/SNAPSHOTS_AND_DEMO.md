@@ -161,7 +161,7 @@ in snapshots.
   gives the read-only demo (`capabilities.isReadOnly`) a stripped presentation:
   it **lands directly on the Assets (`workspace`) stage** (`readOnlyDefaultStage`
   — falling back to `prd` only when there is no safe structured PRD), **omits the
-  `JourneyRail`** (the Define→…→Build step navigation) and the
+  `JourneyRail`** (the Plan→Generate→Review→Build phase navigation) and the
   Finalize/"Review readiness" header action, and never auto-opens the history
   panel from a legacy persisted `history` stage. Exploration happens inside the
   assets workspace (`ArtifactWorkspace`), which is already capability-aware. The

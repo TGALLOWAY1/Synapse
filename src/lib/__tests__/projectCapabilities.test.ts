@@ -23,6 +23,7 @@ describe('project capabilities', () => {
             canManageDesignSystem: false,
             canPersistWorkflowState: false,
             canExportExternally: false,
+            showsProviderSetupWarnings: false,
         });
     });
 

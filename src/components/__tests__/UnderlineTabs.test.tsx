@@ -23,9 +23,9 @@ describe('UnderlineTabs', () => {
         const active = screen.getByRole('tab', { name: 'Second tab' });
         const inactive = screen.getByRole('tab', { name: /First tab/ });
         expect(active).toHaveAttribute('aria-selected', 'true');
-        expect(active).toHaveClass('text-indigo-700', 'border-indigo-600');
+        expect(active).toHaveClass('text-brand-700', 'border-brand-600');
         expect(inactive).toHaveAttribute('aria-selected', 'false');
-        expect(inactive).toHaveClass('text-neutral-500', 'border-transparent');
+        expect(inactive).toHaveClass('text-muted', 'border-transparent');
     });
 
     it('calls onChange when a tab is clicked', () => {
