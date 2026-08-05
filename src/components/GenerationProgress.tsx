@@ -246,6 +246,13 @@ export function GenerationProgress({
                 ? Math.min(((activeDotIndex + 1) / Math.max(stages.length, 1)) * 100, 95)
                 : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
 
+    // Screen-reader announcement, throttled by construction: it tracks the
+    // active STAGE label (not the chatty history stream), so polite live
+    // regions re-announce only on real stage transitions or queue/start.
+    const announceText = waiting
+        ? `${title ?? 'Generation'}: queued, waiting to start`
+        : `${title ?? 'Generation'}: ${stages[activeDotIndex]?.label ?? currentLabel ?? 'in progress'}`;
+
     if (inline) {
         const inlineLabel = waiting
             ? 'Waiting to start…'
@@ -254,6 +261,7 @@ export function GenerationProgress({
                 : currentLabel;
         return (
             <div className="flex items-center gap-3">
+                <span role="status" aria-live="polite" className="sr-only">{announceText}</span>
                 <span className="relative flex h-2 w-2">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
                     <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dotColor}`} />
@@ -269,6 +277,7 @@ export function GenerationProgress({
 
     return (
         <div className={`rounded-xl border ${style.borderColor} ${style.accentBg} overflow-hidden`}>
+            <span role="status" aria-live="polite" className="sr-only">{announceText}</span>
             {/* Progress bar - subtle, thin, animated */}
             <div className="h-0.5 bg-white/60 overflow-hidden">
                 <div

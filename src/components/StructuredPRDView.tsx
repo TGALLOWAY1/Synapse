@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, ListChecks, ArrowRight } from 'lucide-react';
+import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, ListChecks, ArrowRight, GitBranch } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
@@ -7,6 +7,7 @@ import { regenerateGroundingFields } from '../lib/services/groundingService';
 import { SafetyBlockedError } from '../lib/safety';
 import { FeatureCard } from './FeatureCard';
 import { useSelectionPopover } from '../lib/useSelectionPopover';
+import type { SelectionInfo } from '../lib/selectionPopover';
 import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
 import { MobileSelectionToolbar } from './MobileSelectionToolbar';
@@ -146,6 +147,27 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         manualCommit: isMobile && mobileSelectMode,
     });
 
+    // Keyboard-accessible route into the same branch dialog: each section
+    // header carries a "Refine" button that anchors the dialog on the whole
+    // section, so the signature refinement flow never requires a pointer
+    // text-selection. A live pointer selection always wins.
+    const [keyboardSelection, setKeyboardSelection] = useState<SelectionInfo | null>(null);
+    const effectiveSelection = selection ?? keyboardSelection;
+
+    const openSectionRefine = (content: string, e: React.MouseEvent<HTMLButtonElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setKeyboardSelection({
+            text: content,
+            rect: {
+                top: rect.top,
+                bottom: rect.bottom,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height,
+            },
+        });
+    };
+
     // Get active branches for this spine to highlight their anchors.
     // Memoized so the Mark.js effect below doesn't re-run on every parent
     // render — the project store is destructured wholesale, so any unrelated
@@ -200,6 +222,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     const dismiss = () => {
         clear();
+        setKeyboardSelection(null);
         setIntent('');
         setMobileSelectMode(false);
     };
@@ -207,16 +230,17 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // Single branch-creation path shared by the typed-intent form (desktop) and
     // the one-tap action chips (mobile). Same history-tracked flow as before.
     const submitBranch = async (rawIntent: string) => {
-        if (!selection || !rawIntent.trim() || isSubmitting) return;
+        if (!effectiveSelection || !rawIntent.trim() || isSubmitting) return;
         try {
             setIsSubmitting(true);
-            const anchorText = selection.text;
+            const anchorText = effectiveSelection.text;
             const userIntent = rawIntent.trim();
             const { branchId } = createBranch(projectId, spineId, anchorText, userIntent);
             // Reveal the branches sidebar right away — before awaiting the AI
             // reply — so the new thread and its Consolidate bar are visible.
             onBranchCreated?.();
             clear();
+            setKeyboardSelection(null);
             setIntent('');
             setMobileSelectMode(false);
             const response = await replyInBranch({ anchorText, intent: userIntent, threadHistory: [] });
@@ -577,14 +601,24 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">{title}</h3>
                 {!readOnly && editingSection !== section && (
-                    <button
-                        onClick={() => startEditing(section, content)}
-                        className="p-1 text-neutral-300 hover:text-neutral-500 transition"
-                        title={`Edit ${title.toLowerCase()}`}
-                        aria-label={`Edit ${title.toLowerCase()}`}
-                    >
-                        <Pencil size={14} />
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                        <button
+                            onClick={(e) => openSectionRefine(content, e)}
+                            className="p-1 text-neutral-300 hover:text-brand-600 transition"
+                            title={`Refine ${title.toLowerCase()} with AI`}
+                            aria-label={`Refine ${title.toLowerCase()} with AI`}
+                        >
+                            <GitBranch size={14} />
+                        </button>
+                        <button
+                            onClick={() => startEditing(section, content)}
+                            className="p-1 text-neutral-300 hover:text-neutral-500 transition"
+                            title={`Edit ${title.toLowerCase()}`}
+                            aria-label={`Edit ${title.toLowerCase()}`}
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    </div>
                 )}
             </div>
             {editingSection === section ? (
@@ -621,14 +655,24 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">{title}</h3>
                 {!readOnly && editingSection !== section && (
-                    <button
-                        onClick={() => startEditing(section, items.join('\n'))}
-                        className="p-1 text-neutral-300 hover:text-neutral-500 transition"
-                        title={`Edit ${title.toLowerCase()}`}
-                        aria-label={`Edit ${title.toLowerCase()}`}
-                    >
-                        <Pencil size={14} />
-                    </button>
+                    <div className="flex items-center gap-0.5">
+                        <button
+                            onClick={(e) => openSectionRefine(items.join('\n'), e)}
+                            className="p-1 text-neutral-300 hover:text-brand-600 transition"
+                            title={`Refine ${title.toLowerCase()} with AI`}
+                            aria-label={`Refine ${title.toLowerCase()} with AI`}
+                        >
+                            <GitBranch size={14} />
+                        </button>
+                        <button
+                            onClick={() => startEditing(section, items.join('\n'))}
+                            className="p-1 text-neutral-300 hover:text-neutral-500 transition"
+                            title={`Edit ${title.toLowerCase()}`}
+                            aria-label={`Edit ${title.toLowerCase()}`}
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    </div>
                 )}
             </div>
             {editingSection === section ? (
@@ -1311,9 +1355,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 )}
             </div>
 
-            {selection && (
+            {effectiveSelection && (
                 <SelectionActionDialog
-                    selection={selection}
+                    selection={effectiveSelection}
                     intent={intent}
                     setIntent={setIntent}
                     isSubmitting={isSubmitting}
@@ -1327,7 +1371,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 bottom-right (visible while scrolling); the content panel above
                 carries pb-24 so the last action clears it. Once the user opts
                 in, the active footer replaces it. */}
-            {isMobile && !readOnly && !editingSection && !selection && (
+            {isMobile && !readOnly && !editingSection && !effectiveSelection && (
                 <MobileSelectionToolbar
                     active={mobileSelectMode}
                     hasSelection={!!pendingText}

@@ -24,6 +24,14 @@ not reintroduce per-component `onMouseUp` selection logic.
   (`src/components/tour/`) keeps its own demo scripts and demos a subset. The
   per-action prompts are snapshot-locked in `promptSurfaces.test.ts`.
 
+- **Keyboard route (no pointer required).** Every Overview text/list section
+  header in `StructuredPRDView` carries a focusable "Refine <section> with
+  AI" button that synthesizes a `SelectionInfo` from the whole section's
+  content (anchored on the button's rect) and opens the same
+  `SelectionActionDialog` — state `keyboardSelection`, merged as
+  `effectiveSelection = selection ?? keyboardSelection` so a live pointer
+  selection always wins. Branch creation, history, and consolidation are
+  identical from there; do not fork a separate keyboard edit path.
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
   selections), `getSelectionInfo` (text + bounding rect), and
