@@ -305,11 +305,11 @@ export function HomePage() {
                 : 'Generate PRD';
 
     return (
-        <div className="min-h-screen flex flex-col bg-neutral-50 text-neutral-900">
+        <div className="min-h-screen flex flex-col bg-neutral-50 bg-blueprint text-neutral-900">
             {/* Top bar */}
             <div className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold tracking-tight">Synapse</h1>
+                    <h1 className="font-display text-2xl font-bold tracking-tight">Synapse</h1>
                 </div>
                 <div className="flex items-center gap-2">
                     {user && (
@@ -417,7 +417,7 @@ export function HomePage() {
                     </div>
 
                     {/* Hero title */}
-                    <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">
+                    <h2 className="font-display text-4xl md:text-5xl font-bold tracking-tight text-center mb-8">
                         Welcome to Synapse
                     </h2>
 

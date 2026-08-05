@@ -20,22 +20,36 @@ the committed motif, not an accident:
 
 ## Tokens (`tailwind.config.js`)
 
+The brand hue is **"electric iris"** — a bespoke OKLCH-derived scale (hue
+285), deliberately not stock Tailwind indigo. The config **overrides the
+`indigo` alias with the same scale**, so every legacy `indigo-*` call site
+renders the owned hue; `brand-*` is the preferred spelling in new code.
+
 | Token | Value | Use |
 |---|---|---|
-| `brand-*` | indigo scale | The brand hue — owned deliberately. Interactive accents, active states, links, focus. Use `brand-600` on light, `brand-400`/`brand-500` on dark. |
+| `brand-*` / `indigo-*` | iris scale — 600 `#653bec`, 500 `#7962f8`, 400 `#968cff`, 100 `#e8e8ff`, 950 `#211552` | Interactive accents, active states, links, focus. `brand-600` on light (6.2:1 on white), `brand-400` on dark (6.4:1 on neutral-900). |
 | `accent-*` | violet scale | Companion hue; gradient endpoint in the tour's display type. Sparingly — expressive surfaces only. |
 | `muted` | neutral-500 | Secondary/meta text **on light panes** (4.6:1 on white). Never use `neutral-400` on light surfaces — it fails WCAG AA. |
 | `muted-dark` | neutral-400 | Secondary/meta text **on dark chrome** (AA on `neutral-900`). |
 
-New code references tokens (`text-brand-600`, `text-muted`), not raw hues.
-Raw `indigo-*` in older code is legacy to be migrated opportunistically.
+Key contrast pairs are pre-validated: 600/white 6.2, white/600 6.2, 700/100
+6.7, 400/neutral-900 6.4, 300/neutral-900 9.4. Keep any new pairing at ≥4.5.
 
 ## Type
 
-System sans stack (Tailwind default). Hierarchy comes from weight and size,
-not decoration. The tour's gradient display type
-(`from-indigo-400 to-violet-400`) is the **one** sanctioned gradient-text
-moment in the product — do not add more.
+Body/UI: system sans stack (Tailwind default) — Operate surfaces stay on it
+for scanability. Display voice: **Space Grotesk Variable** (self-hosted via
+`@fontsource-variable/space-grotesk`, class `font-display`), reserved for
+brand moments only — the wordmark, the HomePage hero, the boot splash, the
+login title, and tour headings. Do not spread it onto workspace content.
+The tour's gradient display type (`from-indigo-400 to-violet-400`) is the
+**one** sanctioned gradient-text moment in the product — do not add more.
+
+## Motif: the blueprint grid
+
+`bg-blueprint` (light panes) / `bg-blueprint-dark` (studio ground) paint a
+subtle dot grid — the "product blueprint" promise made visible. Entry
+surfaces only (home, login, splash); never behind dense workspace content.
 
 ## Interaction states
 

@@ -14,7 +14,7 @@ export function ScreenShell({
 }) {
     return (
         <div className="mx-auto w-full max-w-5xl">
-            <h2 className="text-3xl font-bold leading-[1.1] tracking-tight sm:text-4xl">
+            <h2 className="font-display text-3xl font-bold leading-[1.1] tracking-tight sm:text-4xl">
                 {title}{' '}
                 <span className="bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">
                     {accent}

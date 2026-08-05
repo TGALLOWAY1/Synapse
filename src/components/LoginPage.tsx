@@ -128,11 +128,11 @@ export function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-neutral-900">
+        <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-neutral-900 bg-blueprint-dark">
             <div className="w-full max-w-sm space-y-6">
                 {/* Name + tagline */}
                 <div className="flex flex-col items-center">
-                    <h1 className="text-3xl font-bold tracking-tight text-center">Synapse</h1>
+                    <h1 className="font-display text-3xl font-bold tracking-tight text-center">Synapse</h1>
                     <p className="text-sm text-neutral-400 text-center mt-2">
                         From plain-language to product blueprint
                     </p>

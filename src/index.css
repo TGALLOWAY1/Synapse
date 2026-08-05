@@ -17,6 +17,20 @@
   }
 }
 
+@layer utilities {
+  /* Blueprint dot grid — the product-blueprint motif on entry surfaces.
+     Light variant tints the dots from the brand hue; dark variant keeps them
+     barely-there on the studio ground. Pure CSS, no assets. */
+  .bg-blueprint {
+    background-image: radial-gradient(circle, rgb(101 59 236 / 0.10) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .bg-blueprint-dark {
+    background-image: radial-gradient(circle, rgb(150 140 255 / 0.14) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+}
+
 /* Hide scrollbar for horizontal scroll areas */
 .scrollbar-hide {
   -ms-overflow-style: none;
