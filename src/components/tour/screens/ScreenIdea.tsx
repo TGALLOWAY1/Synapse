@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ArrowRight, FileText, Sparkles } from 'lucide-react';
 import { ScreenShell } from '../components/ScreenShell';
 import { IDEA_PRD_SECTIONS, IDEA_SEED } from '../tourData';
+import { useIsMobile } from '../../../lib/useIsMobile';
 import type { ScreenProps } from '../tourTypes';
 
 /**
@@ -11,6 +12,7 @@ import type { ScreenProps } from '../tourTypes';
  */
 export default function ScreenIdea({ isActive, reducedMotion }: ScreenProps) {
     // -1 = not started; otherwise the index of the last revealed section.
+    const isMobile = useIsMobile();
     const [revealed, setRevealed] = useState(reducedMotion ? IDEA_PRD_SECTIONS.length : -1);
     const isBuilding = revealed >= 0 && revealed < IDEA_PRD_SECTIONS.length - 1;
     const isDone = revealed >= IDEA_PRD_SECTIONS.length - 1;
@@ -55,7 +57,7 @@ export default function ScreenIdea({ isActive, reducedMotion }: ScreenProps) {
                     </span>
                     <span className="block text-lg font-medium text-neutral-100">{IDEA_SEED.prompt}</span>
                     <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-indigo-300 group-hover:text-indigo-200">
-                        {isDone ? 'Tap to replay' : 'Tap to generate'} <ArrowRight size={13} />
+                        {isDone ? (isMobile ? 'Tap to replay' : 'Click to replay') : (isMobile ? 'Tap to generate' : 'Click to generate')} <ArrowRight size={13} />
                     </span>
                 </button>
 
@@ -102,7 +104,7 @@ export default function ScreenIdea({ isActive, reducedMotion }: ScreenProps) {
             <div className="mt-6 flex justify-center md:justify-start" aria-live="polite">
                 <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 px-4 py-2 text-sm text-indigo-200">
                     <Sparkles size={15} className={isBuilding && !reducedMotion ? 'animate-pulse' : ''} />
-                    {isDone ? 'Your working plan is ready to review' : isBuilding ? 'AI is drafting a working plan…' : 'Tap the idea to begin'}
+                    {isDone ? 'Your working plan is ready to review' : isBuilding ? 'AI is drafting a working plan…' : isMobile ? 'Tap the idea to begin' : 'Click the idea to begin'}
                 </span>
             </div>
         </ScreenShell>

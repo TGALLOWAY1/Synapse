@@ -116,7 +116,7 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
                                 ? 'The PRD drives every artifact — all are highlighted.'
                                 : selected
                                   ? `${TOUR_ASSETS.find((a) => a.id === selected)?.name} depends on the PRD.`
-                                  : 'Tap the PRD or any artifact to trace its dependencies.'}
+                                  : 'Select the PRD or any artifact to trace its dependencies.'}
                         </p>
                     </div>
 

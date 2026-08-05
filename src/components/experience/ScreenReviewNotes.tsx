@@ -110,7 +110,9 @@ export function ScreenReviewNotes({
     const actionableIssues = visibleIssues.filter(i => i.severity !== 'info');
     const infoCount = visibleIssues.length - actionableIssues.length;
     const itemCount = actionableIssues.length + openRisks.length;
-    const [open, setOpen] = useState(false);
+    // Open by default when something actionable is waiting — a collapsed row
+    // must never hide the page's only blocker behind an extra click.
+    const [open, setOpen] = useState(itemCount > 0);
     const [showAddressed, setShowAddressed] = useState(false);
     const [flagResults, setFlagResults] = useState<ReadonlyMap<string, FlagPlanningConcernResult>>(
         () => new Map(),

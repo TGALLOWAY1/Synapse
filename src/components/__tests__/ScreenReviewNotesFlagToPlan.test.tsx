@@ -35,7 +35,8 @@ const baseProps = {
 };
 
 function openReviewNotes() {
-    fireEvent.click(screen.getByRole('button', { name: /Review notes/i }));
+    // The panel opens by default when actionable items exist (blocking notes
+    // and open risks must never hide behind an extra click) — nothing to do.
 }
 
 function noteRow(title: string): HTMLLIElement {

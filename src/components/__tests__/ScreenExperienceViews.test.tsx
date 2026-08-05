@@ -613,9 +613,9 @@ describe('review notes', () => {
     it('flags issues behind a collapsed banner and lets the user address them', () => {
         const onSave = vi.fn();
         const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
-        // Collapsed banner names the count; expanding reveals the notes.
+        // The banner names the count and opens by default when actionable
+        // items exist — a collapsed row must never hide the only blocker.
         expect(getByText('Review notes')).toBeTruthy();
-        fireEvent.click(getByText('Review notes'));
         // A risk resolution box is offered ("How should this be handled?").
         expect(getByText('How should this be handled?')).toBeTruthy();
     });
@@ -623,7 +623,6 @@ describe('review notes', () => {
     it('resolving a risk persists structured input onto the overlay', () => {
         const onSave = vi.fn();
         const { getByText, getByPlaceholderText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
-        fireEvent.click(getByText('Review notes'));
         const box = getByPlaceholderText(/friendly retry prompt/);
         fireEvent.change(box, { target: { value: 'Retry then fall back' } });
         fireEvent.click(getByText('Mark resolved'));
@@ -642,13 +641,12 @@ describe('review notes', () => {
             };
         });
         const onReviewPlanningRecord = vi.fn();
-        const { getByText, getAllByRole, getByRole } = renderContractDetail('overview', {
+        const { getAllByRole, getByRole } = renderContractDetail('overview', {
             onSaveScreenEdit: vi.fn(),
             onFlagToPlan,
             onReviewPlanningRecord,
         });
 
-        fireEvent.click(getByText('Review notes'));
         fireEvent.click(getAllByRole('button', { name: 'Flag to plan' })[0]);
 
         expect(onFlagToPlan).toHaveBeenCalledTimes(1);
@@ -675,7 +673,6 @@ describe('review notes', () => {
         };
         const view = renderContractDetail('overview', options);
 
-        fireEvent.click(view.getByText('Review notes'));
         fireEvent.click(view.getAllByRole('button', { name: 'Flag to plan' })[0]);
         expect(view.getByText('Added to the plan')).toBeTruthy();
         expect(view.getByRole('button', { name: /^Review now — / })).toBeTruthy();
@@ -687,7 +684,6 @@ describe('review notes', () => {
 
         expect(view.queryByText('Added to the plan')).toBeNull();
         expect(view.queryByRole('button', { name: /^Review now/ })).toBeNull();
-        fireEvent.click(view.getByText('Review notes'));
         expect(view.getAllByRole('button', { name: 'Flag to plan' })[0]).toBeEnabled();
         expect(view.queryByRole('button', { name: /^Review now/ })).toBeNull();
     });

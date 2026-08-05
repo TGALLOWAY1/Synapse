@@ -107,6 +107,14 @@ export function VersionHistoryPanel({
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
+                        {entries.length === 1 && (
+                            <p className="text-xs text-muted px-1 pb-1">
+                                This is the only version so far. New versions are added
+                                automatically when {restoreKind === 'prd'
+                                    ? 'the plan is regenerated, edited, or a branch is merged'
+                                    : 'this artifact is regenerated or refined'} — nothing is ever overwritten.
+                            </p>
+                        )}
                         {entries.length === 0 ? (
                             <p className="text-sm text-neutral-400 text-center py-8">No versions yet.</p>
                         ) : (

@@ -167,7 +167,7 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
                     <p className="text-base font-semibold text-white">One source of truth. Everything stays in sync.</p>
                     <p className="mt-1 text-sm text-neutral-400">
                         All assets are connected to your PRD so changes flow through the entire workspace.
-                        {doneCount > 0 && !generating && ' Tap any asset above to preview it.'}
+                        {doneCount > 0 && !generating && ' Select any asset above to preview it.'}
                     </p>
                 </div>
             </div>

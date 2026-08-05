@@ -162,7 +162,7 @@ export function NodeGraph({
                             </span>
                             <span>
                                 <span className="block text-sm font-semibold text-white">Product Requirements Document</span>
-                                <span className="block text-xs text-neutral-400">Tap to trace every downstream artifact</span>
+                                <span className="block text-xs text-neutral-400">Select to trace every downstream artifact</span>
                             </span>
                         </span>
                     )}
