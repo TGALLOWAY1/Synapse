@@ -1929,6 +1929,7 @@ export function ArtifactWorkspace({
                                 payload={payload}
                                 flows={parsedFlows}
                                 hasImageKey={hasOpenAIKey()}
+                                showProviderWarnings={capabilities.showsProviderSetupWarnings}
                                 onOpenFlows={() => setSelected('user_flows')}
                                 onApprove={handleApproveMockupFlows}
                             />

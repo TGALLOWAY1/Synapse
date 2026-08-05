@@ -11,9 +11,13 @@ export interface ProjectCapabilities {
     canManageDesignSystem: boolean;
     canPersistWorkflowState: boolean;
     canExportExternally: boolean;
+    /** Provider/key setup nudges (e.g. "no OpenAI key configured"). Showcase
+     * viewers can't generate anyway, so configuration warnings are noise on
+     * the product's shop window — presentation-only, never a write guard. */
+    showsProviderSetupWarnings: boolean;
 }
 
-export type DurableProjectCapability = Exclude<keyof ProjectCapabilities, 'isReadOnly' | 'canExplore'>;
+export type DurableProjectCapability = Exclude<keyof ProjectCapabilities, 'isReadOnly' | 'canExplore' | 'showsProviderSetupWarnings'>;
 
 type ProjectIdentity = { id: string } | null | undefined;
 
@@ -28,6 +32,7 @@ const EDITABLE_CAPABILITIES: ProjectCapabilities = Object.freeze({
     canManageDesignSystem: true,
     canPersistWorkflowState: true,
     canExportExternally: true,
+    showsProviderSetupWarnings: true,
 });
 
 const READ_ONLY_CAPABILITIES: ProjectCapabilities = Object.freeze({
@@ -41,6 +46,7 @@ const READ_ONLY_CAPABILITIES: ProjectCapabilities = Object.freeze({
     canManageDesignSystem: false,
     canPersistWorkflowState: false,
     canExportExternally: false,
+    showsProviderSetupWarnings: false,
 });
 
 const UNAVAILABLE_CAPABILITIES: ProjectCapabilities = Object.freeze({

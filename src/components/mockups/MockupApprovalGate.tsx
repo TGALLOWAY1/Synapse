@@ -10,6 +10,9 @@ type Props = {
     flows: ParsedFlow[];
     /** OpenAI key present — drives the "images will render" vs "add a key" copy. */
     hasImageKey: boolean;
+    /** Provider-setup nudges are suppressed on showcase surfaces (capability
+     * `showsProviderSetupWarnings`); defaults on for regular projects. */
+    showProviderWarnings?: boolean;
     /** Jump to the Flows artifact so the user can read the full flows. */
     onOpenFlows: () => void;
     /** Record approval + kick off image generation for the selected screen ids. */
@@ -27,7 +30,7 @@ type Props = {
  * "Generate mockups" action. Nothing is blocked once approved — the user can
  * still add/regenerate screens afterwards from the mockup view.
  */
-export function MockupApprovalGate({ payload, flows, hasImageKey, onOpenFlows, onApprove }: Props) {
+export function MockupApprovalGate({ payload, flows, hasImageKey, showProviderWarnings = true, onOpenFlows, onApprove }: Props) {
     const recommendations = useMemo(
         () => buildMockupScreenRecommendations(payload),
         [payload],
@@ -186,7 +189,7 @@ export function MockupApprovalGate({ payload, flows, hasImageKey, onOpenFlows, o
                         Confirm you've reviewed the flows to continue.
                     </span>
                 )}
-                {flowsReviewed && !hasImageKey && (
+                {flowsReviewed && !hasImageKey && showProviderWarnings && (
                     <span className="text-xs text-amber-600">
                         No OpenAI key — screens are approved, but add a key to render images.
                     </span>
