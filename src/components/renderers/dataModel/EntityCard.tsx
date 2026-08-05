@@ -68,7 +68,7 @@ function FieldTable({ group, indexed, entityName, initialMemberName }: {
                         <col className="w-[34%]" />
                     </colgroup>
                     <thead>
-                        <tr className="text-neutral-400 uppercase tracking-wider text-[10px]">
+                        <tr className="text-muted uppercase tracking-wider text-[10px]">
                             <th className="text-left px-2 py-1.5 font-medium">Field</th>
                             <th className="text-left px-2 py-1.5 font-medium">Type</th>
                             <th className="text-center px-2 py-1.5 font-medium">Req</th>
@@ -194,7 +194,7 @@ export function EntityCard({
 
                     <ChevronDown
                         size={18}
-                        className={`mt-0.5 shrink-0 text-neutral-400 transition-transform ${expanded ? 'rotate-180 text-indigo-500' : ''}`}
+                        className={`mt-0.5 shrink-0 text-muted transition-transform ${expanded ? 'rotate-180 text-indigo-500' : ''}`}
                         aria-hidden="true"
                     />
                 </div>
@@ -212,7 +212,7 @@ export function EntityCard({
                     )}
 
                     {entity.groupsAutoDetected && (
-                        <p className="text-[11px] text-neutral-400 italic">
+                        <p className="text-[11px] text-muted italic">
                             Fields grouped automatically — refine the artifact for explicit grouping.
                         </p>
                     )}
@@ -277,7 +277,7 @@ export function EntityCard({
                     {entity.exampleRecord && (
                         <div className="space-y-1">
                             <h5 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Example record</h5>
-                            <p className="text-[11px] text-neutral-400 italic">Illustrative — not real data.</p>
+                            <p className="text-[11px] text-muted italic">Illustrative — not real data.</p>
                             <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 rounded-lg p-3 overflow-x-auto whitespace-pre">
                                 {entity.exampleRecord}
                             </pre>

@@ -88,7 +88,7 @@ const MIN_RATIONALE_LENGTH = 20;
 const statusIcon = (status: ReadinessCheckpointCriterionView['status']) => {
     if (status === 'met') return <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />;
     if (status === 'attention') return <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />;
-    return <Circle size={16} className="mt-0.5 shrink-0 text-neutral-400" />;
+    return <Circle size={16} className="mt-0.5 shrink-0 text-muted" />;
 };
 
 export function ReadinessCheckpoint({
@@ -414,7 +414,7 @@ export function ReadinessCheckpoint({
                                                 <li key={evidence.id} className="text-xs leading-5 text-neutral-600">
                                                     <span className="font-semibold text-neutral-700">{evidence.sourceLabel ?? 'Evidence'}:</span> {evidence.summary}
                                                     {evidence.quality !== 'direct' && (
-                                                        <span className="ml-1 text-neutral-400">({evidence.quality})</span>
+                                                        <span className="ml-1 text-muted">({evidence.quality})</span>
                                                     )}
                                                 </li>
                                             ))}

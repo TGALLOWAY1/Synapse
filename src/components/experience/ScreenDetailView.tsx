@@ -335,7 +335,7 @@ export function ScreenDetailView({
                     <div className="min-w-0">
                         <h2 className="text-lg font-bold text-neutral-900 leading-tight">{screen.name}</h2>
                         {renamed && (
-                            <p className="text-[11px] text-neutral-400 mt-0.5">
+                            <p className="text-[11px] text-muted mt-0.5">
                                 generated as &ldquo;{item.baseScreen.name}&rdquo;
                             </p>
                         )}
@@ -501,25 +501,25 @@ function ScreenEditForm({
                 Saving returns the screen to Needs Review.
             </p>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Name</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Name</span>
                 <input className={field} value={name} onChange={e => setName(e.target.value)} />
             </label>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Purpose</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Purpose</span>
                 <textarea className={field} rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} />
             </label>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">User goal</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">User goal</span>
                 <textarea className={field} rows={2} value={userIntent} onChange={e => setUserIntent(e.target.value)} />
             </label>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Priority</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Priority</span>
                 <select className={field} value={priority} onChange={e => setPriority(e.target.value as ScreenPriority)}>
                     {EDIT_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
             </label>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Notes (internal)</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Notes (internal)</span>
                 <textarea
                     className={field}
                     rows={2}
@@ -708,7 +708,7 @@ function FlowTab({
                         <section key={group.flowIndex}>
                             <header className="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
                                 <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
-                                <span className="text-[11px] text-neutral-400">
+                                <span className="text-[11px] text-muted">
                                     Flow {group.flowIndex + 1} · appears in{' '}
                                     {group.steps.length === 1
                                         ? `step ${group.steps[0].stepIndex + 1}`
@@ -724,7 +724,7 @@ function FlowTab({
                     <details key={group.flowIndex} open={groupIndex === 0} className="group">
                         <summary className="mb-2 flex cursor-pointer list-none items-baseline justify-between gap-2 flex-wrap">
                             <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
-                            <span className="text-[11px] text-neutral-400">
+                            <span className="text-[11px] text-muted">
                                 {stepCount} {stepCount === 1 ? 'step' : 'steps'} · appears in{' '}
                                 {group.steps.length === 1
                                     ? `step ${group.steps[0].stepIndex + 1}`
@@ -945,7 +945,7 @@ function MockupsTab({
                         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                             Suggested variants
                         </h4>
-                        <span className="text-[10px] text-neutral-400">Optional</span>
+                        <span className="text-[10px] text-muted">Optional</span>
                     </div>
                     <ul className="space-y-1 text-xs">
                         {variants.filter(v => v.required).map(v => (
@@ -961,7 +961,7 @@ function MockupsTab({
                             </li>
                         ))}
                     </ul>
-                    <p className="text-[11px] text-neutral-400 mt-2">
+                    <p className="text-[11px] text-muted mt-2">
                         Derived from this screen&rsquo;s priority and documented states. Add this screen to the
                         mockups to generate individual variants.
                     </p>

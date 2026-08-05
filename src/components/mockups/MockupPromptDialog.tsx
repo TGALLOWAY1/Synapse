@@ -68,7 +68,7 @@ export function MockupPromptDialog({ open, onClose, screenName, prompt }: Props)
                     <button
                         type="button"
                         onClick={onClose}
-                        className="p-2 -m-1 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 rounded-full transition shrink-0"
+                        className="p-2 -m-1 text-muted hover:text-neutral-700 hover:bg-neutral-100 rounded-full transition shrink-0"
                         aria-label="Close"
                     >
                         <X size={18} />

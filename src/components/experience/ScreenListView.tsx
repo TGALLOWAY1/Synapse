@@ -279,7 +279,7 @@ export function ScreenListView({
                         Clear
                     </button>
                 )}
-                <span className="ml-auto text-[11px] text-neutral-400 tabular-nums">
+                <span className="ml-auto text-[11px] text-muted tabular-nums">
                     {totalMatches} of {index.items.length} screens
                 </span>
             </div>
@@ -300,11 +300,11 @@ export function ScreenListView({
                             <Workflow size={15} className="text-indigo-400 shrink-0 self-center" aria-hidden />
                         )}
                         <h3 className="text-base font-semibold text-neutral-800">{section.title}</h3>
-                        <span className="text-[11px] text-neutral-400">
+                        <span className="text-[11px] text-muted">
                             {section.items.length}{filteredGroups.length !== groups.length || totalMatches !== index.items.length ? ' matching' : ''}
                         </span>
                         {section.subtitle && group !== 'flow' && (
-                            <span className="text-xs text-neutral-400 truncate">· {section.subtitle}</span>
+                            <span className="text-xs text-muted truncate">· {section.subtitle}</span>
                         )}
                     </header>
                     {/* A single-card group renders full width — a lone half-width
@@ -433,12 +433,12 @@ function CollapsibleSection({
             >
                 <ChevronDown
                     size={16}
-                    className={`text-neutral-400 transition-transform ${open ? '' : '-rotate-90'}`}
+                    className={`text-muted transition-transform ${open ? '' : '-rotate-90'}`}
                     aria-hidden
                 />
                 <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold text-neutral-800">{title}</span>
-                    {subtitle && <span className="block text-xs text-neutral-400 truncate">{subtitle}</span>}
+                    {subtitle && <span className="block text-xs text-muted truncate">{subtitle}</span>}
                 </span>
             </button>
             {/* Kept mounted (hidden, not unmounted) so panel state survives a
@@ -527,12 +527,12 @@ function ScreenCard({
                     (audit L3). */}
                 <div className="mt-auto pt-2 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
                     {readiness && <ReadinessBadge readiness={readiness} />}
-                    <span className="inline-flex items-center gap-1 text-neutral-400" title="Mockup availability for this screen">
+                    <span className="inline-flex items-center gap-1 text-muted" title="Mockup availability for this screen">
                         <ImageIcon size={12} className="text-neutral-300" aria-hidden />
                         {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup yet'}
                     </span>
                     <span
-                        className="ml-auto inline-flex items-center gap-0.5 text-neutral-400 group-hover:text-indigo-500 transition-colors"
+                        className="ml-auto inline-flex items-center gap-0.5 text-muted group-hover:text-indigo-500 transition-colors"
                         title={!variantSummary.hasMockup ? 'Open this screen to generate a mockup' : undefined}
                     >
                         Open
@@ -575,7 +575,7 @@ function FlowStrip({ name, connections }: { name: string; connections: ReturnTyp
     if (connections.outgoing.length > 0) {
         return (
             <div className="flex items-center gap-1.5 flex-wrap text-[11px]" title={`${name} leads to ${connections.outgoing.join(', ')}`}>
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Next</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Next</span>
                 {connections.outgoing.slice(0, 3).map((target, i) => (
                     <span key={i} className="inline-flex items-center gap-1 text-neutral-600">
                         <ArrowRight size={11} className="text-neutral-300" aria-hidden />
@@ -583,7 +583,7 @@ function FlowStrip({ name, connections }: { name: string; connections: ReturnTyp
                     </span>
                 ))}
                 {connections.outgoing.length > 3 && (
-                    <span className="text-neutral-400">+{connections.outgoing.length - 3}</span>
+                    <span className="text-muted">+{connections.outgoing.length - 3}</span>
                 )}
             </div>
         );
@@ -592,7 +592,7 @@ function FlowStrip({ name, connections }: { name: string; connections: ReturnTyp
         return (
             <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
                 <Workflow size={11} className="text-indigo-300" aria-hidden />
-                <span className="text-neutral-400">Part of</span>
+                <span className="text-muted">Part of</span>
                 <span className="font-medium text-neutral-600 truncate" title={connections.flowTitles.join(', ')}>
                     {connections.flowTitles.join(', ')}
                 </span>
@@ -600,7 +600,7 @@ function FlowStrip({ name, connections }: { name: string; connections: ReturnTyp
         );
     }
     return (
-        <div className="text-[11px] text-neutral-400">Not yet connected to a flow</div>
+        <div className="text-[11px] text-muted">Not yet connected to a flow</div>
     );
 }
 
@@ -658,7 +658,7 @@ function CardDetails({
                 <DetailRow label="Connected to">
                     {connections.outgoing.length > 0 ? connections.outgoing.join(', ') : '—'}
                     {connections.incoming.length > 0 && (
-                        <span className="block text-neutral-400 mt-0.5">
+                        <span className="block text-muted mt-0.5">
                             Reached from: {connections.incoming.join(', ')}
                         </span>
                     )}
@@ -702,7 +702,7 @@ function CardDetails({
             <DetailRow label="PRD features">
                 {featureRefs.length > 0
                     ? featureNamesForRefs(featureRefs, features).join(', ')
-                    : <span className="text-neutral-400">No linked PRD features — review recommended</span>}
+                    : <span className="text-muted">No linked PRD features — review recommended</span>}
             </DetailRow>
 
             {/* Mockup coverage — the primary mockup is the only required asset;
@@ -717,7 +717,7 @@ function CardDetails({
 
             {/* States */}
             <DetailRow label="States">
-                {stateCount > 0 ? `${stateCount} documented` : <span className="text-neutral-400">None documented</span>}
+                {stateCount > 0 ? `${stateCount} documented` : <span className="text-muted">None documented</span>}
             </DetailRow>
 
             {/* Risks */}
@@ -747,7 +747,7 @@ function CardDetails({
                 <DetailRow label="Source">
                     {prdVersionLabel ? `Generated from PRD ${prdVersionLabel}` : 'Generated'}
                     {item.isEdited && (
-                        <span className="block text-neutral-400 mt-0.5">
+                        <span className="block text-muted mt-0.5">
                             Edited — this screen carries your manual changes.
                         </span>
                     )}
@@ -781,7 +781,7 @@ function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls 
                         </span>
                     )}
                     {lastMockupGeneratedAt !== undefined && (
-                        <span className="block text-neutral-400 mt-0.5">
+                        <span className="block text-muted mt-0.5">
                             Last mockup generated {formatTimestamp(lastMockupGeneratedAt)}
                         </span>
                     )}
@@ -854,7 +854,7 @@ function formatTimestamp(ts: number): string {
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-neutral-400 uppercase tracking-wide text-[10px] pt-0.5">{label}</dt>
+            <dt className="w-20 shrink-0 text-muted uppercase tracking-wide text-[10px] pt-0.5">{label}</dt>
             <dd className="flex-1 min-w-0 text-neutral-600">{children}</dd>
         </div>
     );

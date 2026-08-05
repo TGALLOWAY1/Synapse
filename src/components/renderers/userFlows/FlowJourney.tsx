@@ -137,7 +137,7 @@ export function FlowJourney({
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 inline-flex items-center gap-1">
                     <Workflow size={11} /> Flow journey
                 </p>
-                <span className="text-[10px] text-neutral-400">
+                <span className="text-[10px] text-muted">
                     {groups.length} {groups.length === 1 ? 'screen' : 'screens'} · {steps.length} {steps.length === 1 ? 'step' : 'steps'}
                 </span>
             </div>
@@ -178,7 +178,7 @@ export function FlowJourney({
                                                 <span className={`min-w-0 truncate text-[13px] font-semibold leading-snug ${screenStyle.text}`} title={group.screenLabel}>
                                                     {group.screenLabel}
                                                 </span>
-                                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-neutral-400 tabular-nums">
+                                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted tabular-nums">
                                                     {rangeLabel(group)}
                                                 </span>
                                             </span>
@@ -203,7 +203,7 @@ export function FlowJourney({
                                             type="button"
                                             onClick={() => toggleStep(node.stepIndex)}
                                             aria-expanded={stepExpanded}
-                                            className="inline-flex items-center gap-1 text-[10px] font-medium text-neutral-400 hover:text-neutral-600 transition-colors"
+                                            className="inline-flex items-center gap-1 text-[10px] font-medium text-muted hover:text-neutral-600 transition-colors"
                                         >
                                             <ChevronRight
                                                 size={11}
@@ -240,7 +240,7 @@ export function FlowJourney({
                                 <span className={`min-w-0 flex-1 truncate text-[13px] font-semibold leading-snug ${screenStyle.text}`} title={group.screenLabel}>
                                     {group.screenLabel}
                                 </span>
-                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-neutral-400 tabular-nums">
+                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted tabular-nums">
                                     {rangeLabel(group)}
                                 </span>
                                 <ChevronRight
@@ -316,7 +316,7 @@ export function FlowJourney({
                     type="button"
                     onClick={() => setLegendOpen(o => !o)}
                     aria-expanded={legendOpen}
-                    className="inline-flex items-center gap-1 text-[10px] font-medium text-neutral-400 hover:text-neutral-600 transition-colors"
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-muted hover:text-neutral-600 transition-colors"
                 >
                     <ChevronRight
                         size={11}

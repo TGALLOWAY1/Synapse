@@ -411,7 +411,7 @@ export function DecisionCenter({
                 {view === 'log' && record.status === 'deferred' && (
                     <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">Deferred</span>
                 )}
-                {record.sourceLabels?.[0] && <span className="truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</span>}
+                {record.sourceLabels?.[0] && <span className="truncate text-xs text-muted">From {record.sourceLabels[0]}</span>}
             </span>
         </button>
     );
@@ -1040,7 +1040,7 @@ export function DecisionCenter({
                                 <summary className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-semibold text-neutral-700"><ChevronDown size={14} /> Source and history</summary>
                                 <p className="mt-2 text-xs text-neutral-500">Sources: {selected.sourceLabels?.join(', ') || 'User-created decision'}</p>
                                 <ol className="mt-3 space-y-3 border-l border-neutral-200 pl-4">
-                                    {(selected.history ?? []).map(item => <li key={item.id}><p className="text-sm font-medium text-neutral-800">{item.label}</p><p className="text-xs text-neutral-400">{new Date(item.at).toLocaleString()}</p>{item.rationale && <p className="mt-1 text-xs text-neutral-600">{item.rationale}</p>}</li>)}
+                                    {(selected.history ?? []).map(item => <li key={item.id}><p className="text-sm font-medium text-neutral-800">{item.label}</p><p className="text-xs text-muted">{new Date(item.at).toLocaleString()}</p>{item.rationale && <p className="mt-1 text-xs text-neutral-600">{item.rationale}</p>}</li>)}
                                 </ol>
                             </details>
                         </div>

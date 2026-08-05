@@ -168,7 +168,7 @@ export function MilestoneCard({
                         </div>
                     )}
                 </div>
-                <span className="shrink-0 mt-1 text-neutral-400">
+                <span className="shrink-0 mt-1 text-muted">
                     {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                 </span>
             </button>
@@ -195,10 +195,10 @@ export function MilestoneCard({
                                     const Icon = row.icon;
                                     return (
                                         <div key={row.key} className="flex items-start gap-1.5 min-w-0">
-                                            <Icon size={12} className="mt-0.5 shrink-0 text-neutral-400" />
+                                            <Icon size={12} className="mt-0.5 shrink-0 text-muted" />
                                             <p className="text-[11px] text-neutral-600 leading-relaxed">
                                                 <span className="font-semibold text-neutral-700">{row.label}</span>
-                                                <span className="text-neutral-400"> — {row.why}: </span>
+                                                <span className="text-muted"> — {row.why}: </span>
                                                 {row.items.join(', ')}
                                             </p>
                                         </div>
@@ -214,7 +214,7 @@ export function MilestoneCard({
                                 <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
                                     Build Tasks
                                 </p>
-                                <span className="text-[10px] text-neutral-400">
+                                <span className="text-[10px] text-muted">
                                     {trackedCount > 0
                                         ? `${trackedCount} of ${m.tasks.length} tracked in Implementation progress · self-reported`
                                         : 'Planned steps — use Convert to tasks to track progress'}
@@ -243,7 +243,7 @@ export function MilestoneCard({
                                         <li id={implementationPlanAnchor.task(m.id, t.id)} tabIndex={-1} key={t.id} className="flex scroll-mt-24 items-start gap-2 text-sm text-neutral-800">
                                             <Icon size={15} className={`mt-0.5 shrink-0 ${iconCls}`} aria-hidden="true" />
                                             <span className="min-w-0">
-                                                <span className={implemented ? 'text-neutral-400 line-through' : undefined}>{t.title}</span>
+                                                <span className={implemented ? 'text-muted line-through' : undefined}>{t.title}</span>
                                                 {chip && (
                                                     <span
                                                         title={chip.title}

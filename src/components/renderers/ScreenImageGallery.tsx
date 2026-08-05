@@ -139,7 +139,7 @@ export function ScreenImageGallery({ screen, context, storageName }: Props) {
                         </button>
                     )}
                     <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] uppercase tracking-wide text-neutral-400 mr-1">
+                        <span className="text-[10px] uppercase tracking-wide text-muted mr-1">
                             <ImageIcon size={10} className="inline -mt-0.5 mr-0.5" />
                             history
                         </span>

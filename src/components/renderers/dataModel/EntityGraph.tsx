@@ -42,7 +42,7 @@ function NodeCardInner({ node }: { node: DataModelNode }) {
     return (
         <>
             <div className="flex items-center gap-1.5 min-w-0">
-                <Database size={13} className="shrink-0 text-neutral-400" />
+                <Database size={13} className="shrink-0 text-muted" />
                 <span className="text-sm font-semibold text-neutral-900 truncate">{node.name}</span>
             </div>
             <div className="mt-1.5">
@@ -58,7 +58,7 @@ function NodeCardInner({ node }: { node: DataModelNode }) {
                     <span className="font-semibold text-neutral-700 tabular-nums">{node.fieldCount}</span> fields
                 </span>
                 <span className="inline-flex items-center gap-1">
-                    <GitBranch size={10} className="text-neutral-400" />
+                    <GitBranch size={10} className="text-muted" />
                     <span className="font-semibold text-neutral-700 tabular-nums">{node.relationshipCount}</span> rel.
                 </span>
             </div>
@@ -218,7 +218,7 @@ export function EntityGraph(props: Props) {
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 inline-flex items-center gap-1.5">
                     <GitBranch size={12} /> Entity relationships
                 </p>
-                <span className="text-[10px] text-neutral-400 inline-flex items-center gap-1">
+                <span className="text-[10px] text-muted inline-flex items-center gap-1">
                     <MousePointerClick size={11} /> Select an entity to open its details
                 </span>
             </div>
@@ -301,7 +301,7 @@ export function EntityGraph(props: Props) {
                             >
                                 <span className="block truncate">{edge.verb}</span>
                                 {edge.cardinality && (
-                                    <span className="block text-[10px] font-mono text-neutral-400 leading-none md:text-[9px]">{edge.cardinality}</span>
+                                    <span className="block text-[10px] font-mono text-muted leading-none md:text-[9px]">{edge.cardinality}</span>
                                 )}
                             </button>
                         );
@@ -336,7 +336,7 @@ export function EntityGraph(props: Props) {
             </div>
 
             {(graph.unresolved.length > 0 || graph.selfRefs.length > 0) && (
-                <p className="text-[11px] text-neutral-400">
+                <p className="text-[11px] text-muted">
                     {graph.selfRefs.length > 0 && (
                         <span>{graph.selfRefs.length} self-reference{graph.selfRefs.length === 1 ? '' : 's'}</span>
                     )}

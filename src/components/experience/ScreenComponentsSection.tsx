@@ -123,7 +123,7 @@ export function ScreenComponentsSection({
                                 {advisoryCount} to review
                             </span>
                         )}
-                        {open ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
+                        {open ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
                     </div>
                 </button>
 

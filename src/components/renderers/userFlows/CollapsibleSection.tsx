@@ -35,18 +35,18 @@ export function CollapsibleSection({
             >
                 <ChevronRight
                     size={14}
-                    className={`shrink-0 text-neutral-400 transition-transform ${open ? 'rotate-90' : ''}`}
+                    className={`shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`}
                     aria-hidden="true"
                 />
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-600 inline-flex items-center gap-1.5">
                     {icon}
                     <span>{title}</span>
                     {typeof count === 'number' && count > 0 && (
-                        <span className="text-neutral-400 font-normal">· {count}</span>
+                        <span className="text-muted font-normal">· {count}</span>
                     )}
                 </span>
                 {!open && collapsedSummary && (
-                    <span className="ml-auto text-[11px] text-neutral-400 truncate min-w-0">
+                    <span className="ml-auto text-[11px] text-muted truncate min-w-0">
                         {collapsedSummary}
                     </span>
                 )}

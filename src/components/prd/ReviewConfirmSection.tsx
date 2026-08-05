@@ -89,7 +89,7 @@ export function ReviewConfirmSection({
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight whitespace-nowrap">
                     {title}
                 </h3>
-                <span className="text-[11px] text-neutral-400">{assumptions.length}</span>
+                <span className="text-[11px] text-muted">{assumptions.length}</span>
             </div>
             <p className="text-sm text-neutral-600 mb-3">{description}</p>
             <ul className="space-y-2">
@@ -100,7 +100,7 @@ export function ReviewConfirmSection({
                                 <div className="flex flex-wrap items-center gap-2"><MaterialityLabel materiality={a.materiality} /><ConfidenceChip confidence={a.confidence} /></div>
                                 <p className="text-sm text-neutral-900 mt-1.5">{a.statement}</p>
                                 {a.whyItMatters && <p className="mt-1 text-xs leading-5 text-neutral-500">Why it matters: {a.whyItMatters}</p>}
-                                {a.affectedPrdSections && a.affectedPrdSections.length > 0 && <p className="mt-1 text-xs text-neutral-400">Affects {a.affectedPrdSections.join(', ')}</p>}
+                                {a.affectedPrdSections && a.affectedPrdSections.length > 0 && <p className="mt-1 text-xs text-muted">Affects {a.affectedPrdSections.join(', ')}</p>}
                             </div>
                             {!readOnly && rejectingId !== a.id && (
                                 <div className="flex w-full shrink-0 flex-col items-stretch gap-1.5 sm:w-auto sm:items-end">

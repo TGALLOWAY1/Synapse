@@ -139,7 +139,7 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                     <ul className="space-y-1 text-sm text-neutral-800">
                         {plan.architecture.map((a, i) => (
                             <li id={implementationPlanAnchor.architecture(i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-start gap-2">
-                                <Layers size={13} className="mt-0.5 shrink-0 text-neutral-400" />
+                                <Layers size={13} className="mt-0.5 shrink-0 text-muted" />
                                 <span>{a}</span>
                             </li>
                         ))}

@@ -9,7 +9,7 @@ export const PRIORITY_STYLES: Record<ScreenPriority, string> = {
     P0: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200',
     P1: 'bg-sky-100 text-sky-700 ring-1 ring-sky-200',
     P2: 'bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200',
-    P3: 'bg-neutral-50 text-neutral-400 ring-1 ring-neutral-100',
+    P3: 'bg-neutral-50 text-muted ring-1 ring-neutral-100',
 };
 
 /** Coerce a possibly-legacy priority value to one that has a style entry. */

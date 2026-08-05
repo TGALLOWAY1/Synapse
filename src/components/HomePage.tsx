@@ -313,7 +313,7 @@ export function HomePage() {
                 </div>
                 <div className="flex items-center gap-2">
                     {user && (
-                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm">
+                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-neutral-200 bg-white text-neutral-600 text-sm">
                             Signed in as {user.name}{providerLabel(user.authProvider) ? ` via ${providerLabel(user.authProvider)}` : ''}
                         </div>
                     )}
@@ -321,6 +321,7 @@ export function HomePage() {
                         onClick={() => setIsSettingsOpen(true)}
                         className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Settings"
+                        aria-label="Settings"
                     >
                         <Settings size={18} />
                     </button>
@@ -330,6 +331,7 @@ export function HomePage() {
                             disabled={isSigningOut}
                             className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300 disabled:opacity-60 disabled:cursor-wait"
                             title="Sign out"
+                            aria-label="Sign out"
                         >
                             {isSigningOut ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />}
                         </button>
@@ -338,6 +340,7 @@ export function HomePage() {
                         onClick={() => setIsDrawerOpen(true)}
                         className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Projects"
+                        aria-label="Projects"
                     >
                         <List size={18} />
                     </button>
@@ -511,6 +514,7 @@ export function HomePage() {
                                             onClick={() => setShowUploadMenu((v) => !v)}
                                             className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition"
                                             title="Attach a file"
+                                            aria-label="Attach a file"
                                             aria-haspopup="menu"
                                             aria-expanded={showUploadMenu}
                                         >

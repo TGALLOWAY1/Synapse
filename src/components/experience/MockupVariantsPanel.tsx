@@ -211,7 +211,7 @@ export function MockupVariantsPanel({
             </div>
             {optionalVariants.length > 0 && (
                 <div>
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-1.5">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">
                         Optional variants — generate on demand
                     </h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -263,7 +263,7 @@ function VariantCard({
         >
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
-                    <Icon size={13} className={generated ? 'text-emerald-500' : 'text-neutral-400'} aria-hidden />
+                    <Icon size={13} className={generated ? 'text-emerald-500' : 'text-muted'} aria-hidden />
                     <span className="text-xs font-medium text-neutral-800 truncate">
                         {formatVariantLabel(variant)}
                     </span>
@@ -290,7 +290,7 @@ function VariantCard({
                     <FreshnessBadge status={variant.freshness.status} />
                 )}
                 {variant.status === 'missing' && (
-                    <span className="text-neutral-400">Available on demand</span>
+                    <span className="text-muted">Available on demand</span>
                 )}
             </div>
         </button>
@@ -455,7 +455,7 @@ function VariantDetail({
                         />
                     </div>
                     {metaParts.length > 0 && (
-                        <p className="text-[11px] text-neutral-400">{metaParts.join(' · ')}</p>
+                        <p className="text-[11px] text-muted">{metaParts.join(' · ')}</p>
                     )}
                 </div>
             ) : isVariantPath && variantRequest && variant.status !== 'not_needed' ? (
@@ -501,7 +501,7 @@ function VariantDetail({
             {/* An older generated image with no source metadata. */}
             {(variant.source === 'legacy' || variant.source === 'variant')
                 && variantRecord?.sourceSignature == null && (
-                <p className="text-[11px] text-neutral-400">
+                <p className="text-[11px] text-muted">
                     Source comparison unavailable for this older mockup — it was generated before Synapse
                     captured source metadata.
                 </p>
@@ -518,7 +518,7 @@ function VariantDetail({
             {/* Storage clarity — tucked behind a disclosure; persistence trivia
                 shouldn't sit in the primary view (audit M6). */}
             {variant.source === 'variant' && (
-                <details className="text-[11px] text-neutral-400">
+                <details className="text-[11px] text-muted">
                     <summary className="inline-flex items-center gap-1 cursor-pointer list-none hover:text-neutral-600">
                         <Info size={10} className="shrink-0" aria-hidden /> Where is this image stored?
                     </summary>
@@ -535,7 +535,7 @@ function VariantDetail({
                 <ul className="space-y-1">
                     {variant.notes.map((note, i) => (
                         <li key={i} className="flex items-start gap-1.5 text-[11px] text-neutral-500">
-                            <Info size={11} className="mt-0.5 shrink-0 text-neutral-400" aria-hidden />
+                            <Info size={11} className="mt-0.5 shrink-0 text-muted" aria-hidden />
                             <span>{note}</span>
                         </li>
                     ))}
@@ -612,7 +612,7 @@ function SourceComparison({
     return (
         <div className="rounded-lg border border-neutral-200 p-3">
             <div className="flex items-center gap-1.5 mb-2">
-                <Layers size={12} className="text-neutral-400" aria-hidden />
+                <Layers size={12} className="text-muted" aria-hidden />
                 <h5 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                     Source comparison
                 </h5>
@@ -623,7 +623,7 @@ function SourceComparison({
                         <span className="text-neutral-700">{row.label}</span>
                         <span className={row.changed
                             ? 'text-amber-700 font-medium'
-                            : row.note === 'unknown' ? 'text-neutral-400' : 'text-emerald-700'}>
+                            : row.note === 'unknown' ? 'text-muted' : 'text-emerald-700'}>
                             {row.note === 'unknown' ? 'Not comparable' : row.changed ? 'Changed' : 'Unchanged'}
                         </span>
                     </li>
@@ -637,7 +637,7 @@ function SourceComparison({
                     </ul>
                 </div>
             )}
-            <p className="text-[11px] text-neutral-400 mt-2">
+            <p className="text-[11px] text-muted mt-2">
                 Compared from stored generation metadata, not the rendered image.
             </p>
         </div>
@@ -687,7 +687,7 @@ function VariantHistory({
                             </div>
                         </div>
                     ))}
-                    <p className="text-[11px] text-neutral-400">
+                    <p className="text-[11px] text-muted">
                         Previous renders are kept on this device and included in project snapshots.
                     </p>
                 </div>
@@ -701,7 +701,7 @@ const MANIFEST_ITEM_TONE: Record<MockupCoverageItemStatus, string> = {
     partial: 'text-amber-700',
     missing: 'text-amber-700',
     unknown: 'text-neutral-500',
-    not_applicable: 'text-neutral-400',
+    not_applicable: 'text-muted',
 };
 
 const MANIFEST_ITEM_LABEL: Record<MockupCoverageItemStatus, string> = {
@@ -725,7 +725,7 @@ function VariantManifestCoverage({ manifest }: { manifest: MockupCoverageManifes
     return (
         <div className="rounded-lg border border-neutral-200 p-3">
             <div className="flex items-center gap-1.5 mb-2">
-                <ShieldQuestion size={12} className="text-neutral-400" aria-hidden />
+                <ShieldQuestion size={12} className="text-muted" aria-hidden />
                 <h5 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                     Coverage manifest
                 </h5>
@@ -741,7 +741,7 @@ function VariantManifestCoverage({ manifest }: { manifest: MockupCoverageManifes
                 <div className="space-y-2">
                     {groups.map(group => (
                         <div key={group.label}>
-                            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-0.5">
+                            <div className="text-[10px] uppercase tracking-wide text-muted mb-0.5">
                                 {group.label}
                             </div>
                             <ul className="space-y-0.5 text-xs">
@@ -761,7 +761,7 @@ function VariantManifestCoverage({ manifest }: { manifest: MockupCoverageManifes
             {manifest.warnings.map((w, i) => (
                 <p key={i} className="text-[11px] text-amber-700 mt-2">{w}</p>
             ))}
-            <p className="text-[11px] text-neutral-400 mt-2">
+            <p className="text-[11px] text-muted mt-2">
                 Coverage manifest captured during generation — a structured self-report of what the
                 render was asked to include, not a visual inspection of the image.
             </p>
@@ -781,7 +781,7 @@ function SpecCoverageSection({
     return (
         <div className="rounded-lg border border-neutral-200 p-3">
             <div className="flex items-center gap-1.5 mb-2">
-                <Layers size={12} className="text-neutral-400" aria-hidden />
+                <Layers size={12} className="text-muted" aria-hidden />
                 <h5 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
                     Spec coverage
                 </h5>
@@ -794,7 +794,7 @@ function SpecCoverageSection({
                         be useful visually, but Synapse cannot confirm which screen-spec items are
                         represented.
                     </p>
-                    <p className="text-neutral-400">
+                    <p className="text-muted">
                         UI Regions · Required States · User Actions · Acceptance Criteria — Not checked.
                     </p>
                 </div>
@@ -814,7 +814,7 @@ function SpecCoverageSection({
                             </li>
                         ))}
                     </ul>
-                    <p className="text-[11px] text-neutral-400 mt-2">
+                    <p className="text-[11px] text-muted mt-2">
                         Compared against the mockup&rsquo;s generation spec, not the rendered image —
                         treat &ldquo;Not in spec&rdquo; as a prompt to double-check the visual.
                     </p>

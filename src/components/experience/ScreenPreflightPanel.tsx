@@ -61,7 +61,7 @@ export function ScreenPreflightPanel({ preflight }: Props) {
                             {preflight.review.length} review
                         </span>
                     )}
-                    {open ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
+                    {open ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
                 </div>
             </button>
 
@@ -92,7 +92,7 @@ export function ScreenPreflightPanel({ preflight }: Props) {
                     )}
                     {preflight.info.length > 0 && (
                         <Group
-                            icon={<Info size={13} className="text-neutral-400" />}
+                            icon={<Info size={13} className="text-muted" />}
                             title="For your information"
                             items={preflight.info}
                             tone="text-neutral-600"
@@ -114,7 +114,7 @@ export function ScreenPreflightPanel({ preflight }: Props) {
                     )}
 
                     {preflight.caveats.length > 0 && (
-                        <ul className="space-y-1 text-[11px] text-neutral-400">
+                        <ul className="space-y-1 text-[11px] text-muted">
                             {preflight.caveats.map((c, i) => (
                                 <li key={i} className="flex gap-1.5">
                                     <span className="select-none">·</span>
@@ -124,7 +124,7 @@ export function ScreenPreflightPanel({ preflight }: Props) {
                         </ul>
                     )}
 
-                    <p className="text-[11px] text-neutral-400">
+                    <p className="text-[11px] text-muted">
                         Preflight is advisory and derived from the current screen state — it never blocks using
                         the Screens artifact.
                     </p>

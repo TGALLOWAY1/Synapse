@@ -498,8 +498,8 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
                     {/* Section header */}
                     <div className="flex items-center gap-2">
                         <h3 className="text-sm font-semibold text-neutral-900 inline-flex items-center gap-1.5">
-                            <Layers className="w-4 h-4 text-neutral-400" /> Entities
-                            <span className="text-xs font-normal text-neutral-400">
+                            <Layers className="w-4 h-4 text-muted" /> Entities
+                            <span className="text-xs font-normal text-muted">
                                 {pairs.length} {pairs.length === 1 ? 'entity' : 'entities'}
                             </span>
                         </h3>

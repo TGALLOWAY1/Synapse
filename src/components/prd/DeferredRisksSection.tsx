@@ -44,11 +44,11 @@ export function DeferredRisksSection({ deferred, risks }: Props) {
             {deferred.length > 0 && (
                 <div className="mb-5">
                     <div className="flex items-center gap-2 mb-2">
-                        <Clock size={14} className="text-neutral-400" aria-hidden />
+                        <Clock size={14} className="text-muted" aria-hidden />
                         <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
                             Deferred scope
                         </h4>
-                        <span className="text-[11px] text-neutral-400">{deferred.length}</span>
+                        <span className="text-[11px] text-muted">{deferred.length}</span>
                     </div>
                     <ul className="space-y-2">
                         {deferred.map(entry => (
@@ -76,7 +76,7 @@ export function DeferredRisksSection({ deferred, risks }: Props) {
                         <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-500">
                             Risks
                         </h4>
-                        <span className="text-[11px] text-neutral-400">{risks.length}</span>
+                        <span className="text-[11px] text-muted">{risks.length}</span>
                     </div>
                     <ul className="space-y-2">
                         {risks.map((r, i) => (

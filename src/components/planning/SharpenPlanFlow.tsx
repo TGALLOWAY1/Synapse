@@ -83,7 +83,7 @@ export function SharpenPlanFlow({ records, onDecide, onClose, onOpenRecord }: Pr
                 <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-100" aria-hidden="true">
                     <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${(index / total) * 100}%` }} />
                 </div>
-                <button type="button" onClick={onClose} aria-label="Close sharpening" className="shrink-0 rounded-lg p-2 text-neutral-400 hover:bg-neutral-50 hover:text-neutral-700">
+                <button type="button" onClick={onClose} aria-label="Close sharpening" className="shrink-0 rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-neutral-700">
                     <X size={16} />
                 </button>
             </div>

@@ -28,7 +28,7 @@ function Section({
                 {icon}
                 <span>{title}</span>
                 {typeof count === 'number' && (
-                    <span className="ml-1 text-neutral-400 font-normal">· {count}</span>
+                    <span className="ml-1 text-muted font-normal">· {count}</span>
                 )}
             </p>
             {children}
@@ -38,7 +38,7 @@ function Section({
 
 function EmptyChip({ label }: { label: string }) {
     return (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-neutral-400 italic">
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] text-muted italic">
             {label}
         </span>
     );

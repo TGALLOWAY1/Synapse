@@ -126,7 +126,7 @@ export function MockupScreenUpload({
                             <ImageUp size={10} />
                             Uploaded
                         </span>
-                        <span className="text-[11px] text-neutral-400">
+                        <span className="text-[11px] text-muted">
                             {new Date(preferred.generatedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                         {capabilities.canEditArtifacts && <label className="ml-auto inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 cursor-pointer transition">

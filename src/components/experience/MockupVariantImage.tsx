@@ -124,7 +124,7 @@ export function MockupVariantImage({
                     </button>
                 </div>
                 {!canGenerate && (
-                    <p className="mt-1 text-[11px] text-neutral-400 text-right">{gateReason}</p>
+                    <p className="mt-1 text-[11px] text-muted text-right">{gateReason}</p>
                 )}
             </div>
         );

@@ -28,7 +28,7 @@ interface Props {
 
 const CELL_STATE_TEXT = {
     missing: { label: 'None linked', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-    not_tracked: { label: 'Not tracked', cls: 'bg-neutral-50 text-neutral-400 border-neutral-200' },
+    not_tracked: { label: 'Not tracked', cls: 'bg-neutral-50 text-muted border-neutral-200' },
 } as const;
 
 function CoverageCellChips({ cell }: { cell: CoverageCell }) {
@@ -51,7 +51,7 @@ function ImpactRow({ entry, onOpenMilestone }: { entry: ChangeImpactEntry; onOpe
     return (
         <li className="py-2 first:pt-0 last:pb-0">
             <div className="flex items-start gap-2">
-                <GitBranch size={13} className="mt-0.5 shrink-0 text-neutral-400" />
+                <GitBranch size={13} className="mt-0.5 shrink-0 text-muted" />
                 <div className="min-w-0">
                     <p className="text-sm font-medium text-neutral-800">
                         {entry.label}
@@ -140,7 +140,7 @@ export function CoverageTab({
                                 ))}
                             </div>
                         ) : (
-                            <p className="text-[11px] text-neutral-400">
+                            <p className="text-[11px] text-muted">
                                 No source versions recorded — this plan predates provenance tracking.
                             </p>
                         )}
@@ -238,7 +238,7 @@ export function CoverageTab({
                         </div>
                         {columns.map(c => (
                             <div key={c.key} className="flex items-start gap-2">
-                                <span className="shrink-0 w-24 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 mt-0.5">
+                                <span className="shrink-0 w-24 text-[10px] font-semibold uppercase tracking-wider text-muted mt-0.5">
                                     {c.label}
                                 </span>
                                 <CoverageCellChips cell={row[c.key]} />

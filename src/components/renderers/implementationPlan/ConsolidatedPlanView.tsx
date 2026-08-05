@@ -285,7 +285,7 @@ export function ConsolidatedPlanView({
                                                         }`}>
                                                             {o.order}
                                                         </span>
-                                                        <span className={`truncate ${copied ? 'text-neutral-400 line-through' : 'text-neutral-800'}`}>
+                                                        <span className={`truncate ${copied ? 'text-muted line-through' : 'text-neutral-800'}`}>
                                                             {o.pack.title}
                                                         </span>
                                                         {isNext && (

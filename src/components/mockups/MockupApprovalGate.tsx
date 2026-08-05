@@ -90,7 +90,7 @@ export function MockupApprovalGate({ payload, flows, hasImageKey, showProviderWa
                                 </span>
                                 <span className="min-w-0">
                                     <span className="font-medium text-neutral-900">{flow.title}</span>
-                                    <span className="text-neutral-400">
+                                    <span className="text-muted">
                                         {' '}· {flow.steps.length} {flow.steps.length === 1 ? 'step' : 'steps'}
                                     </span>
                                     {flow.goal && (

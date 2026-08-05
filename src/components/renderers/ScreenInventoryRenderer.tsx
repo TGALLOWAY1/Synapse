@@ -67,13 +67,13 @@ function SectionHeader({
         <header className="mb-4 space-y-3">
             <div>
                 <h3 className="text-base font-semibold text-neutral-800">
-                    <span className="text-neutral-400 font-normal mr-2">{index + 1}.</span>
+                    <span className="text-muted font-normal mr-2">{index + 1}.</span>
                     {title}
                 </h3>
                 {description && (
                     <p className="text-xs text-neutral-500 mt-1">{description}</p>
                 )}
-                <div className="mt-1.5 text-[11px] uppercase tracking-wide text-neutral-400">
+                <div className="mt-1.5 text-[11px] uppercase tracking-wide text-muted">
                     {screenCount} {screenCount === 1 ? 'screen' : 'screens'}
                 </div>
             </div>
@@ -93,7 +93,7 @@ function parseJourney(flowSummary?: string): string[] {
 function JourneyRow({ steps }: { steps: string[] }) {
     return (
         <div className="rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted mb-1.5">
                 Journey
             </div>
             <div className="flex items-center gap-1.5 overflow-x-auto flex-nowrap sm:flex-wrap pb-0.5">
@@ -103,7 +103,7 @@ function JourneyRow({ steps }: { steps: string[] }) {
                             {step}
                         </span>
                         {i < steps.length - 1 && (
-                            <ChevronRight size={14} className="text-neutral-400 shrink-0" aria-hidden />
+                            <ChevronRight size={14} className="text-muted shrink-0" aria-hidden />
                         )}
                     </div>
                 ))}
@@ -221,7 +221,7 @@ export function ScreenCard({
 function CardField({ label, children }: { label: string; children: ReactNode }) {
     return (
         <div>
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">
+            <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
                 {label}
             </div>
             {children}
@@ -250,7 +250,7 @@ function NavigationBlock({ screen }: { screen: ScreenItem }) {
     const exits: ExitPath[] = screen.exitPaths ?? [];
     return (
         <div>
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted mb-1.5">
                 Navigation
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -275,11 +275,11 @@ function NavigationBlock({ screen }: { screen: ScreenItem }) {
                                 <li key={i}>
                                     <div className="flex items-center gap-1 flex-wrap">
                                         <span>{p.label}</span>
-                                        <ArrowRight size={10} className="text-neutral-400 shrink-0" aria-hidden />
+                                        <ArrowRight size={10} className="text-muted shrink-0" aria-hidden />
                                         <span className="text-neutral-700">{p.target}</span>
                                     </div>
                                     {p.condition && (
-                                        <div className="text-[11px] text-neutral-400 italic mt-0.5">
+                                        <div className="text-[11px] text-muted italic mt-0.5">
                                             when {p.condition}
                                         </div>
                                     )}
@@ -296,7 +296,7 @@ function NavigationBlock({ screen }: { screen: ScreenItem }) {
 function RisksBlock({ risks }: { risks: string[] }) {
     return (
         <div>
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">
+            <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
                 Risks / Edge Cases
             </div>
             <ul className="text-xs text-amber-800 space-y-1">

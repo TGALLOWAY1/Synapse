@@ -71,7 +71,7 @@ export function StepCard({
                             {inlineMd(prettyScreenTitle(step.title))}
                         </h4>
                     ) : (
-                        <h4 className="min-w-0 flex-1 text-sm font-semibold text-neutral-400 leading-snug">
+                        <h4 className="min-w-0 flex-1 text-sm font-semibold text-muted leading-snug">
                             Step {step.index + 1}
                         </h4>
                     )
@@ -117,7 +117,7 @@ export function StepCard({
                 clickable to open the feature drawer. */}
             {step.featureRefs.length > 0 && (
                 <p className="mt-3 text-[11px] text-neutral-500 leading-relaxed">
-                    <span className="font-medium text-neutral-400 uppercase tracking-wider mr-1">Uses</span>
+                    <span className="font-medium text-muted uppercase tracking-wider mr-1">Uses</span>
                     {step.featureRefs.map((ref, i) => {
                         const feature = featuresById?.get(ref.id);
                         const label = feature?.name ?? feature?.id ?? ref.id.toUpperCase();

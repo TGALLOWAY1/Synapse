@@ -129,7 +129,7 @@ export function ScreenReviewNotes({
     // Nothing to review → a quiet, positive line rather than an empty panel.
     if (itemCount === 0 && infoCount === 0 && addressedCount === 0 && resolvedRisks.length === 0) {
         return (
-            <div className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+            <div className="flex items-center gap-1.5 text-[11px] text-muted">
                 <Check size={12} className="text-emerald-500" aria-hidden />
                 Nothing flagged for review on this screen.
             </div>
@@ -147,7 +147,7 @@ export function ScreenReviewNotes({
                     a centered jumble; one row on sm+. */}
                 <span className="flex flex-col items-start gap-0.5 min-w-0 text-left sm:flex-row sm:items-center sm:gap-2">
                     <span className="flex items-center gap-2">
-                        <MessageSquare size={14} className="text-neutral-400 shrink-0" aria-hidden />
+                        <MessageSquare size={14} className="text-muted shrink-0" aria-hidden />
                         <span className="text-sm font-medium text-neutral-800">Review notes</span>
                     </span>
                     {itemCount > 0 ? (
@@ -157,7 +157,7 @@ export function ScreenReviewNotes({
                                 : `${itemCount} ${itemCount === 1 ? 'item' : 'items'} to review`}
                         </span>
                     ) : infoCount > 0 ? (
-                        <span className="text-[11px] text-neutral-400">
+                        <span className="text-[11px] text-muted">
                             {infoCount} {infoCount === 1 ? 'note' : 'notes'}
                         </span>
                     ) : (
@@ -165,8 +165,8 @@ export function ScreenReviewNotes({
                     )}
                 </span>
                 {open
-                    ? <ChevronUp size={15} className="text-neutral-400 shrink-0" />
-                    : <ChevronDown size={15} className="text-neutral-400 shrink-0" />}
+                    ? <ChevronUp size={15} className="text-muted shrink-0" />
+                    : <ChevronDown size={15} className="text-muted shrink-0" />}
             </button>
 
             {open && (
@@ -237,7 +237,7 @@ export function ScreenReviewNotes({
                                                                     new Map(current).set(issue.id, result)
                                                                 ));
                                                             }}
-                                                            className="min-h-11 inline-flex items-center text-[11px] font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-default disabled:text-neutral-400"
+                                                            className="min-h-11 inline-flex items-center text-[11px] font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-default disabled:text-muted"
                                                         >
                                                             Flag to plan
                                                         </button>
@@ -310,7 +310,7 @@ export function ScreenReviewNotes({
                     {/* Risks → review comments with a resolution box */}
                     {risks.length > 0 && (
                         <div className="space-y-2">
-                            <div className="text-[10px] uppercase tracking-wide text-neutral-400">
+                            <div className="text-[10px] uppercase tracking-wide text-muted">
                                 Risks &amp; edge cases
                             </div>
                             {risks.map((r) => (
@@ -331,7 +331,7 @@ export function ScreenReviewNotes({
                             <button
                                 type="button"
                                 onClick={() => setShowAddressed(s => !s)}
-                                className="text-[11px] text-neutral-400 hover:text-neutral-600"
+                                className="text-[11px] text-muted hover:text-neutral-600"
                             >
                                 {showAddressed ? 'Hide' : 'Show'} {addressedCount} addressed
                             </button>
@@ -385,7 +385,7 @@ function RiskRow({
     return (
         <div className={`rounded-lg border px-3 py-2.5 ${resolved ? 'border-neutral-200 bg-neutral-50/60' : 'border-amber-200 bg-amber-50/50'}`}>
             <div className="flex items-start gap-1.5">
-                <AlertTriangle size={13} className={`${resolved ? 'text-neutral-400' : 'text-amber-600'} mt-0.5 shrink-0`} aria-hidden />
+                <AlertTriangle size={13} className={`${resolved ? 'text-muted' : 'text-amber-600'} mt-0.5 shrink-0`} aria-hidden />
                 <div className="min-w-0 flex-1">
                     <p className="text-xs text-neutral-800">{risk.description}</p>
                     {risk.severity && (
@@ -415,7 +415,7 @@ function RiskRow({
                 !readOnly && (
                     editing || !resolved ? (
                         <div className="mt-2 pl-[19px] space-y-1.5">
-                            <label className="block text-[10px] uppercase tracking-wide text-neutral-400">
+                            <label className="block text-[10px] uppercase tracking-wide text-muted">
                                 How should this be handled?
                             </label>
                             <textarea

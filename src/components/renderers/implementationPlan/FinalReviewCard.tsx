@@ -317,7 +317,7 @@ export function FinalReviewCard({
                     <ul className="mt-1 space-y-1">
                         {packet.warnings.map(warning => (
                             <li key={warning.id} className="flex items-start gap-1.5 text-xs text-neutral-600">
-                                <AlertTriangle size={11} className="mt-0.5 shrink-0 text-neutral-400" aria-hidden="true" />
+                                <AlertTriangle size={11} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
                                 <span><span className="font-semibold">{warning.title}</span> — {warning.impact}</span>
                             </li>
                         ))}
@@ -329,7 +329,7 @@ export function FinalReviewCard({
             <details data-testid="final-review-manifest" className="group rounded-lg border border-neutral-200">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-semibold text-neutral-800">
                     <ChevronDown size={15} className="transition group-open:rotate-180" aria-hidden="true" />
-                    <Package size={14} className="shrink-0 text-neutral-400" aria-hidden="true" />
+                    <Package size={14} className="shrink-0 text-muted" aria-hidden="true" />
                     Artifact versions this approval covers
                     {reconciliation.unpinned ? (
                         <span className="text-xs font-medium text-neutral-500">(nothing approved yet)</span>

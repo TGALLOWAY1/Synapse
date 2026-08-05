@@ -238,7 +238,7 @@ function StatusIcon({ status }: { status: ReviewSpecialistProgress['status'] }) 
     if (status === 'running') return <Loader2 size={15} className="animate-spin text-indigo-600" aria-label="Running" />;
     if (status === 'complete') return <CheckCircle2 size={15} className="text-emerald-600" aria-label="Complete" />;
     if (status === 'failed') return <AlertTriangle size={15} className="text-red-500" aria-label="Failed" />;
-    if (status === 'cancelled') return <X size={15} className="text-neutral-400" aria-label="Cancelled" />;
+    if (status === 'cancelled') return <X size={15} className="text-muted" aria-label="Cancelled" />;
     return <Circle size={15} className="text-neutral-300" aria-label="Queued" />;
 }
 
@@ -364,7 +364,7 @@ function ReviewSetup({
                                                 <span className="min-w-0 flex-1">
                                                     <span className="block text-sm font-semibold text-neutral-900">{specialist.name}</span>
                                                     <span className="mt-0.5 block text-sm text-neutral-600">{specialist.responsibility}</span>
-                                                    <span className="mt-1 block text-xs text-neutral-400">Why selected: {specialist.selectionReason}</span>
+                                                    <span className="mt-1 block text-xs text-muted">Why selected: {specialist.selectionReason}</span>
                                                 </span>
                                             </label>
                                             {canExpand && (
@@ -373,7 +373,7 @@ function ReviewSetup({
                                                     onClick={() => toggleExpanded(specialist.id)}
                                                     aria-expanded={isExpanded}
                                                     aria-label={`${isExpanded ? 'Hide' : 'Show'} what ${specialist.name} reviews`}
-                                                    className="mt-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600"
+                                                    className="mt-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-neutral-100 hover:text-neutral-600"
                                                 >
                                                     <ChevronDown size={18} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                                 </button>
@@ -491,7 +491,7 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis, op
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                     <p className="text-sm font-semibold text-neutral-900">{specialist.name}</p>
-                                    {specialist.status === 'complete' && <span className="text-xs text-neutral-400">{specialist.findingCount ?? 0} grounded finding{specialist.findingCount === 1 ? '' : 's'}</span>}
+                                    {specialist.status === 'complete' && <span className="text-xs text-muted">{specialist.findingCount ?? 0} grounded finding{specialist.findingCount === 1 ? '' : 's'}</span>}
                                 </div>
                                 <p className="mt-0.5 text-xs text-neutral-500">{specialist.responsibility}</p>
                                 {specialist.error && <p className="mt-1 text-xs text-red-600">{specialist.error}</p>}
@@ -548,7 +548,7 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
                         <h2 id="issue-action-title" className="font-semibold text-neutral-950">Resolve this finding</h2>
                         <p className="mt-0.5 line-clamp-2 text-sm text-neutral-500">{issue.title}</p>
                     </div>
-                    <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100"><X size={18} /></button>
+                    <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-muted hover:bg-neutral-100"><X size={18} /></button>
                 </div>
                 <div className="space-y-4 p-4 sm:p-5">
                     <label className="block text-sm font-medium text-neutral-800" htmlFor="issue-action">Action</label>
@@ -643,7 +643,7 @@ function ReopenFindingDialog({ issue, onClose, onSubmit }: {
                         <h2 id="reopen-finding-title" className="font-semibold text-neutral-950">Change this finding's treatment</h2>
                         <p className="mt-0.5 line-clamp-2 text-sm text-neutral-500">{issue.title}</p>
                     </div>
-                    <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100"><X size={18} /></button>
+                    <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-muted hover:bg-neutral-100"><X size={18} /></button>
                 </div>
                 <div className="p-4 sm:p-5">
                     <p className="text-sm leading-6 text-neutral-600">This returns the finding to Needs attention. It does not reopen or change any linked decision.</p>
@@ -730,7 +730,7 @@ function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChang
                             <span className="font-semibold text-neutral-500">{KIND_LABELS[issue.kind]}</span>
                             {issue.severity === 'blocking' && <span className="font-semibold text-amber-700">Resolve before building</span>}
                             {issue.disagreement && <span className="font-semibold text-indigo-700">Specialists disagree</span>}
-                            {issue.status !== 'open' && <span className="text-neutral-400">{issue.status.replace('_', ' ')}</span>}
+                            {issue.status !== 'open' && <span className="text-muted">{issue.status.replace('_', ' ')}</span>}
                         </div>
                         <h3 className="mt-2 text-base font-bold leading-6 text-neutral-950">{issue.title}</h3>
                         <p className="mt-2 text-sm leading-6 text-neutral-700">{issue.observation}</p>
@@ -780,7 +780,7 @@ function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChang
                             ))}
                         </div>
                     </div>
-                    <p className="text-xs text-neutral-400">Confidence: {issue.confidence}. Confidence describes evidence strength, not severity.</p>
+                    <p className="text-xs text-muted">Confidence: {issue.confidence}. Confidence describes evidence strength, not severity.</p>
                     {issue.treatmentHistory && issue.treatmentHistory.length > 0 && (
                         <div>
                             <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-500">Treatment history</h4>
@@ -904,7 +904,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
             )}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">{run.label} · {run.sourceLabel}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted">{run.label} · {run.sourceLabel}</p>
                     <h1 className="mt-1 text-2xl font-bold tracking-tight text-neutral-950">{run.readinessCoverage === 'exploratory' ? 'Exploratory planning review' : 'Planning review'}</h1>
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
@@ -989,11 +989,11 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         <div className="mt-6 space-y-3">
                             {chronologicalRuns.map(run => (
                                 <button key={run.id} type="button" onClick={() => { setStartingNewReview(false); props.onSelectRun(run.id); setTab('review'); }} className="flex w-full items-start gap-3 rounded-xl border border-neutral-200 bg-white p-4 text-left shadow-sm hover:border-neutral-300">
-                                    <History size={16} className="mt-0.5 shrink-0 text-neutral-400" />
+                                    <History size={16} className="mt-0.5 shrink-0 text-muted" />
                                     <span className="min-w-0 flex-1">
                                         <span className="block text-sm font-semibold text-neutral-900">{run.label}</span>
                                         <span className="mt-0.5 block text-xs text-neutral-500">{run.sourceLabel} · {new Date(run.capturedAt).toLocaleString()}</span>
-                                        {run.focus && <span className="mt-1 block truncate text-xs text-neutral-400">Focus: {run.focus}</span>}
+                                        {run.focus && <span className="mt-1 block truncate text-xs text-muted">Focus: {run.focus}</span>}
                                         {run.readinessCoverage === 'exploratory' && (
                                             <span className="mt-1 block text-xs font-medium text-amber-700">
                                                 Exploratory · omitted {(run.omittedRequiredSpecialistNames ?? []).join(', ')}

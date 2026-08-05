@@ -374,7 +374,7 @@ function ComponentTokens({ tokens }: { tokens: DesignTokens }) {
                         {(['background', 'text', 'border', 'radius', 'padding'] as const).map(field => (
                             c[field] !== undefined ? (
                                 <div key={field} className="grid grid-cols-[80px,1fr] gap-2">
-                                    <dt className="font-medium uppercase tracking-wider text-neutral-400">{field}</dt>
+                                    <dt className="font-medium uppercase tracking-wider text-muted">{field}</dt>
                                     <dd className="font-mono">{c[field]}</dd>
                                 </div>
                             ) : null

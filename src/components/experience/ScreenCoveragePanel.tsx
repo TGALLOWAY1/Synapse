@@ -198,7 +198,7 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                 <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2 flex-wrap">
                         <h3 className="text-sm font-semibold text-neutral-900">Screen Coverage &amp; Readiness</h3>
-                        <span className="text-[10px] uppercase tracking-wide text-neutral-400">
+                        <span className="text-[10px] uppercase tracking-wide text-muted">
                             Estimated from the generated spec
                         </span>
                     </div>
@@ -273,7 +273,7 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                                 <ImageIcon size={12} />
                                 {missingMockups === 1 ? 'Generate the missing mockup' : `Generate ${missingMockups} missing mockups`}
                             </button>
-                            <span className="text-[11px] text-neutral-400">
+                            <span className="text-[11px] text-muted">
                                 Adding coverage is free — image generation is confirmed separately.
                             </span>
                         </div>
@@ -300,7 +300,7 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                                 </p>
                             )}
                             {variantCoverage.legacyUnknownMockups > 0 && (
-                                <p className="text-[11px] text-neutral-400">
+                                <p className="text-[11px] text-muted">
                                     {variantCoverage.legacyUnknownMockups} older {variantCoverage.legacyUnknownMockups === 1 ? 'mockup' : 'mockups'}
                                     {' '}predate coverage metadata — visually useful, but their spec coverage is unconfirmed.
                                 </p>
@@ -360,7 +360,7 @@ function ExpandedCoverageSection({ variant }: { variant: MockupVariantCoverageSu
                         Expanded Design Coverage
                     </h4>
                 </div>
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Optional</span>
+                <span className="text-[10px] uppercase tracking-wide text-muted">Optional</span>
             </div>
             <p className="text-[11px] leading-relaxed text-neutral-500">
                 Primary screens are prioritized first. Additional variants — empty, loading, error, and
@@ -410,7 +410,7 @@ function HandoffReadinessSection({ rollup }: { rollup: ScreensHandoffRollup }) {
     return (
         <div className="mt-4 pt-4 border-t border-neutral-100">
             <div className="flex items-center gap-1.5 mb-1">
-                <ClipboardCheck size={13} className="text-neutral-400" aria-hidden />
+                <ClipboardCheck size={13} className="text-muted" aria-hidden />
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Implementation handoff</h4>
             </div>
             {rollup.blocked > 0 ? (
@@ -451,7 +451,7 @@ function DownstreamReadinessSection({ rollup }: { rollup: ScreensDownstreamImpac
     return (
         <div className="mt-4 pt-4 border-t border-neutral-100">
             <div className="flex items-center gap-1.5 mb-2">
-                <Gauge size={13} className="text-neutral-400" aria-hidden />
+                <Gauge size={13} className="text-muted" aria-hidden />
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Downstream impact</h4>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
@@ -471,7 +471,7 @@ function DownstreamReadinessSection({ rollup }: { rollup: ScreensDownstreamImpac
                         <ul className="mt-1.5 space-y-0.5 text-[11px] text-neutral-600">
                             {rollup.recommendedNextActions.slice(0, 3).map((a, i) => (
                                 <li key={i} className="flex gap-1.5">
-                                    <span className="text-neutral-400 select-none">·</span>
+                                    <span className="text-muted select-none">·</span>
                                     <span>{a}</span>
                                 </li>
                             ))}
@@ -489,7 +489,7 @@ function ReviewReadinessSection({ review }: { review: ScreenArtifactReviewReadin
     return (
         <div className="mt-4 pt-4 border-t border-neutral-100">
             <div className="flex items-center gap-1.5 mb-2">
-                <ClipboardCheck size={13} className="text-neutral-400" aria-hidden />
+                <ClipboardCheck size={13} className="text-muted" aria-hidden />
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Review readiness</h4>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">

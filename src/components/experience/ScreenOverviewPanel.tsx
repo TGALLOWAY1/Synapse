@@ -42,7 +42,7 @@ interface Props {
 }
 
 const NotSpecified = ({ children = 'Not specified' }: { children?: ReactNode }) => (
-    <span className="text-neutral-400 italic">{children}</span>
+    <span className="text-muted italic">{children}</span>
 );
 
 /** A titled card, with optional right-aligned header actions. */
@@ -82,7 +82,7 @@ function Collapsible({
                     {icon}
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{title}</span>
                 </span>
-                {open ? <ChevronUp size={15} className="text-neutral-400" /> : <ChevronDown size={15} className="text-neutral-400" />}
+                {open ? <ChevronUp size={15} className="text-muted" /> : <ChevronDown size={15} className="text-muted" />}
             </button>
             {open && <div className="px-4 pb-4">{children}</div>}
         </section>
@@ -112,7 +112,7 @@ export function ScreenOverviewPanel({
                     : <p className="text-xs"><NotSpecified>No purpose recorded yet.</NotSpecified></p>}
                 {screen.userIntent && (
                     <p className="text-xs text-neutral-600 mt-2">
-                        <span className="text-[10px] uppercase tracking-wide text-neutral-400 mr-1.5">User goal</span>
+                        <span className="text-[10px] uppercase tracking-wide text-muted mr-1.5">User goal</span>
                         {screen.userIntent}
                     </p>
                 )}
@@ -128,7 +128,7 @@ export function ScreenOverviewPanel({
                 Neutral bullets, NOT green checks: these are derived/generated
                 statements the user has not verified, so pass/verified iconography
                 would overstate them. */}
-            <Card title="Acceptance criteria" icon={<CheckCircle2 size={12} className="text-neutral-400" aria-hidden />}>
+            <Card title="Acceptance criteria" icon={<CheckCircle2 size={12} className="text-muted" aria-hidden />}>
                 {criteria.criteria.length > 0 ? (
                     <>
                         <ul className="space-y-1.5">
@@ -140,7 +140,7 @@ export function ScreenOverviewPanel({
                             ))}
                         </ul>
                         <details className="mt-2 group">
-                            <summary className="text-[11px] text-neutral-400 hover:text-neutral-600 cursor-pointer list-none">
+                            <summary className="text-[11px] text-muted hover:text-neutral-600 cursor-pointer list-none">
                                 Show generated details
                             </summary>
                             <p className="text-[11px] text-neutral-500 mt-1.5">
@@ -169,7 +169,7 @@ export function ScreenOverviewPanel({
                                 <span className="text-neutral-700">
                                     {link.feature?.name ?? link.raw}
                                     {link.refId && !link.feature && (
-                                        <span className="text-neutral-400"> (not in the current PRD feature list)</span>
+                                        <span className="text-muted"> (not in the current PRD feature list)</span>
                                     )}
                                 </span>
                             </li>
@@ -183,7 +183,7 @@ export function ScreenOverviewPanel({
                 )}
                 {traceability.flows.length > 0 && (
                     <div className="mt-2.5">
-                        <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">User flows</div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted mb-1">User flows</div>
                         <ul className="space-y-0.5 text-xs text-neutral-700">
                             {traceability.flows.map((title, i) => (
                                 <li key={i} className="flex items-center gap-1.5">
@@ -202,7 +202,7 @@ export function ScreenOverviewPanel({
                 <div className="space-y-4">
                     {/* Entry / exit navigation */}
                     <div>
-                        <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">Navigation</div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted mb-1.5">Navigation</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
                             <div>
                                 <div className="text-[10px] font-medium text-neutral-500 mb-1">How users arrive</div>
@@ -222,10 +222,10 @@ export function ScreenOverviewPanel({
                                             <li key={i}>
                                                 <div className="flex items-center gap-1 flex-wrap">
                                                     <span>{p.label}</span>
-                                                    <ArrowRight size={10} className="text-neutral-400 shrink-0" aria-hidden />
+                                                    <ArrowRight size={10} className="text-muted shrink-0" aria-hidden />
                                                     <span>{p.target}</span>
                                                 </div>
-                                                {p.condition && <div className="text-[11px] text-neutral-400 italic mt-0.5">when {p.condition}</div>}
+                                                {p.condition && <div className="text-[11px] text-muted italic mt-0.5">when {p.condition}</div>}
                                             </li>
                                         ))}
                                     </ul>
@@ -236,7 +236,7 @@ export function ScreenOverviewPanel({
 
                     {/* Core UI regions + data */}
                     <div>
-                        <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">Core UI regions</div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted mb-1.5">Core UI regions</div>
                         {ui.length > 0 ? (
                             <ul className="space-y-1 text-xs text-neutral-700">
                                 {ui.map((c, i) => (
@@ -246,7 +246,7 @@ export function ScreenOverviewPanel({
                         ) : <p className="text-xs"><NotSpecified>Not specified.</NotSpecified></p>}
                         {screen.outputData && screen.outputData.length > 0 && (
                             <div className="mt-2.5">
-                                <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">Data outputs</div>
+                                <div className="text-[10px] uppercase tracking-wide text-muted mb-1">Data outputs</div>
                                 <ul className="text-xs text-neutral-700 space-y-0.5">
                                     {screen.outputData.map((o, i) => (
                                         <li key={i} className="flex gap-1.5"><span className="text-neutral-300">·</span><span>{o}</span></li>
@@ -258,7 +258,7 @@ export function ScreenOverviewPanel({
 
                     {/* Required states */}
                     <div>
-                        <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">Screen states</div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted mb-1.5">Screen states</div>
                         {states.length > 0 ? (
                             <ul className="space-y-2">
                                 {states.map((s, i) => <StateRow key={i} state={s} />)}
@@ -302,16 +302,16 @@ function StateRow({ state }: { state: ScreenState }) {
             </div>
             <dl className="mt-1 space-y-0.5 text-[11px]">
                 <div className="flex gap-1.5">
-                    <dt className="text-neutral-400 shrink-0 w-16">Trigger</dt>
+                    <dt className="text-muted shrink-0 w-16">Trigger</dt>
                     <dd className="text-neutral-700">{state.trigger?.trim() || <NotSpecified />}</dd>
                 </div>
                 <div className="flex gap-1.5">
-                    <dt className="text-neutral-400 shrink-0 w-16">User sees</dt>
+                    <dt className="text-muted shrink-0 w-16">User sees</dt>
                     <dd className="text-neutral-700">{state.description?.trim() || <NotSpecified />}</dd>
                 </div>
                 {state.systemBehavior?.trim() && (
                     <div className="flex gap-1.5">
-                        <dt className="text-neutral-400 shrink-0 w-16">System</dt>
+                        <dt className="text-muted shrink-0 w-16">System</dt>
                         <dd className="text-neutral-700">{state.systemBehavior}</dd>
                     </div>
                 )}

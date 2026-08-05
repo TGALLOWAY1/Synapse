@@ -363,7 +363,7 @@ export function MockupViewer({
                             <span className="text-[11px] text-neutral-500">{pageCountLabel}</span>
                             <FreshnessBadge status={staleness} />
                         </div>
-                        <span className="text-[11px] text-neutral-400 tabular-nums">
+                        <span className="text-[11px] text-muted tabular-nums">
                             v{versionNumber} · {formatDate(createdAt)}
                         </span>
                     </div>
@@ -407,8 +407,8 @@ export function MockupViewer({
                         <span className="inline-flex items-center gap-1.5 text-xs text-neutral-500">
                             {screens.length} {screens.length === 1 ? 'page' : 'pages'}
                             {navOpen
-                                ? <ChevronDown size={14} className="text-neutral-400" />
-                                : <ChevronRight size={14} className="text-neutral-400" />}
+                                ? <ChevronDown size={14} className="text-muted" />
+                                : <ChevronRight size={14} className="text-muted" />}
                         </span>
                     </button>
                     {navOpen && (
@@ -534,7 +534,7 @@ export function MockupViewer({
                             )}
 
                             {screen.notes && (
-                                <p className="px-5 pb-4 text-xs text-neutral-400 italic">
+                                <p className="px-5 pb-4 text-xs text-muted italic">
                                     {screen.notes}
                                 </p>
                             )}
@@ -547,7 +547,7 @@ export function MockupViewer({
                         {actions}
                     </div>
                 )}
-                <div className="px-5 py-2 text-[11px] text-neutral-400 border-t border-neutral-100 flex items-center gap-1.5">
+                <div className="px-5 py-2 text-[11px] text-muted border-t border-neutral-100 flex items-center gap-1.5">
                     <span>v{versionNumber}</span>
                     <span className="text-neutral-300">·</span>
                     <span>{formatDate(createdAt)}</span>

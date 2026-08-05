@@ -52,7 +52,7 @@ export function AssumptionsPanel({ flow, featuresById, onSelectFeature }: Props)
                     <section className="rounded-xl border border-neutral-200 bg-white p-3.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-600 mb-2 inline-flex items-center gap-1">
                             <Lightbulb size={11} className="text-amber-600" /> Assumptions
-                            <span className="ml-1 font-normal text-neutral-400">· {assumptions.length}</span>
+                            <span className="ml-1 font-normal text-muted">· {assumptions.length}</span>
                         </p>
                         <ul className="space-y-1.5 text-sm text-neutral-800">
                             {assumptions.map((a, i) => (
@@ -68,7 +68,7 @@ export function AssumptionsPanel({ flow, featuresById, onSelectFeature }: Props)
                     <section className="rounded-xl border border-neutral-200 bg-white p-3.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-600 mb-2 inline-flex items-center gap-1">
                             <HelpCircle size={11} className="text-sky-600" /> Open questions
-                            <span className="ml-1 font-normal text-neutral-400">· {openQuestions.length}</span>
+                            <span className="ml-1 font-normal text-muted">· {openQuestions.length}</span>
                         </p>
                         <ul className="space-y-1.5 text-sm text-neutral-800">
                             {openQuestions.map((q, i) => (

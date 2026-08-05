@@ -200,7 +200,7 @@ export function PromptPackCard({
 
                     {pack.recommendedCommitMessage && (
                         <div className="px-4 py-2.5 border-t border-neutral-100 flex items-center gap-2">
-                            <GitCommitHorizontal size={13} className="text-neutral-400 shrink-0" />
+                            <GitCommitHorizontal size={13} className="text-muted shrink-0" />
                             <code className="text-[11px] text-neutral-600 truncate">{pack.recommendedCommitMessage}</code>
                         </div>
                     )}

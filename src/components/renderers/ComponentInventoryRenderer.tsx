@@ -91,7 +91,7 @@ export function ComponentInventoryRenderer({ content, screens = EMPTY_SCREENS, o
                                 </>
                             )}
                         </p>
-                        <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-400">
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                             Screen references are <strong className="font-medium">derived</strong> by matching component
                             and screen names between the two artifacts — there is no stored link, so treat them as
                             estimates. Everything on this page is advisory and blocks nothing.
@@ -146,12 +146,12 @@ function ComponentCard({ entry, joinAvailable, onNavigateToScreen }: {
             </div>
 
             <p className="mt-1.5 text-xs leading-relaxed text-neutral-700">
-                {component.purpose?.trim() || <span className="text-neutral-400">Purpose not specified.</span>}
+                {component.purpose?.trim() || <span className="text-muted">Purpose not specified.</span>}
             </p>
 
-            <Field icon={<Target size={12} className="text-neutral-400" />} label="Props">
+            <Field icon={<Target size={12} className="text-muted" />} label="Props">
                 {props.length === 0
-                    ? <span className="text-xs text-neutral-400">Not specified.</span>
+                    ? <span className="text-xs text-muted">Not specified.</span>
                     : (
                         <ul className="space-y-1">
                             {props.map((prop, i) => (
@@ -172,16 +172,16 @@ function ComponentCard({ entry, joinAvailable, onNavigateToScreen }: {
                     )}
             </Field>
 
-            <Field icon={<MonitorSmartphone size={12} className="text-neutral-400" />} label="Used on screens">
+            <Field icon={<MonitorSmartphone size={12} className="text-muted" />} label="Used on screens">
                 <ScreenRefs entry={entry} joinAvailable={joinAvailable} onNavigateToScreen={onNavigateToScreen} />
             </Field>
 
-            <Field icon={<Keyboard size={12} className="text-neutral-400" />} label="Accessibility">
+            <Field icon={<Keyboard size={12} className="text-muted" />} label="Accessibility">
                 <Accessibility a11y={component.accessibility} />
             </Field>
 
             {component.notes && (
-                <Field icon={<Info size={12} className="text-neutral-400" />} label="Notes">
+                <Field icon={<Info size={12} className="text-muted" />} label="Notes">
                     <p className="text-xs leading-relaxed text-neutral-700">{component.notes}</p>
                 </Field>
             )}
@@ -210,7 +210,7 @@ function ScreenRefs({ entry, joinAvailable, onNavigateToScreen }: {
         // No screen inventory was supplied — fall back to the component's own
         // raw `usedIn` names rather than claiming "not referenced".
         const usedIn = entry.component.usedIn ?? [];
-        if (usedIn.length === 0) return <span className="text-xs text-neutral-400">Not specified.</span>;
+        if (usedIn.length === 0) return <span className="text-xs text-muted">Not specified.</span>;
         return (
             <div className="flex flex-wrap gap-1.5">
                 {usedIn.map((name, i) => (
@@ -224,7 +224,7 @@ function ScreenRefs({ entry, joinAvailable, onNavigateToScreen }: {
 
     if (entry.screenRefs.length === 0 && entry.unresolvedUsedIn.length === 0) {
         return (
-            <span className="text-xs text-neutral-400">
+            <span className="text-xs text-muted">
                 No screen references this component (estimated from names).
             </span>
         );
@@ -283,7 +283,7 @@ function Accessibility({ a11y }: { a11y?: ComponentA11y }) {
 
     if (flags.length === 0 && aria.length === 0 && !a11y?.notes) {
         return (
-            <span className="text-xs text-neutral-400">
+            <span className="text-xs text-muted">
                 Not specified — this component has no recorded accessibility contract.
             </span>
         );
@@ -340,7 +340,7 @@ function ComponentAdvisories({ issues, onNavigateToScreen }: {
                     <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${review.length > 0 ? 'bg-amber-50' : 'bg-neutral-100'}`}>
                         {review.length > 0
                             ? <AlertTriangle size={14} className="text-amber-600" />
-                            : <Info size={14} className="text-neutral-400" />}
+                            : <Info size={14} className="text-muted" />}
                     </div>
                     <div className="min-w-0 text-left">
                         <h3 className="text-sm font-semibold text-neutral-900">Component review notes</h3>
@@ -351,7 +351,7 @@ function ComponentAdvisories({ issues, onNavigateToScreen }: {
                         </p>
                     </div>
                 </div>
-                {open ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
+                {open ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
             </button>
 
             {open && (
@@ -362,7 +362,7 @@ function ComponentAdvisories({ issues, onNavigateToScreen }: {
                     {info.length > 0 && (
                         <IssueGroup title="For your information" tone="text-neutral-500" issues={info} onNavigateToScreen={onNavigateToScreen} />
                     )}
-                    <p className="text-[11px] text-neutral-400">
+                    <p className="text-[11px] text-muted">
                         Derived by comparing component and screen names across the two artifacts — advisory only, and it
                         never blocks generation or review.
                     </p>

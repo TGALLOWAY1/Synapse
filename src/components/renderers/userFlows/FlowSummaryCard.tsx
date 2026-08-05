@@ -77,7 +77,7 @@ export function FlowSummaryCard({
                         type="button"
                         title="More actions"
                         aria-label="More actions"
-                        className="p-1.5 rounded hover:bg-neutral-100 text-neutral-400"
+                        className="p-1.5 rounded hover:bg-neutral-100 text-muted"
                     >
                         <MoreHorizontal size={16} />
                     </button>
@@ -110,14 +110,14 @@ export function FlowSummaryCard({
                         >
                             <ChevronRight
                                 size={13}
-                                className={`shrink-0 text-neutral-400 transition-transform ${detailsOpen ? 'rotate-90' : ''}`}
+                                className={`shrink-0 text-muted transition-transform ${detailsOpen ? 'rotate-90' : ''}`}
                                 aria-hidden="true"
                             />
                             <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
                                 Preconditions &amp; dependencies
                             </span>
                             {!detailsOpen && (
-                                <span className="ml-auto text-[10px] text-neutral-400">
+                                <span className="ml-auto text-[10px] text-muted">
                                     {[
                                         hasPreconditions ? 'preconditions' : null,
                                         hasEntryPoints ? `${flow.entryPoints.length} entry ${flow.entryPoints.length === 1 ? 'point' : 'points'}` : null,
@@ -146,7 +146,7 @@ export function FlowSummaryCard({
                                         <ul className="space-y-1 text-neutral-700">
                                             {flow.entryPoints.slice(0, 5).map((ep, i) => (
                                                 <li key={i} className="flex gap-2">
-                                                    <span className="text-neutral-400">•</span>
+                                                    <span className="text-muted">•</span>
                                                     <span className="min-w-0 flex-1">{renderText(ep)}</span>
                                                 </li>
                                             ))}

@@ -216,7 +216,7 @@ export function PlanningStateBar({ readiness, buildPacket, planSummary, committe
                                             ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
                                             : item.status === 'met'
                                                 ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" />
-                                                : <Circle size={15} className="mt-0.5 shrink-0 text-neutral-400" />}
+                                                : <Circle size={15} className="mt-0.5 shrink-0 text-muted" />}
                                         <div className="min-w-0">
                                             <p className="text-sm font-semibold">{item.label}</p>
                                             <p className="mt-0.5 text-xs leading-5 opacity-70">{item.explanation}</p>
@@ -252,7 +252,7 @@ export function PlanningStateBar({ readiness, buildPacket, planSummary, committe
                     <div className="grid gap-2 sm:grid-cols-2">
                         {readiness.criteria.map(item => (
                             <div key={item.id} className={`flex items-start gap-2 rounded-lg p-3 ${calm ? 'bg-white' : 'bg-white/60'}`}>
-                                {item.status === 'met' ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" /> : item.status === 'attention' ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" /> : <Circle size={15} className="mt-0.5 shrink-0 text-neutral-400" />}
+                                {item.status === 'met' ? <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" /> : item.status === 'attention' ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" /> : <Circle size={15} className="mt-0.5 shrink-0 text-muted" />}
                                 <div className="min-w-0">
                                     <p className="text-sm font-semibold">{item.label}</p>
                                     <p className="mt-0.5 text-xs leading-5 opacity-70">{item.explanation}</p>

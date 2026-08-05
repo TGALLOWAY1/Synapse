@@ -222,7 +222,7 @@ export function FlowSidebar({
                         {numbers[selectedIndex]}
                     </span>
                     <span className="min-w-0 flex-1">
-                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-neutral-400 truncate">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted truncate">
                             {selected
                                 ? `${selected.category} · ${numbers[selectedIndex]} of ${flows.length}`
                                 : `${flows.length} ${flows.length === 1 ? 'flow' : 'flows'}`}
@@ -231,7 +231,7 @@ export function FlowSidebar({
                             {selected?.title ?? 'Select a flow'}
                         </span>
                     </span>
-                    <Menu size={16} className="shrink-0 text-neutral-400" />
+                    <Menu size={16} className="shrink-0 text-muted" />
                 </button>
             </div>
             )}

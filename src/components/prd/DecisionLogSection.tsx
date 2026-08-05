@@ -79,7 +79,7 @@ export function DecisionLogSection({ entries, onUndoAssumption, onPlanValidation
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight whitespace-nowrap">
                     Decision Log
                 </h3>
-                <span className="text-[11px] text-neutral-400">{entries.length}</span>
+                <span className="text-[11px] text-muted">{entries.length}</span>
             </div>
             <ul className="space-y-2">
                 {entries.map(entry => (
@@ -91,7 +91,7 @@ export function DecisionLogSection({ entries, onUndoAssumption, onPlanValidation
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <ReferenceBadge entry={entry} />
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
                                     {verdictLabel(entry)}
                                 </span>
                             </div>

@@ -107,10 +107,10 @@ export function ScreensHandoffExportPanel({ input }: Props) {
                     </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] text-neutral-400 tabular-nums hidden sm:inline">
+                    <span className="text-[10px] text-muted tabular-nums hidden sm:inline">
                         {s.totalScreens} {s.totalScreens === 1 ? 'screen' : 'screens'} · {s.p0Screens} P0
                     </span>
-                    {open ? <ChevronUp size={16} className="text-neutral-400" /> : <ChevronDown size={16} className="text-neutral-400" />}
+                    {open ? <ChevronUp size={16} className="text-muted" /> : <ChevronDown size={16} className="text-muted" />}
                 </div>
             </button>
 
@@ -210,7 +210,7 @@ export function ScreensHandoffExportPanel({ input }: Props) {
                         </details>
                     )}
 
-                    <p className="text-[11px] text-neutral-400">
+                    <p className="text-[11px] text-muted">
                         The export bundles the current screens, their handoff details, and read-only trace
                         references. It never changes the Screens, Data Model, or Implementation Plan artifacts.
                     </p>
@@ -225,7 +225,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: 'wa
     return (
         <div className="rounded-lg bg-neutral-50 ring-1 ring-neutral-100 py-1.5">
             <div className={`text-sm font-semibold tabular-nums ${color}`}>{value}</div>
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400">{label}</div>
+            <div className="text-[10px] uppercase tracking-wide text-muted">{label}</div>
         </div>
     );
 }

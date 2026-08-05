@@ -195,7 +195,7 @@ export function FeatureDetailDrawer({
                                         <ul className="space-y-1 text-neutral-700">
                                             {feature.edgeCases.map((c, i) => (
                                                 <li key={i} className="flex gap-2">
-                                                    <span className="text-neutral-400">•</span>
+                                                    <span className="text-muted">•</span>
                                                     <span>{inlineMd(c)}</span>
                                                 </li>
                                             ))}
@@ -234,7 +234,7 @@ export function FeatureDetailDrawer({
                                             key={i}
                                             className="flex items-start gap-2 px-2 py-1.5 rounded-md bg-neutral-50 border border-neutral-200"
                                         >
-                                            <ExternalLink size={12} className="shrink-0 mt-0.5 text-neutral-400" />
+                                            <ExternalLink size={12} className="shrink-0 mt-0.5 text-muted" />
                                             <div className="min-w-0 flex-1">
                                                 <p className="text-xs font-medium text-neutral-800 leading-snug">
                                                     {f.title}
