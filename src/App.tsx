@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { ReactElement } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { BootSplash } from './components/BootSplash';
 import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
@@ -27,11 +27,7 @@ function HomeRoute() {
   const refreshSession = useAuthStore((s) => s.refreshSession);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="animate-spin text-neutral-400" size={24} />
-      </div>
-    );
+    return <BootSplash />;
   }
 
   // A transport/server failure resolving the session is distinct from being
@@ -73,11 +69,7 @@ function RequireAuth({ children }: { children: ReactElement }) {
   const loading = useAuthStore((s) => s.loading);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="animate-spin text-neutral-400" size={24} />
-      </div>
-    );
+    return <BootSplash />;
   }
 
   return user ? children : <Navigate to="/" replace />;
@@ -133,11 +125,7 @@ function RequireOwner({ children }: { children: ReactElement }) {
   const loading = useAuthStore((s) => s.loading);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="animate-spin text-neutral-400" size={24} />
-      </div>
-    );
+    return <BootSplash />;
   }
 
   if (!user || !getOwnerToken()) return <Navigate to="/" replace />;

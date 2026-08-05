@@ -335,7 +335,7 @@ export function LoginPage() {
                     {/* LinkedIn */}
                     <a
                         href="/api/auth/linkedin"
-                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-[#0a66c2]/50 bg-[#0a66c2]/15 text-[#9bc9f5] hover:bg-[#0a66c2]/25 transition text-sm font-medium"
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-neutral-800 text-white hover:bg-neutral-700 transition text-sm font-medium"
                     >
                         <Linkedin size={16} />
                         Continue with LinkedIn
