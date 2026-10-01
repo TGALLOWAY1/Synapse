@@ -6,7 +6,7 @@ import {
 } from './decisionProjection';
 import { planningContentHash } from './planningHash';
 
-export const MATERIALITY_ACCEPTANCE_MIN_RATIONALE_LENGTH = 20;
+const MATERIALITY_ACCEPTANCE_MIN_RATIONALE_LENGTH = 20;
 
 export type MaterialityBlockReason =
     | 'unresolved'

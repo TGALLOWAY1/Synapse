@@ -16,7 +16,7 @@ import type { SectionId } from '../schemas/prdSchemas';
 import type { ProjectPlatform } from '../../types';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 
-export const PRD_SCHEMA_VERSION = 2;
+const PRD_SCHEMA_VERSION = 2;
 
 export type SectionStatusUpdate = {
     tier: 'fast' | 'strong';

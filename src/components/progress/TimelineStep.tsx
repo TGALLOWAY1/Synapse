@@ -44,7 +44,7 @@ export function StatusIcon({ status, size = 'md' }: { status: GenerationStepStat
 
 // ─── Model chip ──────────────────────────────────────────────────────────────
 
-export function ModelChip({ model }: { model: string }) {
+function ModelChip({ model }: { model: string }) {
     if (!model) return null;
     return (
         <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium px-2 py-0.5 max-w-full min-w-0">

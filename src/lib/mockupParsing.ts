@@ -12,7 +12,7 @@ import type {
 } from '../types';
 import { MOCKUP_HTML_V1, MOCKUP_SPEC_V1 } from '../types';
 
-export const DEFAULT_MOCKUP_SETTINGS: MockupSettings = {
+const DEFAULT_MOCKUP_SETTINGS: MockupSettings = {
     platform: 'desktop',
     fidelity: 'mid',
     scope: 'key_workflow',

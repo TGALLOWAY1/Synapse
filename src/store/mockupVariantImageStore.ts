@@ -28,7 +28,6 @@ import { useProjectStore } from './projectStore';
 import { assertProjectCapability } from '../lib/projectCapabilities';
 import {
     buildVariantImageKey,
-    getVariantImage as idbGetVariantImage,
     listVariantImagesForVersion as idbListVariantImages,
     putVariantImage as idbPutVariantImage,
 } from '../lib/mockupVariantImageStore';
@@ -267,10 +266,3 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
         });
     },
 }));
-
-// Re-export a helper so callers can compute the scope key without duplicating.
-export const variantImageScope = variantScope;
-
-// Re-export helper for reading a single record from IDB (used by tests / rare
-// cache-miss paths).
-export { idbGetVariantImage as getVariantImageFromIdb };

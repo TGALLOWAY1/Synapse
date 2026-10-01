@@ -77,12 +77,6 @@ export interface ScreenReviewIssue {
     recommendedAction?: string;
 }
 
-export const SEVERITY_LABELS: Record<ScreenReviewIssueSeverity, string> = {
-    blocking: 'Blocking',
-    review: 'Review recommended',
-    info: 'For your information',
-};
-
 // --- System readiness --------------------------------------------------------
 
 /** Synapse's derived estimate of a screen's build-readiness — distinct from
@@ -526,12 +520,6 @@ export function buildScreenReviewIndex(
 // --- Review freshness (re-review after acceptance) ---------------------------
 
 export type ScreenReviewFreshnessStatus = 'current' | 'outdated' | 'unknown';
-
-export const REVIEW_FRESHNESS_LABELS: Record<ScreenReviewFreshnessStatus, string> = {
-    current: 'Review current',
-    outdated: 'Review may be outdated',
-    unknown: 'Review freshness unknown',
-};
 
 /**
  * Compare the signature captured at sign-off against the current screen spec.

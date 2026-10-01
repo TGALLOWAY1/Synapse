@@ -179,7 +179,7 @@ export function readScreenEdits(metadata: Record<string, unknown> | undefined): 
     return Object.keys(out).length > 0 ? out : EMPTY_SCREEN_EDITS;
 }
 
-export const EMPTY_SCREEN_EDITS: ScreenEditsMap = {};
+const EMPTY_SCREEN_EDITS: ScreenEditsMap = {};
 
 /** Apply an edit overlay to a stored screen, producing the effective screen. */
 function applyScreenEdit(base: ScreenItem, edit: ScreenMetadataEdit | undefined): ScreenItem {
@@ -287,9 +287,9 @@ export function readScreenLinks(metadata: Record<string, unknown> | undefined): 
     return Object.keys(out).length > 0 ? out : EMPTY_SCREEN_LINKS;
 }
 
-export const EMPTY_SCREEN_LINKS: Record<string, string> = {};
+const EMPTY_SCREEN_LINKS: Record<string, string> = {};
 
-export function formatScreenLabel(screenId: string): string {
+function formatScreenLabel(screenId: string): string {
     const cleaned = screenId
         .replace(/^(scr|mod|flow|screen)[-_]/i, '')
         .replace(/[-_]+/g, ' ')
@@ -298,7 +298,7 @@ export function formatScreenLabel(screenId: string): string {
     return cleaned.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export function buildMockupCoverage(
+function buildMockupCoverage(
     items: readonly ScreenExperienceItem[],
     trueIssueCount = 0,
 ): MockupCoverageModel {
@@ -335,7 +335,7 @@ export function readDismissedScreenIssues(metadata: Record<string, unknown> | un
     return keys.length > 0 ? new Set(keys) : EMPTY_DISMISSED_ISSUES;
 }
 
-export const EMPTY_DISMISSED_ISSUES: ReadonlySet<string> = new Set();
+const EMPTY_DISMISSED_ISSUES: ReadonlySet<string> = new Set();
 
 export type MockupCoverageStatus =
     | 'mocked'

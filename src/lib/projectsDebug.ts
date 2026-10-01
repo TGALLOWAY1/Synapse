@@ -8,7 +8,7 @@
 
 let cached: boolean | null = null;
 
-export function projectsDebugEnabled(): boolean {
+function projectsDebugEnabled(): boolean {
   if (cached !== null) return cached;
   try {
     if (typeof localStorage !== 'undefined' && localStorage.getItem('synapse-projects-debug') === 'true') {

@@ -31,7 +31,7 @@ export function sealReadinessCommitmentEvent(
     } as ReadinessCommitmentEvent;
 }
 
-export function validateReadinessCommitmentEventIntegrity(event: ReadinessCommitmentEvent): boolean {
+function validateReadinessCommitmentEventIntegrity(event: ReadinessCommitmentEvent): boolean {
     return (event.eventSchemaVersion === 1 || event.eventSchemaVersion === 2)
         && typeof event.eventIntegrityHash === 'string'
         && event.eventIntegrityHash === planningContentHash(eventIntegrityPayload(event));

@@ -186,6 +186,3 @@ export async function runAdversarialReview(
         coverage: { selected, completed, failed, cancelled },
     };
 }
-
-/** Retry selected failed/interrupted specialists against the same frozen manifest. */
-export const retryReviewSpecialists = runAdversarialReview;

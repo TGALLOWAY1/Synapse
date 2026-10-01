@@ -10,7 +10,6 @@ import { refVersionId } from './imageRef';
 
 let allRefs: ImageRef[] = [];
 const byVersion = new Map<string, ImageRef[]>();
-const byKey = new Map<string, ImageRef>();
 
 // Listeners notified with the affected version ids after a project's refs are
 // (re)installed. Lets image stores re-hydrate versions they already marked
@@ -28,9 +27,7 @@ export function onImageRefsChanged(listener: RefsChangedListener): () => void {
 
 function reindex(): void {
   byVersion.clear();
-  byKey.clear();
   for (const ref of allRefs) {
-    byKey.set(ref.key, ref);
     const versionId = refVersionId(ref);
     if (versionId) {
       const list = byVersion.get(versionId);
@@ -60,14 +57,8 @@ export function getRefsForVersion(versionId: string): ImageRef[] {
   return byVersion.get(versionId) ?? [];
 }
 
-/** One pulled ref by its composite key, if any. */
-export function getImageRef(key: string): ImageRef | undefined {
-  return byKey.get(key);
-}
-
 /** Drop all registry state (sign-out / namespace switch). */
 export function clearImageRefRegistry(): void {
   allRefs = [];
   byVersion.clear();
-  byKey.clear();
 }

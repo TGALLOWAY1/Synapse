@@ -76,7 +76,7 @@ const CONFIDENCES = ['high', 'medium', 'low'] as const;
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 3;
 
-export const decisionOptionsSchema = {
+const decisionOptionsSchema = {
     type: 'OBJECT',
     properties: {
         options: {

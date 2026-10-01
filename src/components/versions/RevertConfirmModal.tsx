@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle, RotateCcw, X } from 'lucide-react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 // Confirmation for restoring a historical version. Restore is non-destructive:
 // it always appends a NEW version and never deletes history. The PRD variant
@@ -21,6 +22,7 @@ interface RevertConfirmModalProps {
 export function RevertConfirmModal({
     kind, sourceLabel, staleArtifactTitles = [], hasCurrentOverlayEdits = false, onCancel, onConfirm,
 }: RevertConfirmModalProps) {
+    useEscapeKey(onCancel);
     // Default keeps the user's current edits: restoring older CONTENT should
     // not silently throw away unrelated newer work.
     const [restoreOverlays, setRestoreOverlays] = useState(false);

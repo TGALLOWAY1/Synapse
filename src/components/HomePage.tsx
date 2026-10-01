@@ -321,6 +321,7 @@ export function HomePage() {
                         onClick={() => setIsSettingsOpen(true)}
                         className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Settings"
+                        aria-label="Settings"
                     >
                         <Settings size={18} />
                     </button>
@@ -330,6 +331,7 @@ export function HomePage() {
                             disabled={isSigningOut}
                             className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300 disabled:opacity-60 disabled:cursor-wait"
                             title="Sign out"
+                            aria-label="Sign out"
                         >
                             {isSigningOut ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />}
                         </button>
@@ -338,6 +340,7 @@ export function HomePage() {
                         onClick={() => setIsDrawerOpen(true)}
                         className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Projects"
+                        aria-label="Projects"
                     >
                         <List size={18} />
                     </button>
@@ -388,7 +391,7 @@ export function HomePage() {
             )}
 
             {/* Main content — vertically centered */}
-            <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
+            <main className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
                 <div className="w-full max-w-2xl">
                     {/* Take the interactive tour + View demo project — inline pills */}
                     <div className="flex flex-wrap justify-center items-center gap-2 mb-8">
@@ -423,7 +426,9 @@ export function HomePage() {
                         <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
                             {/* Project name */}
                             <div className="px-5 pt-4">
+                                <label htmlFor="home-project-name" className="sr-only">Project name</label>
                                 <input
+                                    id="home-project-name"
                                     type="text"
                                     value={projectName}
                                     onChange={(e) => setProjectName(e.target.value)}
@@ -451,7 +456,9 @@ export function HomePage() {
 
                             {/* Textarea */}
                             <div className="px-5">
+                                <label htmlFor="home-prompt-text" className="sr-only">Describe the product you want to design</label>
                                 <textarea
+                                    id="home-prompt-text"
                                     ref={textareaRef}
                                     value={promptText}
                                     onChange={(e) => setPromptText(e.target.value)}
@@ -511,6 +518,7 @@ export function HomePage() {
                                             onClick={() => setShowUploadMenu((v) => !v)}
                                             className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition"
                                             title="Attach a file"
+                                            aria-label="Attach a file"
                                             aria-haspopup="menu"
                                             aria-expanded={showUploadMenu}
                                         >
@@ -609,7 +617,7 @@ export function HomePage() {
                         <ExamplePromptCarousel examples={EXAMPLE_PROMPTS} onSelect={handleExampleClick} />
                     </div>
                 </div>
-            </div>
+            </main>
 
             {/* Modals & Drawers */}
             {isChoosingMode && (

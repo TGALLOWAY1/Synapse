@@ -19,7 +19,7 @@ const SCREEN_SEED_ID_RE = /^scr[-_][a-z0-9]+(?:[-_][a-z0-9]+)*$/i;
 
 /** True when a flow-step title is a bare screen seed id (`scr-…`) the model
  * echoed instead of a real screen name. */
-export function looksLikeScreenSeedId(title: string): boolean {
+function looksLikeScreenSeedId(title: string): boolean {
     return SCREEN_SEED_ID_RE.test(title.trim());
 }
 

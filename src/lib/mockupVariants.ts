@@ -104,7 +104,7 @@ export interface DerivedMockupVariant {
     freshness?: MockupVariantFreshness;
 }
 
-export const VIEWPORT_LABELS: Record<MockupViewport, string> = {
+const VIEWPORT_LABELS: Record<MockupViewport, string> = {
     desktop: 'Desktop',
     mobile: 'Mobile',
     tablet: 'Tablet',

@@ -3,17 +3,14 @@
 // The single-pass `runPrdPipeline` function that previously lived here was
 // replaced by the section-by-section `runProgressivePrdPipeline` in
 // `progressivePrdPipeline.ts`, which is the only PRD entry point now wired
-// through `prdService.ts`. The interfaces and schema-version constant below
-// are kept here because the progressive pipeline reuses them as its public
-// contract.
+// through `prdService.ts`. The interfaces below are kept here because the
+// progressive pipeline reuses them as its public contract.
 
 import type { ProviderOptions } from '../geminiClient';
 import type {
     StructuredPRD,
     GenerationMeta,
 } from '../../types';
-
-export const PRD_SCHEMA_VERSION = 2;
 
 export interface PrdPipelineOptions extends ProviderOptions {
     /**

@@ -443,7 +443,7 @@ export function deriveHandoffDataDependencies(screen: ScreenItem): HandoffDataDe
  * variants that hold a real generated image (legacy / per-variant) or are
  * user-accepted are listed as references; recommendedForBuild flags the default
  * + generated variants a developer should look at first. */
-export function deriveHandoffMockupReferences(
+function deriveHandoffMockupReferences(
     variants: readonly DerivedMockupVariant[],
 ): HandoffMockupReference[] {
     const out: HandoffMockupReference[] = [];
@@ -570,7 +570,7 @@ export interface BuildTaskSignals {
  * Not a project manager — just the obvious steps, each with a `source` so the
  * user understands why it exists. Priority: P0 / acceptance-critical → must;
  * recommended states/mockup review → should; polish → could. */
-export function deriveHandoffBuildTasks(
+function deriveHandoffBuildTasks(
     screen: ScreenItem,
     signals: BuildTaskSignals,
 ): HandoffBuildTask[] {

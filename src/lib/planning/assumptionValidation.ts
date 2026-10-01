@@ -109,19 +109,19 @@ const persistedHashValue = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 export const assumptionStatementHash = (record: Pick<PlanningRecord, 'statement'>): string =>
     hashReviewValue(normalizeEvidenceText(record.statement));
 
-export const assumptionValidationPlanContentHash = (
+const assumptionValidationPlanContentHash = (
     plan: Omit<AssumptionValidationPlan, 'contentHash'> | AssumptionValidationPlan,
 ): string => hashReviewValue(persistedHashValue('contentHash' in plan ? withoutContentHash(plan) : plan));
 
-export const assumptionEvidenceContentHash = (
+const assumptionEvidenceContentHash = (
     evidence: Omit<AssumptionEvidenceRecord, 'contentHash'> | AssumptionEvidenceRecord,
 ): string => hashReviewValue(persistedHashValue('contentHash' in evidence ? withoutContentHash(evidence) : evidence));
 
-export const assumptionPlanProposalContentHash = (
+const assumptionPlanProposalContentHash = (
     proposal: Omit<AssumptionValidationPlanProposal, 'contentHash'> | AssumptionValidationPlanProposal,
 ): string => hashReviewValue(persistedHashValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal));
 
-export const assumptionInterpretationContentHash = (
+const assumptionInterpretationContentHash = (
     proposal: Omit<AssumptionInterpretationProposal, 'contentHash'> | AssumptionInterpretationProposal,
 ): string => hashReviewValue(persistedHashValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal));
 
@@ -140,7 +140,7 @@ export const sealAssumptionValidationPlan = (
 
 const normalizeSourceIdentity = (value: string): string => normalizeEvidenceText(value).toLocaleLowerCase();
 
-export const assumptionEvidenceSourceFingerprint = (
+const assumptionEvidenceSourceFingerprint = (
     sourceType: AssumptionEvidenceSourceType,
     sourceIdentity: string,
 ): string => hashReviewValue({ sourceType, sourceIdentity: normalizeSourceIdentity(sourceIdentity) });
@@ -546,7 +546,7 @@ export function assumptionValidationDecisionEvent(
 
 export type AssumptionValidationEventValidation = { valid: true } | { valid: false; reason: string };
 
-export function validateAssumptionValidationEvent(
+function validateAssumptionValidationEvent(
     record: PlanningRecord,
     event: AssumptionValidationEvent,
     context: AssumptionValidationAppendContext = {},

@@ -9,6 +9,7 @@ import {
   resolveConflictKeepLocal,
 } from '../../store/projectServerSync';
 import { downloadProjectRecoveryBundle } from '../../lib/projectRecovery';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 // UI states for server-backed project sync. Reads the projectSyncStore (driven
 // by projectServerSync.ts) and renders: loading, offline, sync-failed (with
@@ -218,6 +219,7 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
   const info = useProjectSyncStore((s) => s.projects[projectId]);
   const [busy, setBusy] = useState<null | 'local' | 'cloud'>(null);
   const [downloaded, setDownloaded] = useState(false);
+  const [confirmUseCloud, setConfirmUseCloud] = useState(false);
 
   if (!info || info.state !== 'conflict') return null;
 
@@ -233,13 +235,7 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
 
   const useCloud = async () => {
     if (busy) return;
-    if (
-      !window.confirm(
-        'Replace this device\'s copy with the cloud version? Your local changes will be discarded. Consider downloading a recovery copy first.',
-      )
-    ) {
-      return;
-    }
+    setConfirmUseCloud(false);
     setBusy('cloud');
     try {
       await resolveConflictUseCloud(projectId);
@@ -273,7 +269,7 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
               Keep this device's version
             </button>
             <button
-              onClick={useCloud}
+              onClick={() => setConfirmUseCloud(true)}
               disabled={!!busy}
               className="inline-flex items-center gap-1 rounded-md border border-amber-600/60 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-800/40 disabled:opacity-50"
             >
@@ -291,6 +287,22 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
           </div>
         </div>
       </div>
+      {confirmUseCloud && (
+        // Portaled: the banner sits in a z-10 strip under the workspace header.
+        <ConfirmDialog
+          portal
+          tone="danger"
+          title="Replace this device's copy with the cloud version?"
+          cancelLabel="Cancel"
+          confirmLabel="Use cloud version"
+          onCancel={() => setConfirmUseCloud(false)}
+          onConfirm={useCloud}
+        >
+          <p className="text-sm text-neutral-700 mt-1">
+            Your local changes will be discarded. Consider downloading a recovery copy first.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

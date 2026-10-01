@@ -97,7 +97,7 @@ What happens after you press **one button** — *Generate PRD*:
 
 A single prompt drives a concurrent generation pipeline: the safety check runs first, then the PRD's sections generate in dependency order — independent ones in parallel — streaming into the draft as they land. Marking the plan ready fans the same source of truth out into the downstream artifacts, and every step is recorded so a `/metrics` dashboard can show the real speedup, concurrency, and cost of each run.
 
-**Tech stack:** React 19 · TypeScript · Vite · Tailwind · Zustand · Google Gemini (fast + strong tiers) · deployed on Vercel with serverless sync.
+**Tech stack:** React 19 · TypeScript · Vite · Tailwind · Zustand · Google Gemini (fast + strong tiers) · OpenAI `gpt-image-2` for optional mockup images (your own key) · deployed on Vercel with serverless sync.
 
 ---
 

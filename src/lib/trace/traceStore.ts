@@ -15,7 +15,7 @@ const STORE_NAME = 'traces';
 const CREATED_INDEX = 'createdAt';
 
 // Keep persisted history bounded. Newest traces are kept on prune.
-export const TRACE_STORE_CAP = 1000;
+const TRACE_STORE_CAP = 1000;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 const memoryFallback: Map<string, LlmTraceCall> = new Map();

@@ -160,7 +160,7 @@ const OPERATIONS = ['replace', 'add', 'remove', 'none'] as const;
 /** Broad Phase 1 locations accepted as relevance scopes. The model never gets
  * patch authority over these values; each is expanded into canonical scalar
  * leaves before reasoning. */
-export const COMPLEX_REASONING_TARGET_PATHS: Record<ComplexTargetKind, readonly string[]> = {
+const COMPLEX_REASONING_TARGET_PATHS: Record<ComplexTargetKind, readonly string[]> = {
     requirement: ['$.nonFunctionalRequirements', '$.features.acceptanceCriteria', '$.features.successCriteria', '$.features.uiAcceptanceCriteria'],
     flow_step: ['$.primaryActions', '$.userLoops', '$.uxPages', '$.architectureFlows', '$.stateMachines', '$.jtbd'],
     behavior: ['$.primaryActions', '$.userLoops', '$.uxPages', '$.stateMachines', '$.features.uiAcceptanceCriteria'],
@@ -170,7 +170,7 @@ export const COMPLEX_REASONING_TARGET_PATHS: Record<ComplexTargetKind, readonly 
     claim: ['$.architecture'],
 };
 
-export const complexTargetReasoningSchema = {
+const complexTargetReasoningSchema = {
     type: 'OBJECT',
     properties: {
         candidates: {

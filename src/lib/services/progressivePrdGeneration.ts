@@ -175,11 +175,6 @@ export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
     { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
 ];
 
-/** Lookup of estimated wall-clock seconds per section, derived from DEFAULT_PRD_SECTIONS. */
-export const SECTION_ESTIMATES_S: Record<string, number> = Object.fromEntries(
-    DEFAULT_PRD_SECTIONS.map(s => [s.id, s.estimatedSeconds]),
-);
-
 const nowIso = () => new Date().toISOString();
 
 export const makeSkeletonJobs = (sections = DEFAULT_PRD_SECTIONS): Record<string, PrdSectionJob> =>
@@ -199,7 +194,7 @@ export const makeSkeletonJobs = (sections = DEFAULT_PRD_SECTIONS): Record<string
 export const selectModelTier = (risk: GenerationTaskRisk): ModelTier =>
     risk === 'low' ? 'fast' : 'strong';
 
-export const selectModelForTier = (tier: ModelTier, cfg: ProgressiveGenerationConfig): string => {
+const selectModelForTier = (tier: ModelTier, cfg: ProgressiveGenerationConfig): string => {
     if (tier === 'premium' && cfg.premiumModel) return cfg.premiumModel;
     return tier === 'fast' ? cfg.fastModel : cfg.strongModel;
 };
@@ -286,7 +281,7 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
     }
 };
 
-export const makeJsonProvider = (): ModelProvider => ({
+const makeJsonProvider = (): ModelProvider => ({
     async generateText({ prompt, model, schema, signal, onUsage, onFinish, traceMeta, maxOutputTokens }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',

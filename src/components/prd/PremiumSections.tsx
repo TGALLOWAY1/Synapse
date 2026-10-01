@@ -1,13 +1,11 @@
 import type {
-    Jtbd, Principle, UserLoop, UXPage, FeatureSystem, PrdDataModel,
-    StateMachine, RolePermission, ArchFlow, RiskDetailed,
+    Jtbd, Principle, UserLoop, UXPage, PrdDataModel,
+    StateMachine, RolePermission, ArchFlow,
     SuccessMetric, ProductThesis,
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
 import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
-import { isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
-import { FeatureIdBadge } from './FeatureIdBadge';
 
 // Shared horizontally-scrollable wrapper for the PRD's wide tables. On mobile
 // (<md) a table's `min-w-*` forces it past the viewport; this wrapper lets it
@@ -247,50 +245,6 @@ export function UxArchitectureSection({ pages }: { pages: UXPage[] }) {
     );
 }
 
-export function FeatureSystemsSection({
-    systems,
-    deferredFeatureIds,
-}: {
-    systems: FeatureSystem[];
-    /** Scope-aware deferred set (deriveDeferredFeatureIds) — PRD sections must
-     * not refer to features outside the MVP/V1 phases; deferred features
-     * surface only in the Decision Log. */
-    deferredFeatureIds?: ReadonlySet<string>;
-}) {
-    const deferredIds = new Set([...(deferredFeatureIds ?? [])].map(id => id.toLowerCase()));
-    return (
-        <Section title="Feature Systems" id="prd-feature-systems">
-            <div className="grid sm:grid-cols-2 gap-3">
-                {systems.map((s) => {
-                    const visibleIds = (s.featureIds ?? []).filter(id => !deferredIds.has(id.toLowerCase()));
-                    return (
-                    <div key={s.id} className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                        <p className="text-sm font-bold text-neutral-900">{s.name}</p>
-                        <p className="text-xs text-neutral-600 mt-1 leading-relaxed">{s.purpose}</p>
-                        {visibleIds.length ? (
-                            <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                                <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Features:</span>
-                                {visibleIds.map(id =>
-                                    isDisplayableFeatureId(id)
-                                        ? <FeatureIdBadge key={id} id={id} />
-                                        : <span key={id} className="text-[11px] font-mono text-neutral-500">{id}</span>,
-                                )}
-                            </div>
-                        ) : null}
-                        {s.endToEndBehavior && (
-                            <p className="text-xs text-neutral-700 mt-2"><span className="font-semibold">End-to-end:</span> {s.endToEndBehavior}</p>
-                        )}
-                        {s.mvpVsLater && (
-                            <p className="text-xs text-neutral-700 mt-1"><span className="font-semibold">MVP vs later:</span> {s.mvpVsLater}</p>
-                        )}
-                    </div>
-                    );
-                })}
-            </div>
-        </Section>
-    );
-}
-
 export function DataModelSection({ model }: { model: PrdDataModel }) {
     return (
         <Section title="Data Model" id="prd-data-model">
@@ -494,46 +448,6 @@ export function ArchFlowsSection({ flows }: { flows: ArchFlow[] }) {
                     </div>
                 ))}
             </div>
-        </Section>
-    );
-}
-
-const likelihoodTone = (l: 'low' | 'med' | 'high') =>
-    l === 'high' ? 'bg-red-100 text-red-800' :
-    l === 'med' ? 'bg-amber-100 text-amber-800' :
-    'bg-neutral-100 text-neutral-700';
-
-export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
-    return (
-        <Section title="Risks" id="prd-risks">
-            <TableScroll>
-                <table className="w-full min-w-[700px] text-sm">
-                    <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
-                        <tr>
-                            <th className="px-3 py-2 text-left">Risk</th>
-                            <th className="px-3 py-2 text-left">Likelihood</th>
-                            <th className="px-3 py-2 text-left">Impact</th>
-                            <th className="px-3 py-2 text-left">Mitigation</th>
-                            <th className="px-3 py-2 text-left">Owner</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-100">
-                        {risks.map((r, i) => (
-                            <tr key={i}>
-                                <td className="px-3 py-2 text-neutral-800 align-top">{r.risk}</td>
-                                <td className="px-3 py-2 align-top">
-                                    <span className={`inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${likelihoodTone(r.likelihood)}`}>
-                                        {r.likelihood}
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{r.impact}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{r.mitigation}</td>
-                                <td className="px-3 py-2 text-neutral-700 align-top">{r.owner || '—'}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </TableScroll>
         </Section>
     );
 }

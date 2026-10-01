@@ -62,7 +62,7 @@ interface PresetCardProps {
     onSelect: () => void;
 }
 
-export function PresetCard({
+function PresetCard({
     preset,
     selected,
     recommended,
@@ -123,7 +123,7 @@ export function PresetCard({
  * call, no images. Top bar + sidebar + heading/body type sample + primary
  * button + mock content card + color swatches.
  */
-export function PresetPreview({ tokens }: { tokens: PresetPreviewTokens }) {
+function PresetPreview({ tokens }: { tokens: PresetPreviewTokens }) {
     const cardRadius = Math.min(tokens.radius, 12);
     return (
         <div
@@ -208,7 +208,7 @@ export function PresetPreview({ tokens }: { tokens: PresetPreviewTokens }) {
     );
 }
 
-export function CustomPreviewPlaceholder() {
+function CustomPreviewPlaceholder() {
     return (
         <div
             aria-hidden

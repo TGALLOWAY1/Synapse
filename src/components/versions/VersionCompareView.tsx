@@ -1,5 +1,6 @@
 import { X, RotateCcw } from 'lucide-react';
 import type { StructuredPRD } from '../../types';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 import {
     diffText, diffStructuredPRD, getDiffSummary,
     type DiffSegment, type SectionDiff,
@@ -55,6 +56,7 @@ const KIND_BADGE: Record<SectionDiff['kind'], { label: string; className: string
 };
 
 export function VersionCompareView({ input, fromLabel, toLabel, onClose, onRestore }: VersionCompareViewProps) {
+    useEscapeKey(onClose);
     const prdDiffs = input.kind === 'prd' ? diffStructuredPRD(input.before, input.after) : [];
     const summary = input.kind === 'prd' ? getDiffSummary(prdDiffs) : null;
     const textSegments = input.kind === 'text' ? diffText(input.before, input.after) : [];

@@ -178,8 +178,10 @@
       features; never keyword-inferred links). The decision derivations in
       `prdViews.ts` (`splitDecisionInputs`, `deriveRisks`, `hasDecisionContent`)
       remain — they still feed the markdown export and the section-uncertainty
-      badges — but the interactive `ReviewConfirmSection` / `DecisionLogSection` /
-      `DeferredRisksSection` components are no longer mounted in the PRD view.
+      badges — but the old interactive `ReviewConfirmSection` /
+      `DecisionLogSection` / `DeferredRisksSection` components are gone from the
+      PRD view and were deleted from the codebase (the Decision Center owns that
+      interaction).
       The active view is **navigational-only URL state**
       (`?prdView=overview|features`, wired by both hosts via `useSearchParams`;
       `coercePrdView` normalizes — legacy `?prdView=decisions` coerces to

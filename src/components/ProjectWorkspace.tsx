@@ -402,6 +402,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // Incomplete-PRD generation gate: explicit confirmation required before a
     // non-final partial PRD may drive output generation.
     const [showIncompleteGenerateConfirm, setShowIncompleteGenerateConfirm] = useState(false);
+    const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
     const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
     const [readinessInitialConcernId, setReadinessInitialConcernId] = useState<string>();
     const [readinessSubmitError, setReadinessSubmitError] = useState<string | null>(null);
@@ -1313,7 +1314,6 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         mockup: 'Mockup',
         prompt: 'Prompt',
         core_artifact: 'Artifact',
-        markup_image: 'Markup',
     };
     const getArtifactEventLabel = (artifactId: string, artifactVersionId?: string) => {
         const artifact = getArtifact(projectId, artifactId);
@@ -1327,11 +1327,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
     if (!project) return <div>Project Not Found</div>;
 
-    const handleAbandon = () => {
-        if (window.confirm('Abandon this project and return to the home screen?')) {
-            navigate('/');
-        }
-    };
+    const handleAbandon = () => setShowAbandonConfirm(true);
 
     const handleRegenerate = async () => {
         // Ref guard, not just `isGenerating`: two clicks in the same tick both
@@ -2185,6 +2181,15 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     </p>
                 </ConfirmDialog>
             )}
+            {showAbandonConfirm && (
+                <ConfirmDialog
+                    title="Abandon this project and return to the home screen?"
+                    cancelLabel="Cancel"
+                    confirmLabel="Abandon"
+                    onCancel={() => setShowAbandonConfirm(false)}
+                    onConfirm={() => { setShowAbandonConfirm(false); navigate('/'); }}
+                />
+            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsGenerated={assetsReady}
@@ -2399,8 +2404,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     />
                 ) : (
                 <>
-                {/* Left: Main Content Column */}
-                <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 shadow-inner z-0 relative">
+                {/* Left: Main Content Column — the page's <main> landmark for the
+                    Plan and History stages. The Explore/Build stage gets its own
+                    from ArtifactWorkspace; the two never render together. */}
+                <main className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 shadow-inner z-0 relative">
                     {isOldVersion && pipelineStage === 'prd' && (
                         <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex flex-wrap gap-2 justify-between items-center z-10 -mx-4 md:-mx-8 -mt-4 md:-mt-8 mb-4">
                             <span>You are viewing a historical version (Read-Only).</span>
@@ -2694,7 +2701,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         )}
 
                     </div>
-                </div>
+                </main>
 
                 {/* Right Column: Combined Branches and History */}
                 {isBranchesVisible && (

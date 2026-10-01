@@ -50,10 +50,6 @@ export const REVIEW_STATUS_LABELS: Record<ScreenReviewStatus, string> = {
     implementation_ready: 'Confirmed',
 };
 
-export const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
-    'draft', 'needs_review', 'accepted', 'implementation_ready',
-]);
-
 // --- Gap detection -----------------------------------------------------------
 
 export type ScreenGapKind =

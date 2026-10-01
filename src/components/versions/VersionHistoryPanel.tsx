@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { History, X, GitCompare, RotateCcw, Check } from 'lucide-react';
 import type { VersionChangeSource } from '../../types';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { VersionCompareView, type CompareInput } from './VersionCompareView';
 import { RevertConfirmModal } from './RevertConfirmModal';
 
@@ -69,6 +70,10 @@ export function VersionHistoryPanel({
 }: VersionHistoryPanelProps) {
     const [compareId, setCompareId] = useState<string | null>(null);
     const [confirmId, setConfirmId] = useState<string | null>(null);
+
+    // Escape closes the topmost layer only: the compare view and restore
+    // confirmation (below) register after the panel, so they unwind first.
+    useEscapeKey(onClose);
 
     const compareEntry = entries.find(e => e.id === compareId) ?? null;
     const confirmEntry = entries.find(e => e.id === confirmId) ?? null;

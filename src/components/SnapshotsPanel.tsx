@@ -10,6 +10,18 @@ import {
     type SnapshotProgress,
 } from '../lib/snapshotClient';
 import { useProjectStore } from '../store/projectStore';
+import { ConfirmDialog, type ConfirmDialogTone } from './common/ConfirmDialog';
+
+// A question the owner must answer before an action runs. Replaces the native
+// confirm(): the handler stores one of these and the dialog at the bottom of
+// the panel runs `run` on confirm.
+interface ConfirmRequest {
+    title: string;
+    message?: string;
+    confirmLabel: string;
+    tone?: ConfirmDialogTone;
+    run: () => void;
+}
 
 interface SnapshotsPanelProps {
     projectId: string;
@@ -43,6 +55,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     const [error, setError] = useState<string | null>(null);
     const [notices, setNotices] = useState<string[]>([]);
     const [title, setTitle] = useState<string>(project?.name ?? 'Untitled');
+    const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
     const refresh = async () => {
         if (!getOwnerToken()) return;
@@ -106,8 +119,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         return `Image ${saveProgress.completed}/${saveProgress.total}…`;
     })();
 
-    const handleLoad = async (id: string) => {
-        if (!confirm('Loading will replace the current copy of this project in the workspace. Continue?')) return;
+    const performLoad = async (id: string) => {
         setBusy(`loading:${id}`);
         setError(null);
         try {
@@ -122,8 +134,16 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('Delete this snapshot from cloud storage? This cannot be undone.')) return;
+    const handleLoad = (id: string) => {
+        setConfirmRequest({
+            title: 'Load this snapshot?',
+            message: 'Loading will replace the current copy of this project in the workspace. Continue?',
+            confirmLabel: 'Continue',
+            run: () => void performLoad(id),
+        });
+    };
+
+    const performDelete = async (id: string) => {
         setBusy(`deleting:${id}`);
         setError(null);
         try {
@@ -134,6 +154,16 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         } finally {
             setBusy(null);
         }
+    };
+
+    const handleDelete = (id: string) => {
+        setConfirmRequest({
+            title: 'Delete this snapshot from cloud storage?',
+            message: 'This cannot be undone.',
+            confirmLabel: 'Delete',
+            tone: 'danger',
+            run: () => void performDelete(id),
+        });
     };
 
     // SYN-003 — pin-time completeness HARD GATE (no override; pre-launch, the
@@ -173,22 +203,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     // Pin (or unpin) a snapshot as the public demo project. The "Demo project"
     // button on the home page fetches whichever snapshot is pinned here via
     // the public `?demo=1` endpoint, so no owner token is needed to view it.
-    const handleSetDemo = async (id: string) => {
-        const willClear = demoSnapshotId === id;
-
-        // Unpinning is never gated.
-        if (!willClear) {
-            const gateError = completenessGateError(id);
-            if (gateError) {
-                setError(gateError);
-                return;
-            }
-        }
-
-        const confirmMsg = willClear
-            ? 'Unset this snapshot as the public demo? The "View demo project" button will stop working until another snapshot is set.'
-            : 'Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.';
-        if (!confirm(confirmMsg)) return;
+    const performSetDemo = async (id: string, willClear: boolean) => {
         setBusy(`demo:${id}`);
         setError(null);
         try {
@@ -204,30 +219,37 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         }
     };
 
-    // Add / remove a snapshot in the project gallery. Adding shares the same
-    // SYN-003 completeness gate as pinning the demo — a gallery slot is just
-    // as public. Removal is never gated.
-    const handleToggleGallery = async (id: string) => {
-        const inGallery = gallery?.snapshotIds.includes(id) ?? false;
-        if (!inGallery) {
+    const handleSetDemo = (id: string) => {
+        const willClear = demoSnapshotId === id;
+
+        // Unpinning is never gated.
+        if (!willClear) {
             const gateError = completenessGateError(id);
             if (gateError) {
                 setError(gateError);
                 return;
             }
-        } else if (gallery?.mode === 'gallery' && gallery.snapshotIds.length - 1 < gallery.minLive) {
-            // Removing this slot drops a LIVE gallery below the go-live
-            // minimum, so the server demotes the showcase back to demo mode —
-            // make that consequence explicit before proceeding. Removals that
-            // stay at or above the minimum leave the gallery live.
-            const confirmed = confirm(
-                'Removing this snapshot takes the live gallery below '
-                + `${gallery.minLive} projects, so the public showcase will switch back to the `
-                + 'single demo project. The remaining slots are kept — re-fill and go '
-                + 'live again when ready. Continue?',
-            );
-            if (!confirmed) return;
         }
+
+        setConfirmRequest(willClear
+            ? {
+                title: 'Unset this snapshot as the public demo?',
+                message: 'The "View demo project" button will stop working until another snapshot is set.',
+                confirmLabel: 'Unset demo',
+                run: () => void performSetDemo(id, willClear),
+            }
+            : {
+                title: 'Make this snapshot the public demo?',
+                message: 'Any visitor (no owner token required) will be able to load it from the home page.',
+                confirmLabel: 'Make public demo',
+                run: () => void performSetDemo(id, willClear),
+            });
+    };
+
+    // Add / remove a snapshot in the project gallery. Adding shares the same
+    // SYN-003 completeness gate as pinning the demo — a gallery slot is just
+    // as public. Removal is never gated.
+    const performToggleGallery = async (id: string, inGallery: boolean) => {
         setBusy(`gallery:${id}`);
         setError(null);
         try {
@@ -242,17 +264,38 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         }
     };
 
+    const handleToggleGallery = (id: string) => {
+        const inGallery = gallery?.snapshotIds.includes(id) ?? false;
+        if (!inGallery) {
+            const gateError = completenessGateError(id);
+            if (gateError) {
+                setError(gateError);
+                return;
+            }
+        } else if (gallery?.mode === 'gallery' && gallery.snapshotIds.length - 1 < gallery.minLive) {
+            // Removing this slot drops a LIVE gallery below the go-live
+            // minimum, so the server demotes the showcase back to demo mode —
+            // make that consequence explicit before proceeding. Removals that
+            // stay at or above the minimum leave the gallery live.
+            setConfirmRequest({
+                title: 'Remove this snapshot from the live gallery?',
+                message: 'Removing this snapshot takes the live gallery below '
+                    + `${gallery.minLive} projects, so the public showcase will switch back to the `
+                    + 'single demo project. The remaining slots are kept — re-fill and go '
+                    + 'live again when ready. Continue?',
+                confirmLabel: 'Continue',
+                run: () => void performToggleGallery(id, inGallery),
+            });
+            return;
+        }
+        void performToggleGallery(id, inGallery);
+    };
+
     // The go-live switch. Flipping to gallery mode swaps the public
     // "View demo project" entry for the project gallery; the server refuses
     // the flip until at least `minLive` snapshots are pinned, so an
     // accidental early toggle can't publish a near-empty gallery.
-    const handleToggleGalleryMode = async () => {
-        if (!gallery) return;
-        const nextMode = gallery.mode === 'gallery' ? 'demo' : 'gallery';
-        const confirmMsg = nextMode === 'gallery'
-            ? `Go live with the project gallery? Visitors will see the ${gallery.snapshotIds.length}-project gallery instead of the single demo project.`
-            : 'Switch back to single-demo mode? Visitors will see the pinned demo project again; the gallery keeps its slots for the next go-live.';
-        if (!confirm(confirmMsg)) return;
+    const performToggleGalleryMode = async (nextMode: 'gallery' | 'demo') => {
         setBusy('gallery-mode');
         setError(null);
         try {
@@ -262,6 +305,24 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         } finally {
             setBusy(null);
         }
+    };
+
+    const handleToggleGalleryMode = () => {
+        if (!gallery) return;
+        const nextMode = gallery.mode === 'gallery' ? 'demo' : 'gallery';
+        setConfirmRequest(nextMode === 'gallery'
+            ? {
+                title: 'Go live with the project gallery?',
+                message: `Visitors will see the ${gallery.snapshotIds.length}-project gallery instead of the single demo project.`,
+                confirmLabel: 'Go live',
+                run: () => void performToggleGalleryMode(nextMode),
+            }
+            : {
+                title: 'Switch back to single-demo mode?',
+                message: 'Visitors will see the pinned demo project again; the gallery keeps its slots for the next go-live.',
+                confirmLabel: 'Switch to demo mode',
+                run: () => void performToggleGalleryMode(nextMode),
+            });
     };
 
     // Move one gallery slot up or down. The server takes the full new order
@@ -285,6 +346,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     };
 
     return (
+        <>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
             <div
                 className="bg-neutral-900 border border-neutral-700 rounded-lg w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl"
@@ -588,5 +650,28 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                 </div>
             </div>
         </div>
+
+        {/* A sibling of the panel, not a child: the panel's root click handler
+            closes the whole panel, and clicks inside a child dialog would bubble
+            to it. */}
+        {confirmRequest && (
+            <ConfirmDialog
+                title={confirmRequest.title}
+                tone={confirmRequest.tone}
+                cancelLabel="Cancel"
+                confirmLabel={confirmRequest.confirmLabel}
+                onCancel={() => setConfirmRequest(null)}
+                onConfirm={() => {
+                    const { run } = confirmRequest;
+                    setConfirmRequest(null);
+                    run();
+                }}
+            >
+                {confirmRequest.message && (
+                    <p className="text-sm text-neutral-700 mt-1">{confirmRequest.message}</p>
+                )}
+            </ConfirmDialog>
+        )}
+        </>
     );
 }

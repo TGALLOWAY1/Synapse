@@ -8,6 +8,7 @@ import { useToastStore } from '../store/toastStore';
 import type { Branch, BranchMessage } from '../types';
 import { IntentHelperLabel } from '../lib/intentHelper';
 import { getActionFromIntent } from '../lib/prdEditActions';
+import { ConfirmDialog } from './common/ConfirmDialog';
 
 interface BranchListProps {
     projectId: string;
@@ -140,17 +141,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                                     >
                                         <Maximize2 size={16} />
                                     </button>
-                                    <button
-                                        onClick={() => {
-                                            if (window.confirm("Are you sure you want to delete this branch?")) {
-                                                deleteBranch(projectId, branch.id);
-                                            }
-                                        }}
-                                        className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded transition"
-                                        title="Delete Branch"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    <DeleteBranchButton onConfirm={() => deleteBranch(projectId, branch.id)} />
                                 </div>
                             )}
                         </div>
@@ -258,5 +249,39 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                 </div>
             ))}
         </div>
+    );
+}
+
+// Branch delete. Asks first through the shared ConfirmDialog (this replaced a
+// native confirm()). Portaled to <body>: the branch rail is its own z-indexed
+// stacking context, so an in-place backdrop would be capped at the rail's level
+// instead of covering the page.
+function DeleteBranchButton({ onConfirm }: { onConfirm: () => void }) {
+    const [confirming, setConfirming] = useState(false);
+    return (
+        <>
+            <button
+                onClick={() => setConfirming(true)}
+                className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+                title="Delete Branch"
+                aria-label="Delete branch"
+            >
+                <Trash2 size={16} />
+            </button>
+            {confirming && (
+                <ConfirmDialog
+                    portal
+                    tone="danger"
+                    title="Are you sure you want to delete this branch?"
+                    cancelLabel="Cancel"
+                    confirmLabel="Delete"
+                    onCancel={() => setConfirming(false)}
+                    onConfirm={() => {
+                        setConfirming(false);
+                        onConfirm();
+                    }}
+                />
+            )}
+        </>
     );
 }
