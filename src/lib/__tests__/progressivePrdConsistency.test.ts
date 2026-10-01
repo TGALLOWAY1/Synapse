@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Controls what the mocked consistency-review model call returns per test.

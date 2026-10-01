@@ -23,11 +23,14 @@ import { emptyBundleSource, pickBundleSource } from '../lib/projectBundle';
 export { getLegacyImportOffer, declineLegacyImport } from './userScope';
 
 // Fresh, empty values for every persisted collection (ALL_PROJECT_COLLECTIONS
-// in projectBundle.ts — the single source of truth for this key list). Used to
-// wipe in-memory state before rehydrating from a different user's namespace so
-// nothing from the previous account survives the switch.
+// in projectBundle.ts — the single source of truth for this key list) plus the
+// per-user delete tombstones (deliberately not a project collection — they
+// never travel in bundles — but just as user-scoped). Used to wipe in-memory
+// state before rehydrating from a different user's namespace so nothing from
+// the previous account survives the switch; the new namespace's own
+// tombstones come back with the rehydrate.
 function emptyPersistedState() {
-  return emptyBundleSource();
+  return { ...emptyBundleSource(), projectTombstones: {} };
 }
 
 /**

@@ -113,6 +113,29 @@ describe('complex planning-target reasoning', () => {
         expect(JSON.stringify(creatorWorkspaceReasoningInput)).toBe(inputSnapshot);
     });
 
+    it('sends a response schema with no array bounds, which the Gemini API rejects with HTTP 400', async () => {
+        const transport = vi.fn<ComplexTargetReasoningTransport>().mockResolvedValue(validResponse());
+        await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, { transport, model: 'strong-test' });
+        expect(transport).toHaveBeenCalledTimes(1);
+        const serialized = JSON.stringify(transport.mock.calls[0][0].schema);
+        expect(serialized).not.toContain('maxItems');
+        expect(serialized).not.toContain('minItems');
+    });
+
+    it('still enforces the five-question cap in code now that the schema is unbounded', async () => {
+        const tooManyQuestions = {
+            ...needsInputCandidate(),
+            questions: ['Q1?', 'Q2?', 'Q3?', 'Q4?', 'Q5?', 'Q6?'],
+        };
+        const result = await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
+            transport: async () => JSON.stringify({ candidates: [candidate(), tooManyQuestions, alignedCandidate()] }),
+            model: 'strong-test', maxStructuredRepairAttempts: 0,
+        });
+        expect(result).toMatchObject({ ok: false, reason: 'invalid_response' });
+        if (result.ok) throw new Error('expected failure');
+        expect(result.errors.join(' ')).toMatch(/invalid questions/i);
+    });
+
     it('preserves ambiguity and focused questions without manufacturing a patch', async () => {
         const result = await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
             transport: async () => validResponse(), model: 'strong-test',

@@ -21,12 +21,27 @@ describe('ProjectWorkspace orientation', () => {
 
     // `structuredPRD` is truthy after the first streamed section, so the
     // outputs pill has to be gated on the run being settled — otherwise it
-    // invites the user to build outputs from a half-written plan.
+    // invites the user to build outputs from a half-written plan. The gate is
+    // the PRD edit lock: unlike the section grid it also covers the final
+    // consistency-review pass, which still rewrites the spine in place.
     it('hides the outputs pill while the PRD is still generating', () => {
         const start = workspace.indexOf('const showAssetsPill =');
         const decl = workspace.slice(start, workspace.indexOf(';', start));
 
-        expect(decl).toContain('!isPRDActivelyGenerating');
+        expect(decl).toContain('!isPrdEditLocked');
+        expect(workspace).toContain('const isPrdEditLocked = isPrdRunInFlight(latestSpine,');
+    });
+
+    // A second pipeline started mid-run would race the first on the same
+    // project; Regenerate Draft waits for the run to settle and says why.
+    it('locks Regenerate Draft while a PRD run is in flight', () => {
+        const start = workspace.indexOf('onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}');
+        const button = workspace.slice(start, workspace.indexOf('</button>', start));
+
+        expect(button).toMatch(/disabled=\{[^}]*isPrdEditLocked[^}]*\}/);
+        expect(button).toContain('Regenerate unlocks when generation finishes.');
+        const handler = workspace.slice(workspace.indexOf('const handleRegenerate = async'));
+        expect(handler.slice(0, handler.indexOf('regenerateInFlight.current = true'))).toContain('isPrdEditLocked) return;');
     });
 
     // Plan §W6: the outputs CTA used to read "Build outputs" off

@@ -35,7 +35,7 @@ You are an expert software engineer. Build the product specified below.
 How to use this document:
 - Treat the **Product Requirements** as the source of truth for scope and behavior.
 - Follow the **Implementation Plan** for milestone order; ship in small, reviewable commits.
-- Use the **Prompt Pack** as ready-made prompts for individual build steps.
+- Use the **Prompt Packs** in the Implementation Plan (its Prompts section) as ready-made prompts for individual build steps: each milestone lists its packs, and the full prompt bodies are in the plan's trailing \`json synapse-plan\` code block. If a separate **Developer Prompts** section is present (older projects), use it the same way.
 - Honor the **Data Model** and **Design System** where present.
 - Ask before any destructive or irreversible action. Confirm assumptions that aren't pinned down here rather than guessing silently.
 `;

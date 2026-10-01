@@ -67,7 +67,9 @@ organized."*
 - [ ] Type the idea, set a project name, choose **App**.
 - [ ] Submit. The dialog **"How would you like to start?"** appears with three
       options: **Develop the idea**, **Draft a working plan**, **Explore deeply**.
-- [ ] Choose **Develop the idea**. Clarification questions generate.
+- [ ] Choose **Develop the idea**. Clarification questions generate (also on
+      `npm run dev`, whose React StrictMode double-runs effects). While you
+      answer, the header badge reads **Clarifying…**, not Generating….
 - [ ] Questions arrive one at a time with a **Question N of M** progress header.
 - [ ] The questions are worth asking — they target decisions that change the
       product (who it is for, the core workflow, scope), not trivia that could
@@ -78,7 +80,8 @@ organized."*
       **Open questions**.
 - [ ] **Edit answers** returns to the questions without losing them.
 - [ ] **Generate PRD** starts generation; the progress timeline shows real
-      stages advancing, not a static spinner.
+      stages advancing, not a static spinner. Until it finishes the plan is
+      read-only, with **"Editing unlocks when generation finishes."** above it.
 - [ ] Generation completes and lands on the plan view.
 
 **Safety gate** — start a second project with an idea that should be refused
@@ -104,7 +107,9 @@ On the **Overview** tab:
 - [ ] Because the idea was vague, the plan **surfaces gaps** — assumptions and
       open decisions — rather than inventing certainty about everything.
 - [ ] Each section's **Edit** works in place: change text, **Save changes**,
-      value persists. **Cancel editing** discards.
+      value persists. **Cancel editing** discards. **Save changes** with
+      nothing changed creates no new version (the header version number stays
+      put).
 
 On the **Features** tab:
 
@@ -130,13 +135,15 @@ This is the least-covered path in the codebase — exercise it properly.
 - [ ] Pick an action, give an instruction, and start a branch.
 - [ ] The branch conversation returns a proposal that actually addresses the
       instruction.
-- [ ] **Consolidate to Document** → choose a scope → generate the patch.
+- [ ] **Consolidate now** → choose a scope → generate the patch.
 - [ ] The patch preview shows what will change.
 - [ ] **Commit to New Spine** applies it, and the plan text visibly changes.
 - [ ] The change is **appended** as a new version — the previous version is
       still in Version History, not overwritten.
 - [ ] If consolidation fails to find its anchor, you get a clear error — the
       edit is not silently dropped.
+- [ ] Open branches survive other edits: with a branch still open, edit a
+      section inline — the branch is still listed under **Active Branches**.
 
 Then stage several edits:
 
@@ -297,7 +304,13 @@ Interrupt a generation (reload the page mid-run):
       mid-progress, and can be retried.
 - [ ] Retrying does not produce duplicate artifacts.
 - [ ] Interrupt an **output** run the same way; it resumes or can be restarted
-      without duplicating slots.
+      without duplicating slots — including a reload **before the first output
+      finishes** (the Build view resumes the run instead of sitting idle).
+- [ ] An output that keeps failing is retried automatically at most twice per
+      session (revisit Build a few times), then stays failed with **Retry**.
+- [ ] Reload while a branch reply is in flight: the thread shows *"Reply was
+      interrupted — send again"* with your message back in the reply box, and
+      nothing is re-sent until you send it.
 
 Recovery bundle (a separate escape hatch — it never touches the network):
 
@@ -362,6 +375,15 @@ the real reload, which those tests simulate.
       resolved decisions are still resolved, and no artifact silently reverts.
 - [ ] Open the project in a second tab, edit in one, and confirm the other does
       not clobber it.
+- [ ] With a second tab open, delete a project in one tab, then make any change
+      in the other: the deleted project does not come back in either tab (or,
+      signed in, on another device).
+- [ ] Start output generation in Build, then open the same project's Build view
+      in a second tab: it shows the run in progress **read-only** (with the
+      "being generated in another tab" notice) and starts no second run.
+      Reloading the first tab resumes its own run; closing it mid-run hands the
+      unfinished outputs to the second tab once the lease lapses (under a
+      minute).
 - [ ] Signed in with sync available, confirm the project appears on another
       device.
 

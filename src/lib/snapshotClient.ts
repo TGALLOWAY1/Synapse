@@ -57,7 +57,7 @@ import type {
 } from './planning/downstreamArtifactUpdateProposal';
 import { auditMockupImageCoverage, countMockupSpecScreens } from './snapshotImageAudit';
 
-export const OWNER_TOKEN_KEY = 'synapse-owner-token';
+const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
 export type SnapshotProjectBundle = {
     project: Project;
@@ -206,7 +206,7 @@ const errorFromResponse = async (resp: Response, fallbackCode: string): Promise<
 
 // Pull the per-project slice out of Zustand. We snapshot the store at one
 // point in time so concurrent edits don't tear the bundle.
-export const collectProjectBundle = (projectId: string): SnapshotProjectBundle => {
+const collectProjectBundle = (projectId: string): SnapshotProjectBundle => {
     const state = useProjectStore.getState();
     const project = state.projects[projectId];
     if (!project) throw new Error(`Project ${projectId} not found in store`);
@@ -647,44 +647,6 @@ export const loadGalleryPointerPublic = async (): Promise<GalleryPointerState | 
     } catch {
         return null;
     }
-};
-
-// Public: gallery state joined with each pinned snapshot's manifest summary,
-// for rendering the gallery cards. Throws on transport errors (the gallery
-// page owns its retry UI); returns entries in slot order.
-export type GalleryEntrySummary = {
-    slot: number;
-    snapshotId: string;
-    title?: string;
-    projectName?: string;
-    createdAt?: string;
-    imageCount?: number;
-    screenImageCount?: number;
-    mockupScreenCount?: number;
-    variantImageCount?: number;
-    sizeBytes?: number;
-};
-
-export type GalleryStatePublic = {
-    mode: GalleryMode;
-    size: number;
-    entries: GalleryEntrySummary[];
-};
-
-export const loadGalleryStatePublic = async (): Promise<GalleryStatePublic> => {
-    const resp = await fetch(`${API_BASE}?gallery=1`);
-    if (!resp.ok) throw await errorFromResponse(resp, 'load_gallery_failed');
-    const body = await resp.json() as { mode?: unknown; size?: unknown; entries?: unknown };
-    const entries = (Array.isArray(body.entries) ? body.entries : [])
-        .filter((e): e is GalleryEntrySummary =>
-            !!e && typeof e === 'object'
-            && typeof (e as { slot?: unknown }).slot === 'number'
-            && typeof (e as { snapshotId?: unknown }).snapshotId === 'string');
-    return {
-        mode: body.mode === 'gallery' ? 'gallery' : 'demo',
-        size: typeof body.size === 'number' ? body.size : 6,
-        entries,
-    };
 };
 
 // Public: fetch one gallery slot's snapshot bundle. Same failure-tolerant

@@ -60,7 +60,7 @@ export const BUILD_PACKET_APPROVAL_KEY = 'buildPacketApproval';
  * overlays by default, so an approval can outlive the content it signed. The
  * packet's own currency/validation criteria are what catch that.)
  */
-export const BUILD_PACKET_APPROVAL_HOST_SLOT: ArtifactSlotKey = 'implementation_plan';
+const BUILD_PACKET_APPROVAL_HOST_SLOT: ArtifactSlotKey = 'implementation_plan';
 
 /** One pinned row of the signed-off artifact-version manifest. */
 export interface BuildPacketManifestEntry {

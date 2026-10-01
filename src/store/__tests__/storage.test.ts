@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDebouncedStorage, registerCrossTabMerge, registerQuotaRecovery } from '../storage';
 import { useToastStore } from '../toastStore';

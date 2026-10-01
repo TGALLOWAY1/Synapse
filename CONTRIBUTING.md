@@ -44,15 +44,16 @@ the browser console), let you tune model routing without code changes:
 npm run dev          # Vite dev server
 npm run build        # tsc -b && vite build (type-check is part of the build)
 npm run lint         # ESLint (flat config, TS/TSX)
+npm run lint:dead    # knip dead-code report (opt-in; not part of the PR gate)
 npm run preview      # preview the production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # run a single test file in watch mode
-npx tsc --noEmit     # type-check without emitting
+npx tsc -b           # type-check (the root tsconfig is solution-style: `tsc --noEmit` checks nothing)
 ```
 
 Other scripts: `npm run mockup:harness` (mockup-generation evaluation harness),
-`npm run mockup-css:build` (compile Tailwind CSS for mockup iframes), and
-`npm run capture:screenshots` (regenerate the README tour screenshots via
+`npm run mockup-css:build` (recompile the Tailwind sheet the harness inlines),
+and `npm run capture:screenshots` (regenerate the README tour screenshots via
 Playwright).
 
 ## Before opening a PR
@@ -65,7 +66,10 @@ Playwright).
   workflow. Treat doc drift as a defect in the change.
 - Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
   `src/components/**/__tests__/`, and `api/_lib/__tests__/`. Add coverage for
-  new pure logic and store actions.
+  new pure logic and store actions. Suites under `src/lib/`, `src/store/` and
+  `api/` run in Vitest's `node` environment; if one needs
+  `window`/`document`/`localStorage`, add `// @vitest-environment jsdom` as its
+  first line (see `vitest.config.ts`).
 
 ## Recruiter portal (backend) setup
 

@@ -33,18 +33,18 @@ import { buildVariantImageKey } from './mockupVariantImageStore';
 
 // --- Constants ---------------------------------------------------------------
 
-export const MOCKUP_VARIANT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+const MOCKUP_VARIANT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
 /** Per-image ceiling. A gpt-image-2 PNG is normally 0.2–2 MB; 8 MB is a
  * generous cap that only skips pathological payloads. */
 export const MAX_VARIANT_IMAGE_BYTES = 8 * 1024 * 1024;
 /** Whole-section ceiling so one project can't produce a 500 MB snapshot. */
-export const MAX_VARIANT_SNAPSHOT_TOTAL_BYTES = 50 * 1024 * 1024;
+const MAX_VARIANT_SNAPSHOT_TOTAL_BYTES = 50 * 1024 * 1024;
 /** History entries preserved per variant in a snapshot (store cap is 6). */
-export const MAX_VARIANT_SNAPSHOT_HISTORY = 10;
+const MAX_VARIANT_SNAPSHOT_HISTORY = 10;
 
 /** Only safe raster image types travel — never SVG (script-bearing) or other. */
-export const SAFE_VARIANT_IMAGE_MIME: readonly string[] = [
+const SAFE_VARIANT_IMAGE_MIME: readonly string[] = [
     'image/png', 'image/jpeg', 'image/webp',
 ];
 
@@ -144,7 +144,7 @@ export function parseImageDataUrl(dataUrl: unknown): ParsedImageDataUrl | null {
     return { mime, base64, approxBytes };
 }
 
-export const isSafeVariantImageDataUrl = (dataUrl: unknown): boolean =>
+const isSafeVariantImageDataUrl = (dataUrl: unknown): boolean =>
     parseImageDataUrl(dataUrl) !== null;
 
 // --- Build (store records -> portable snapshot) ------------------------------

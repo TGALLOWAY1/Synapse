@@ -1,4 +1,5 @@
-import type { SpineVersion } from '../types';
+import type { Project, SpineVersion } from '../types';
+import { getTabId, shouldInterruptOutputRunOnLoad } from '../lib/outputRunLease';
 
 /**
  * Detect spines whose PRD generation was interrupted (page refreshed or
@@ -50,6 +51,35 @@ export function markInterruptedGenerations(
                 },
             };
         });
+    }
+    return changed;
+}
+
+/**
+ * The artifact-output counterpart of `markInterruptedGenerations`: a page load
+ * kills THIS tab's in-flight output run, so a `'running'` `outputRun` marker
+ * that this same tab owned (its own reload), or whose lease has lapsed (the
+ * owner stopped heartbeating — closed or crashed), was interrupted mid-run.
+ * Flip it to `'interrupted'` — the durable evidence
+ * `artifactJobController.resumeIfNeeded` uses to resume the run on the next
+ * Build mount even when NO output had completed yet. A marker another tab is
+ * still heartbeating stays `'running'`: that run is alive there, and this tab
+ * must neither interrupt nor resume it (see src/lib/outputRunLease.ts).
+ *
+ * Mutates `projects` in place (onRehydrateStorage hands us the draft state)
+ * and returns whether anything was changed.
+ */
+export function markInterruptedOutputRuns(
+    projects: Record<string, Project>,
+    { now = Date.now(), tabId = getTabId() }: { now?: number; tabId?: string } = {},
+): boolean {
+    let changed = false;
+    for (const projectId of Object.keys(projects)) {
+        const project = projects[projectId];
+        const run = project?.outputRun;
+        if (!run || !shouldInterruptOutputRunOnLoad(run, now, tabId)) continue;
+        projects[projectId] = { ...project, outputRun: { ...run, phase: 'interrupted' } };
+        changed = true;
     }
     return changed;
 }

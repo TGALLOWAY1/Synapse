@@ -21,6 +21,7 @@ import { hasOpenAIKey } from '../../lib/openaiClient';
 import { getMockupImageMode, resolveMockupRender } from '../../lib/artifactModelSettings';
 import { MockupScreenUpload } from './MockupScreenUpload';
 import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface Props {
     projectId: string;
@@ -77,6 +78,8 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     // Active quality: defaults to the highest available; user can flip back
     // to lower qualities via the quality switcher.
     const [activeQuality, setActiveQuality] = useState<MockupImageQuality | null>(null);
+    // High-quality renders are paid; ask before spending (see handleGenerate).
+    const [confirmHighQuality, setConfirmHighQuality] = useState(false);
 
     const fallbackQuality = useMemo(() => pickInitialQuality(records), [records]);
     const effectiveQuality: MockupImageQuality | null =
@@ -146,20 +149,20 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
         );
     }
 
+    const runGenerate = (quality: MockupImageQuality) => {
+        clearError(versionId, screen.id);
+        void generate({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated });
+    };
+
     const handleGenerate = (quality: MockupImageQuality) => {
         if (!capabilities.canGenerateArtifacts) return;
         // High quality is the expensive variant — confirm before spending. Paid
         // OpenAI usage is billed to the user's own account via their key.
-        if (quality === 'high' && typeof window !== 'undefined') {
-            const ok = window.confirm(
-                'Generate a HIGH-quality image with OpenAI gpt-image-2?\n\n'
-                + 'This is a paid OpenAI operation billed to your own account '
-                + '(typically a few cents per image).',
-            );
-            if (!ok) return;
+        if (quality === 'high') {
+            setConfirmHighQuality(true);
+            return;
         }
-        clearError(versionId, screen.id);
-        void generate({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated });
+        runGenerate(quality);
     };
 
     if (inFlight) {
@@ -234,6 +237,23 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                         Regenerate
                     </button>
                 </div>}
+                {confirmHighQuality && (
+                    <ConfirmDialog
+                        portal
+                        title="Generate a HIGH-quality image with OpenAI gpt-image-2?"
+                        cancelLabel="Cancel"
+                        confirmLabel="Generate"
+                        onCancel={() => setConfirmHighQuality(false)}
+                        onConfirm={() => {
+                            setConfirmHighQuality(false);
+                            runGenerate('high');
+                        }}
+                    >
+                        <p className="text-sm text-neutral-700 mt-1">
+                            This is a paid OpenAI operation billed to your own account (typically a few cents per image).
+                        </p>
+                    </ConfirmDialog>
+                )}
             </div>
         );
     }

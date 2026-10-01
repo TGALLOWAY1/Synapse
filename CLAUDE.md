@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Synapse — "From plain-language to product blueprint" — is an AI-native product
 definition environment that transforms a plain-language prompt into a
 structured PRD, then into UI mockups, downstream artifacts (screen inventory,
-data model, etc.), and visual annotations. The product workspace is a
+data model, etc.). The product workspace is a
 local-first React SPA — all PRD/branch/artifact state lives in localStorage via
 Zustand and that remains the live cache, but signed-in users' projects also
 **sync to a server `projects` collection** so they follow the user across
@@ -69,6 +69,7 @@ npm install          # Install dependencies
 npm run dev          # Vite dev server at http://localhost:5173
 npm run build        # tsc -b && vite build (TS check is part of build)
 npm run lint         # ESLint flat config, TS/TSX only
+npm run lint:dead    # knip dead-code report (opt-in; not part of lint or the pre-push gate)
 npm run preview      # Preview production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # Run a single test file in watch mode
@@ -141,6 +142,13 @@ not exceed 12.
 
 Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
 `src/components/__tests__/`, and `api/_lib/__tests__/` (+ `api/__tests__/`).
+`vitest.config.ts` runs two projects: suites under `src/lib/`, `src/store/` and
+`api/` use Vitest's `node` environment (no per-file jsdom startup), and
+everything else — components, hooks, any new directory — uses `jsdom`. A
+node-directory suite that really needs `window`/`document`/`localStorage` opts
+in with a first-line `// @vitest-environment jsdom` docblock (a
+`ReferenceError: localStorage is not defined` there means "add the docblock");
+don't widen the glob.
 There is no Playwright *assertion* suite; Playwright powers the screenshot
 capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
 (`npm run e2e` — real generation + visual screenshots + report; see
@@ -151,11 +159,18 @@ capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
 
 - React 19 + TypeScript + Vite 7
 - Tailwind CSS 3 + tailwind-merge + clsx
-- framer-motion (page/drag transitions in the interactive product tour)
+- framer-motion (page/drag transitions in the interactive product tour; ships
+  only in the lazy `/tour` chunk)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
 - React Router v7 (workspace, recruiter portal, admin pages, the interactive
   product tour at `/tour` + `/about` alias, /privacy)
+- Route-level code splitting in `src/App.tsx`: `/tour` (+ `/about`), `/gallery`,
+  `/metrics`, `/developer/llm-trace`, `/privacy` and `/admin/recruiters` are
+  `React.lazy` pages behind one `Suspense` fallback; `/` (including
+  `LoginPage`) and `/p/:projectId` stay static. Don't statically import a lazy
+  page (or framer-motion / `date-fns`, which only the tour and the admin page
+  use) from code the entry chunk reaches — check the `vite build` chunk list.
 - Deployed to Vercel (SPA + Node serverless functions under `api/`)
 
 
@@ -217,10 +232,12 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
                    the shared touch-aware pipeline (see
                    docs/architecture/UI_PATTERNS.md).
   Build stage:     ArtifactWorkspace (exploratory or committed outputs; bundle/
-                   individual gen, refine, validate)
-                   + MockupsView (platform/fidelity/scope config)
-                   + MarkupImageView (MarkupImageSpec → SVG via
-                   MarkupImageRenderer). The `'workspace'` pipeline stage is
+                   individual gen, refine, validate; per-artifact renderers in
+                   src/components/renderers/)
+                   + the Screens view (src/components/experience/:
+                   ScreenListView / ScreenDetailView / MockupVariantsPanel)
+                   + MockupViewer (src/components/mockups/: approval gate and
+                   per-screen MockupScreenImage). The `'workspace'` pipeline stage is
                    labeled **"Explore"** for a working plan and **"Build"** for
                    a committed plan (the stage key/route stays `workspace`).
   History stage:   HistoryView — chronological timeline with diffs
@@ -251,7 +268,7 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 | [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph / freshness actions, build-packet readiness, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
 | [docs/architecture/SCREENS_EXPERIENCE.md](docs/architecture/SCREENS_EXPERIENCE.md) | The Screens view: stable screen ids, join layer, screen contracts, readiness/coverage, review workflow (4A), downstream impact (4B), handoff + trace bridge + export (5A–5C), mockup variants (3A–3D), overlays, URL-addressable selection | Anything under `src/components/experience/` or `src/lib/screen*` / `mockupVariant*` |
 | [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest + agent handoff, version history/compare/revert, change-aware staleness, provenance stamping, "Confirm aligned" | Exports, version history, revert, staleness UX |
-| [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, `/tour`, `/metrics` |
+| [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, overlay keyboard handling (`useEscapeKey`, `ConfirmDialog` — never native `confirm()`), landmarks, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, modals/drawers/confirmations, `/tour`, `/metrics` |
 
 Standalone design docs (referenced from the topic docs):
 `docs/SERVER_PROJECT_STORAGE.md`, `docs/AUTH_AND_PROVIDER_KEYS.md`,
@@ -299,7 +316,10 @@ rationale and detail.
    list the bundle, sync, recovery, namespace switch, and legacy import all
    derive from), the snapshot collectors/restorers +
    `namespaceSnapshotForRestore`, and demo cleanup — or it silently won't
-   survive snapshots/sync. → SNAPSHOTS_AND_DEMO.md, PROJECT_SYNC.md
+   survive snapshots/sync. Per-user state that is *not* a project collection
+   (e.g. `projectTombstones`) stays out of `ALL_PROJECT_COLLECTIONS` but must
+   be reset on user switch and carried by the cross-tab merge.
+   → SNAPSHOTS_AND_DEMO.md, PROJECT_SYNC.md, STATE_AND_AUTH.md
 7. **Prompts are snapshot-locked:** every major prompt surface is covered by
    `src/lib/__tests__/promptSurfaces.test.ts` — an intentional prompt edit
    updates the snapshot in the same change; an unreviewed snapshot diff is
@@ -326,7 +346,11 @@ rationale and detail.
 11. **Every version-creating path stamps `provenance.changeSource`**, and
     revert/restore always **appends** a new version — history is never mutated
     or deleted. Never parse a version number out of an id; labels derive from
-    array position. → VERSIONING_AND_EXPORT.md, STATE_AND_AUTH.md
+    array position. Every spine append also re-points open branches to the new
+    version inside the same updater (`repointProjectOpenBranches`,
+    `src/lib/openBranches.ts`), and nothing may append on top of a spine whose
+    PRD run is still in flight (`isPrdRunInFlight`, `src/lib/prdRunState.ts`).
+    → VERSIONING_AND_EXPORT.md, STATE_AND_AUTH.md
 12. **User edits are overlays, and overlays are versioned:** screen/plan/
     approval edits live in `ArtifactVersion.metadata` overlays (key list in
     `src/lib/artifactOverlays.ts`), never rewrites of `content`; overlay
@@ -354,5 +378,6 @@ rationale and detail.
     `compareAndAppendStructuredPRD` is the authoritative version-bound path for
     applying decision impacts and section retries — it compares the latest
     spine/hash/decision event inside one transaction and appends atomically; a
-    stale preview writes nothing. Never mutate the spine around it.
+    stale preview — or a latest spine whose PRD run is still in flight —
+    writes nothing. Never mutate the spine around it.
     → PLANNING_AND_DECISIONS.md

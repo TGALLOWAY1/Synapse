@@ -44,7 +44,7 @@ export function isMvpFeature(feature: Feature): boolean {
     return false;
 }
 
-export function isV1Feature(feature: Feature): boolean {
+function isV1Feature(feature: Feature): boolean {
     if (feature.tier === 'v1') return true;
     if (!feature.tier && feature.priority === 'should') return true;
     return false;
@@ -53,7 +53,7 @@ export function isV1Feature(feature: Feature): boolean {
 /** Deferred = explicitly tagged 'later'. Untagged features are never treated
  * as deferred by tier alone (hand-added features carry no tier and must stay
  * visible) — see deriveDeferredFeatureIds for the scope-aware full set. */
-export function isDeferredFeature(feature: Feature): boolean {
+function isDeferredFeature(feature: Feature): boolean {
     return feature.tier === 'later';
 }
 

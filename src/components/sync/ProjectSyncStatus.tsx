@@ -7,8 +7,11 @@ import {
   refreshProjectsFromServer,
   resolveConflictUseCloud,
   resolveConflictKeepLocal,
+  type ConflictResolutionOutcome,
 } from '../../store/projectServerSync';
 import { downloadProjectRecoveryBundle } from '../../lib/projectRecovery';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { useToastStore, type Toast } from '../../store/toastStore';
 
 // UI states for server-backed project sync. Reads the projectSyncStore (driven
 // by projectServerSync.ts) and renders: loading, offline, sync-failed (with
@@ -26,6 +29,7 @@ export function SyncStatusBanner({ signedIn }: { signedIn: boolean }) {
   const error = useProjectSyncStore((s) => s.error);
   const migratedCount = useProjectSyncStore((s) => s.migratedCount);
   const conflicts = useProjectSyncStore((s) => conflictCount(s.projects));
+  const failedPulls = useProjectSyncStore((s) => s.failedPullIds.length);
 
   if (!signedIn) return null;
 
@@ -62,15 +66,37 @@ export function SyncStatusBanner({ signedIn }: { signedIn: boolean }) {
   }
 
   if (phase === 'ready') {
+    // A partial pull: the reconcile finished, but some cloud copies did not
+    // come down. Never report that as a clean "synced".
+    const partial = failedPulls > 0 ? (
+      <Row tone="amber" icon={<AlertTriangle size={13} />}>
+        <span className="flex-1">
+          {failedPulls === 1
+            ? "1 project couldn't be downloaded from the cloud."
+            : `${failedPulls} projects couldn't be downloaded from the cloud.`}{' '}
+          Everything else is synced.
+        </span>
+        <button
+          onClick={() => refreshProjectsFromServer()}
+          className="inline-flex items-center gap-1 text-xs font-medium text-amber-300 hover:text-amber-200"
+        >
+          <RefreshCw size={12} /> Retry
+        </button>
+      </Row>
+    ) : null;
     if (conflicts > 0) {
       return (
-        <Row tone="amber" icon={<GitMerge size={13} />}>
-          {conflicts === 1
-            ? '1 project changed on another device — resolve it below.'
-            : `${conflicts} projects changed on another device — resolve them below.`}
-        </Row>
+        <div className="flex flex-col gap-2">
+          {partial}
+          <Row tone="amber" icon={<GitMerge size={13} />}>
+            {conflicts === 1
+              ? '1 project changed on another device — resolve it below.'
+              : `${conflicts} projects changed on another device — resolve them below.`}
+          </Row>
+        </div>
       );
     }
+    if (partial) return partial;
     return (
       <Row tone="neutral" icon={<Cloud size={13} />}>
         {migratedCount > 0
@@ -208,16 +234,48 @@ export function ProjectCloudStatus({
   );
 }
 
+// What to tell the user when a resolution did not simply succeed. Resolution
+// is explicit, never silent — including when it could not do what was asked.
+const CONFLICT_OUTCOME_TOASTS: Record<Exclude<ConflictResolutionOutcome, 'resolved'>, Omit<Toast, 'id' | 'duration'>> = {
+  failed: {
+    type: 'error',
+    title: "Couldn't resolve the conflict",
+    message: 'Nothing was changed — both copies are as they were. Check your connection and try again.',
+  },
+  cloud_missing: {
+    type: 'warning',
+    title: 'No cloud version to use',
+    message: "The cloud copy no longer exists, so this device's version was kept. It will upload on the next sync.",
+  },
+  conflicted_again: {
+    type: 'warning',
+    title: 'The cloud version changed again',
+    message: 'Another device saved while this one was uploading. Review the conflict and choose again.',
+  },
+  upload_failed: {
+    type: 'error',
+    title: "Couldn't upload this device's version",
+    message: 'Your choice was recorded and your work is safe on this device. The upload will retry on the next sync.',
+  },
+};
+
+function reportConflictOutcome(outcome: ConflictResolutionOutcome): void {
+  if (outcome === 'resolved') return;
+  useToastStore.getState().addToast(CONFLICT_OUTCOME_TOASTS[outcome]);
+}
+
 /**
  * Cross-device conflict banner: shown when a project changed on another device
  * while this device also has unsynced edits. Offers the three safe resolutions —
  * keep local (overwrite cloud), use cloud (discard local), or download a
- * recovery copy of the local work first. Never resolves silently.
+ * recovery copy of the local work first. Never resolves silently, and reports
+ * any outcome other than a clean resolution.
  */
 export function ProjectConflictBanner({ projectId }: { projectId: string }) {
   const info = useProjectSyncStore((s) => s.projects[projectId]);
   const [busy, setBusy] = useState<null | 'local' | 'cloud'>(null);
   const [downloaded, setDownloaded] = useState(false);
+  const [confirmUseCloud, setConfirmUseCloud] = useState(false);
 
   if (!info || info.state !== 'conflict') return null;
 
@@ -225,7 +283,9 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
     if (busy) return;
     setBusy('local');
     try {
-      await resolveConflictKeepLocal(projectId);
+      reportConflictOutcome(await resolveConflictKeepLocal(projectId));
+    } catch {
+      reportConflictOutcome('failed');
     } finally {
       setBusy(null);
     }
@@ -233,16 +293,12 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
 
   const useCloud = async () => {
     if (busy) return;
-    if (
-      !window.confirm(
-        'Replace this device\'s copy with the cloud version? Your local changes will be discarded. Consider downloading a recovery copy first.',
-      )
-    ) {
-      return;
-    }
+    setConfirmUseCloud(false);
     setBusy('cloud');
     try {
-      await resolveConflictUseCloud(projectId);
+      reportConflictOutcome(await resolveConflictUseCloud(projectId));
+    } catch {
+      reportConflictOutcome('failed');
     } finally {
       setBusy(null);
     }
@@ -273,7 +329,7 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
               Keep this device's version
             </button>
             <button
-              onClick={useCloud}
+              onClick={() => setConfirmUseCloud(true)}
               disabled={!!busy}
               className="inline-flex items-center gap-1 rounded-md border border-amber-600/60 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-800/40 disabled:opacity-50"
             >
@@ -291,6 +347,22 @@ export function ProjectConflictBanner({ projectId }: { projectId: string }) {
           </div>
         </div>
       </div>
+      {confirmUseCloud && (
+        // Portaled: the banner sits in a z-10 strip under the workspace header.
+        <ConfirmDialog
+          portal
+          tone="danger"
+          title="Replace this device's copy with the cloud version?"
+          cancelLabel="Cancel"
+          confirmLabel="Use cloud version"
+          onCancel={() => setConfirmUseCloud(false)}
+          onConfirm={useCloud}
+        >
+          <p className="text-sm text-neutral-700 mt-1">
+            Your local changes will be discarded. Consider downloading a recovery copy first.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

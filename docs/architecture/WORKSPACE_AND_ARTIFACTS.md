@@ -62,7 +62,9 @@ What unhiding `component_inventory` changed — all intentional and test-covered
   offers Retry. Covered by `coreArtifactPipeline.test.ts`.
 - **It now AUTO-RETRIES.** `resumeIfNeeded` wakes a run for a pending
   `component_inventory` slot instead of skipping it — no longer an invisible
-  retry, for the same reason. Covered by `src/lib/__tests__/artifactJobResume.test.ts`.
+  retry, for the same reason (and, like every slot, within the automatic-resume
+  cap — see "Artifact job runs" below). Covered by
+  `src/lib/__tests__/artifactJobResume.test.ts`.
 - **It is a Dependency-Graph node and an export row.** The mockup's dependency on
   it is now an explicit edge instead of a collapsed one, it appears in the
   Sync-outputs row list (so it can be regenerated like any other output), and it
@@ -125,6 +127,89 @@ ready-output count plus current generation failures, validation dispositions
 (including accepted issues and advisory warnings), critique findings, and
 alignment notes. It is keyed by the transient job's spine/`startedAt`, is
 dismissible, and does not reappear from stale persisted state after reload.
+
+### Artifact job runs: ownership, resume evidence, automatic-resume cap
+
+`artifactJobController` (`src/lib/services/artifactJobController.ts`) drives
+output runs; the per-project job (`generationJobsSlice`) is transient UI state.
+Three rules keep runs from fighting each other or looping:
+
+- **Run ownership.** Every run (`startAll`, `regenerateSlots`, `retrySlot`,
+  `ensureDesignSystemForSpine`) has a `runId`. `initJob(…, { runId })` stamps it
+  on the job (`ProjectJobState.runId`); a run that reuses an existing job
+  (`retrySlot` without a live run, the early design-system run) takes it over
+  with `claimJobRun`; a retry that joins the live run shares its id. Every job
+  write from the controller passes its run id — `setSlotStatus`,
+  `appendSlotProgress`, `markAllInterrupted` — and the slice **no-ops a write
+  from any run that doesn't own the job**. So a superseded run (e.g. aborted by
+  a spine change) settling late can't flip the new run's slots to
+  `interrupted`. Untagged writes stay unguarded (legacy callers, tests). New
+  controller write paths must pass the run id.
+- **Resume evidence (`hasResumeEvidence`).** Auto-resume is recovery for a run
+  that was started, never an entry side effect of opening Build. Evidence is
+  (1) an output already completed for the spine, (2) this session's job for the
+  spine still holding queued/generating/interrupted slots, or (3) the durable
+  `Project.outputRun` marker for the spine showing a run that died —
+  `'interrupted'`, or `'running'` but no longer alive anywhere (see the lease
+  below). `startAll` stamps the marker `'running'` (`markOutputRunStarted`) when
+  a run launches and removes it when **that** run settles — completed, failed,
+  or cancelled (`settleOutputRun`, a no-op for any other run id). This is how a
+  reload **before the first output lands** resumes instead of leaving an idle
+  workspace. Only `startAll` stamps the marker — `regenerateSlots` batches and
+  single-slot runs do not.
+- **The marker is a lease (`src/lib/outputRunLease.ts`).** Every tab of the
+  same user shares one persisted store, and run ids are tab-local, so a second
+  tab cannot otherwise tell "the run died with its page" from "the run is alive
+  in the first tab" — and treating a live run as crashed generates (and pays
+  for) the same outputs twice. The marker records `ownerTabId` (a per-tab id in
+  sessionStorage, kept across that tab's own reload; a "Duplicate tab" copy
+  mints a new one) and `heartbeatAt`, which the owner refreshes every
+  `OUTPUT_RUN_HEARTBEAT_MS` (10 s) while the run is live (`heartbeatOutputRun`;
+  the interval stops when the run settles). A `'running'` marker owned by
+  another tab whose heartbeat is younger than `OUTPUT_RUN_LEASE_MS` (45 s) is
+  **live elsewhere**:
+  - on page load `markInterruptedOutputRuns` (in `onRehydrateStorage`) leaves it
+    `'running'` — it converts a marker to `'interrupted'` only when this same
+    tab owned it (its own reload killed the run) or the lease lapsed (the
+    owner closed or crashed);
+  - every generation entry point refuses while it holds — `resumeIfNeeded`,
+    `startAll`, `retrySlot`, `regenerateSlots`, `ensureDesignSystemForSpine`
+    (`isRunLiveElsewhere`). The check reads this tab's memory **and** what
+    other tabs last persisted (`readPersistedProjectSnapshot`), because this
+    tab never sees another tab's heartbeats until it adopts a cross-tab merge;
+    a refused call nudges that merge (`requestCrossTabCatchUp`);
+  - before resuming, `resumeIfNeeded` also refuses to act on a stale view: if
+    another tab advanced the project past this tab's memory (e.g. finished the
+    outputs this tab still thinks are missing), it catches up and decides on
+    the next evaluation;
+  - the Build view shows the run's in-progress state **read-only**
+    (`useOutputRunLiveElsewhere` → `readOnlyWhileRunElsewhere` capabilities and
+    a notice), re-checking every heartbeat interval until the run settles or
+    the lease lapses, then catching up with the other tab's writes.
+
+  The heartbeat is coordination, not content: it does **not** stamp
+  `Project.updatedAt` (that would make the owner's copy win every cross-tab
+  merge over real edits — the merge keeps the newest heartbeat explicitly) and
+  a heartbeat-only change is never pushed to the cloud. Known limits: Chrome's
+  intensive throttling (a tab hidden 5+ minutes wakes about once a minute) can
+  let a still-running owner's lease lapse, so another tab may resume that run;
+  without sessionStorage a tab's own reload counts as another tab (it resumes
+  once the lease lapses); across devices the lease is only as fresh as the
+  last synced heartbeat.
+- **Automatic-resume cap.** `resumeIfNeeded` runs on every Build mount, so a
+  deterministically failing slot used to be re-run (and paid for) on every
+  visit. Each automatic run counts toward its slots'
+  `SlotState.autoResumeAttempts` (carried across same-spine `initJob`s; a new
+  spine starts fresh); once a slot reaches `MAX_AUTO_RESUME_ATTEMPTS` (2) it is left out of
+  automatic runs — its failed state is carried into the new job unchanged
+  (`carryOverSlots`) — and the manual Retry (with its own `MAX_RETRY_FAILURES`
+  cap) owns it. User-started runs neither count nor reset the budget. Like the
+  manual cap it is per page session (jobs are not persisted).
+
+Covered by `src/lib/services/__tests__/artifactJobController.runs.test.ts`,
+`src/store/__tests__/generationJobsSlice.test.ts`,
+`src/lib/__tests__/artifactJobResume.test.ts`, and
+`src/store/__tests__/interruptedGeneration.test.ts`.
 
 ### Mockup flow-approval gate (approve flows before images)
 

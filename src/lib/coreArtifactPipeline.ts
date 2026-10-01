@@ -108,7 +108,7 @@ export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
 // generation unless the user acknowledges degraded generation. Every other
 // declared dependency is treated as optional context. Keep this conservative —
 // over-marking a dep as required needlessly blocks generation.
-export const REQUIRED_DEPENDENCIES: Partial<Record<CoreArtifactSubtype, CoreArtifactSubtype[]>> = {
+const REQUIRED_DEPENDENCIES: Partial<Record<CoreArtifactSubtype, CoreArtifactSubtype[]>> = {
     // Flows reference specific screens by name — without the inventory they'd be
     // invented.
     user_flows: ['screen_inventory'],
@@ -257,7 +257,7 @@ export function expandWithHiddenDependencyClosure(
 }
 
 /** The direct dependencies a slot consumes (core deps, or MOCKUP_DEPENDENCIES for the mockup). */
-export function slotDependencies(slot: ArtifactSlotKey): CoreArtifactSubtype[] {
+function slotDependencies(slot: ArtifactSlotKey): CoreArtifactSubtype[] {
     if (slot === 'mockup') return [...MOCKUP_DEPENDENCIES];
     return getArtifactMeta(slot).dependsOn;
 }

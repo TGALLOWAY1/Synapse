@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import React from 'react';
 import { getActionFromIntent } from './prdEditActions';
 
@@ -7,7 +6,7 @@ interface IntentInfo {
     helper: string;
 }
 
-export function getIntentInfo(text: string): IntentInfo | null {
+function getIntentInfo(text: string): IntentInfo | null {
     // Labels and helper copy live in the PRD edit-action registry (single
     // source of truth); this derives the hint from the intent's `"<Label>: "`
     // prefix.

@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', '.vite', 'src/styles/mockup-tailwind.generated.ts']),
+  globalIgnores(['dist', '.vite', '.worktrees']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

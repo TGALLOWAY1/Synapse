@@ -27,7 +27,7 @@ Projects and keys persist across reloads via `localStorage`.
 | `npm run build` | `tsc -b && vite build` — typechecks the whole project, then emits the production bundle to `dist/` |
 | `npm run preview` | Serves the production build locally |
 | `npm run lint` | ESLint (flat config, TS / TSX only) |
-| `npm run test` | Vitest suite (jsdom environment) |
+| `npm run test` | Vitest suite (`node` environment for `src/lib`, `src/store`, `api`; `jsdom` for components) |
 | `npx tsc --noEmit` | Typecheck without emitting |
 
 ## Vercel (recommended)

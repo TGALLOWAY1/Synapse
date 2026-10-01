@@ -24,7 +24,7 @@ Phase 1 already applied in commit `claude/synapse-codebase-audit-tIUSS`.
 
 - [ ] **Merge `prdPipeline.ts` into `progressivePrdPipeline.ts`.** After the
   May 2026 cleanup `prdPipeline.ts` only re-exports types
-  (`PrdPipelineOptions`, `PrdPipelineResult`, `PRD_SCHEMA_VERSION`). Two
+  (`PrdPipelineOptions`, `PrdPipelineResult`). Two
   files import from it. Wait until `progressivePrdPipeline.ts` is stable for
   one release cycle, then inline and delete.
 - [ ] **Resolve "Password reset is coming soon" tooltip** at
@@ -53,9 +53,14 @@ Phase 1 already applied in commit `claude/synapse-codebase-audit-tIUSS`.
   - Mockup generation (`mockupService` → `MockupViewer`)
   - Branch consolidation (`branchService.consolidateBranch`)
   - Staleness detection (`stalenessSlice` against the current spine)
-- [ ] **Resolve `TODO(tailwind-hardening)` at
-  `src/components/mockups/buildMockupSrcDoc.ts:30`.** Replace CDN-loaded
-  Tailwind in the iframe sandbox with a vendored / pre-built stylesheet.
+- [x] **Resolve `TODO(tailwind-hardening)` (formerly in
+  `src/components/mockups/buildMockupSrcDoc.ts`).** Obsolete: that file and
+  the iframe mockup preview it fed no longer exist — mockup screens render as
+  AI images (`MockupScreenImage`), so `src/` has no iframe sandbox or
+  CDN-loaded Tailwind left. The pre-built stylesheet
+  (`src/styles/mockup-tailwind.generated.css`, `npm run mockup-css:build`)
+  survives only as an input to `scripts/mockup-eval-harness.mjs`; the app
+  never imports it.
 
 ### Phase 5 — Sunsetting live shims
 

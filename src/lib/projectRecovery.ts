@@ -30,7 +30,7 @@ function bundleSourceOfStore(): BundleSource {
 
 /** Assemble a recovery bundle for one project from the live local store, or null
  *  if the project doesn't exist locally. Pure w.r.t. the network. */
-export function buildProjectRecoveryBundle(
+function buildProjectRecoveryBundle(
   projectId: string,
   reason?: string,
 ): ProjectRecoveryBundle | null {

@@ -6,11 +6,13 @@
 // "which localStorage key is the project store reading/writing right now".
 //
 // It is intentionally a LEAF module (only touches localStorage, plus the pure
-// collection-key constant below) so it can be imported by `storage.ts` without
-// creating an import cycle with the store itself. The orchestration that
-// resets + rehydrates the store on a user switch lives in `projectUserSync.ts`.
+// collection-key constant and delete-tombstone reader) so it can be imported
+// by `storage.ts` without creating an import cycle with the store itself. The
+// orchestration that resets + rehydrates the store on a user switch lives in
+// `projectUserSync.ts`.
 
 import { ALL_PROJECT_COLLECTIONS } from '../lib/projectBundle';
+import { readProjectTombstones } from '../lib/projectTombstones';
 import { decodePersistedBlob, encodePersistedBlob } from './persistCodec';
 
 const BASE_NAME = 'synapse-projects-storage';
@@ -98,6 +100,17 @@ function readProjectsMap(raw: string | null): Record<string, unknown> {
   }
 }
 
+/** Parse a persisted blob's per-user delete tombstones (see projectTombstones.ts). */
+function readTombstonedIds(raw: string | null): Set<string> {
+  const json = decodePersistedBlob(raw);
+  if (!json) return new Set();
+  try {
+    return new Set(Object.keys(readProjectTombstones(JSON.parse(json)?.state?.projectTombstones)));
+  } catch {
+    return new Set();
+  }
+}
+
 /** Number of anonymous/legacy projects available under BASE_NAME (0 if none). */
 export function countLegacyProjects(): number {
   return Object.keys(readProjectsMap(safeGet(BASE_NAME))).length;
@@ -113,8 +126,11 @@ function countImportableForUser(userId: string): number {
   const legacyProjects = readProjectsMap(safeGet(BASE_NAME));
   const legacyIds = Object.keys(legacyProjects);
   if (legacyIds.length === 0) return 0;
-  const ownProjects = readProjectsMap(safeGet(namespaceFor(userId)));
-  return legacyIds.filter((id) => !(id in ownProjects)).length;
+  const ownRaw = safeGet(namespaceFor(userId));
+  const ownProjects = readProjectsMap(ownRaw);
+  // A project this user deleted is not "importable" — the merge skips it.
+  const deleted = readTombstonedIds(ownRaw);
+  return legacyIds.filter((id) => !(id in ownProjects) && !deleted.has(id)).length;
 }
 
 /**
@@ -195,7 +211,10 @@ export function importLegacyProjectsForUser(userId: string): boolean {
 /**
  * Additively merge a `source` persisted blob into a `target` persisted blob,
  * unioning every project-keyed collection. Existing ids in `target` always win,
- * so a merge can only ADD entries, never overwrite/delete one. Returns the
+ * so a merge can only ADD entries, never overwrite/delete one — and a project
+ * `target` has a delete tombstone for is never re-added (otherwise the
+ * idempotent merged-account recovery would resurrect it on every sign-in).
+ * `target`'s own tombstones are kept; `source`'s are not imported. Returns the
  * serialized merged blob and how many *projects* were added, or null if either
  * blob can't be parsed (so a corrupt blob never destroys data).
  */
@@ -208,6 +227,7 @@ function mergeStoredBlobs(targetRaw: string, sourceRaw: string): { json: string;
     const source = JSON.parse(sourceJson);
     const targetState = target?.state ?? {};
     const sourceState = source?.state ?? {};
+    const deleted = new Set(Object.keys(readProjectTombstones(targetState.projectTombstones)));
     let added = 0;
     for (const key of MERGEABLE_COLLECTIONS) {
       const sourceMap = sourceState[key];
@@ -215,7 +235,7 @@ function mergeStoredBlobs(targetRaw: string, sourceRaw: string): { json: string;
       const targetMap = (targetState[key] && typeof targetState[key] === 'object') ? targetState[key] : {};
       const nextMap: Record<string, unknown> = { ...targetMap };
       for (const id of Object.keys(sourceMap)) {
-        if (!(id in nextMap)) {
+        if (!(id in nextMap) && !deleted.has(id)) {
           nextMap[id] = sourceMap[id];
           if (key === 'projects') added += 1;
         }

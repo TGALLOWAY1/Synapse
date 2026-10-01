@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { reviewPrdConsistency } from '../services/prdConsistencyReview';
 import type { StructuredPRD, Feature } from '../../types';

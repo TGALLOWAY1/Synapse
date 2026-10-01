@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
 
@@ -92,6 +93,35 @@ describe('projectStore', () => {
             expect(useProjectStore.getState().downstreamArtifactUpdateApplications[projectId]).toBeUndefined();
             expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId]).toBeUndefined();
             expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId]).toBeUndefined();
+        });
+
+        it('records a delete tombstone in the same write so the project cannot be resurrected', () => {
+            const { projectId } = useProjectStore.getState().createProject('Test', 'prompt');
+            const before = Date.now();
+
+            useProjectStore.getState().deleteProject(projectId);
+
+            expect(useProjectStore.getState().projectTombstones[projectId]).toBeGreaterThanOrEqual(before);
+        });
+
+        it('reviveDeletedProject clears the tombstone and lifts activity just past the deletion only when the content predates it', () => {
+            const deletedAt = Date.now() + 60_000; // newer than anything either project holds
+            useProjectStore.setState({
+                projects: {
+                    old: { id: 'old', name: 'Old', createdAt: 1 },
+                    fresh: { id: 'fresh', name: 'Fresh', createdAt: 1, updatedAt: deletedAt + 5_000 },
+                },
+                projectTombstones: { old: deletedAt, fresh: deletedAt },
+            });
+
+            useProjectStore.getState().reviveDeletedProject('old', deletedAt);
+            useProjectStore.getState().reviveDeletedProject('fresh', deletedAt);
+
+            const state = useProjectStore.getState();
+            expect(state.projectTombstones).toEqual({});
+            expect(state.projects['old']?.updatedAt).toBe(deletedAt + 1);
+            // Already active after the deletion: left exactly as pulled.
+            expect(state.projects['fresh']?.updatedAt).toBe(deletedAt + 5_000);
         });
     });
 

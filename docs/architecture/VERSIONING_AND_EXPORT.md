@@ -8,6 +8,11 @@ The Export dialog downloads the PRD, individual artifacts, a combined bundle,
 or structured JSON. It also offers a **"Copy for coding agent"** preset
 (`buildAgentHandoff` in `src/lib/exportHandoff.ts`): an instruction preamble +
 PRD + build-relevant core artifacts (mockups excluded), with copy and download.
+The preamble points the agent at the **Implementation Plan** — its per-milestone
+Prompt Packs (the plan's Prompts tab; the full prompt bodies live in the plan's
+trailing `json synapse-plan` block). The standalone Prompt Pack artifact is
+retired, so the preamble must not name it as a source; `exportHandoff.test.ts`
+asserts this.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
 
@@ -72,7 +77,10 @@ nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
 generated artifact. Restores route
 to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
-new version and never deletes history.** See
+new version and never deletes history.** PRD restore is hidden (and
+`handleRestoreSpine` refuses) while a PRD run is in flight, since it would
+append on top of a spine the pipeline is still writing in place; a
+content-identical PRD save appends no version at all (see STATE_AND_AUTH.md). See
 `docs/VERSIONING_ASSESSMENT.md` for the current state of the feature and the
 priority-ordered list of what remains (it supersedes the retired
 `VERSIONING_AUDIT.md` / `VERSIONING_V2_PLAN.md` planning docs; everything they

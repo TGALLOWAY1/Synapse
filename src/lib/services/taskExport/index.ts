@@ -36,6 +36,3 @@ export async function exportTasks(
     }
     return provider.exportTasks(tasks, options);
 }
-
-export { buildGithubIssueBody, buildGithubIssuePayload, exportTasksToGithub } from './githubExporter';
-export { renderTaskMarkdown, renderTasksMarkdown } from './markdownExporter';

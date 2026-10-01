@@ -10,6 +10,8 @@ import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import { buildDecisionEditSummary } from '../../lib/derive/prdDecisions';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
+import { isStructuredPrdContentEqual } from '../../lib/structuredPrdEquality';
+import { repointProjectOpenBranches } from '../../lib/openBranches';
 import {
     appendDecisionEvent,
     buildReviewedDecisionImpact,
@@ -120,6 +122,8 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             return {
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), regenEvent] },
+                // Open branches always target the latest version (openBranches.ts).
+                branches: repointProjectOpenBranches(state.branches, projectId, newSpineId),
             };
         });
 
@@ -374,11 +378,22 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         // reject/undo) coalesce onto the latest version in place instead of
         // spamming a full clone per click; every other edit appends as before.
         let amendedSpineId: string | null = null;
+        let unchanged = false;
 
         set((state) => {
             const currentVersions = state.spineVersions[projectId] || [];
             const src = currentVersions.find(s => s.id === spineId);
             if (!src) return state;
+
+            // A content-identical edit (e.g. Save with nothing changed) writes
+            // nothing: a new version would change the latest spine id and flag
+            // every generated output as needing an update for no reason.
+            // Generation-meta overrides are an explicit change, so they still
+            // take the normal path.
+            if (opts?.meta === undefined && isStructuredPrdContentEqual(src.structuredPRD, nextStructuredPRD)) {
+                unchanged = true;
+                return state;
+            }
 
             const latest = currentVersions.find(v => v.isLatest);
 
@@ -535,9 +550,14 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), editEvent] },
                 planningRecords,
+                // Open branches follow the new latest instead of being orphaned
+                // on the edited version (openBranches.ts). An in-place amend
+                // keeps the id, so it needs no move.
+                branches: repointProjectOpenBranches(state.branches, projectId, newSpineId),
             };
         });
 
+        if (unchanged) return { newSpineId: spineId, unchanged: true };
         return { newSpineId: amendedSpineId ?? newSpineId, recognition };
     },
 
@@ -569,6 +589,22 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     expectedLatestSpineId,
                     ...(latest ? { actualLatestSpineId: latest.id } : {}),
                     reason: 'spine_changed',
+                };
+                return state;
+            }
+            // A spine whose PRD run has not settled is not a stable baseline:
+            // the pipeline keeps rewriting it IN PLACE (partial sections, then
+            // the consistency-reviewed result). Appending on top of it would
+            // freeze the partial PRD as the new latest while the finished PRD
+            // landed on a hidden older version. The hash check alone misses
+            // this whenever no partial lands between preview and apply (e.g.
+            // during the final consistency-review pass).
+            if (latest.generationPhase === 'running') {
+                result = {
+                    status: 'stale',
+                    expectedLatestSpineId,
+                    actualLatestSpineId: latest.id,
+                    reason: 'generation_running',
                 };
                 return state;
             }
@@ -696,6 +732,8 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     ...state.historyEvents,
                     [projectId]: [...(state.historyEvents[projectId] || []), historyEvent],
                 },
+                // Open branches always target the latest version (openBranches.ts).
+                branches: repointProjectOpenBranches(state.branches, projectId, newSpineId),
                 ...(appliedPlanningRecord ? {
                     planningRecords: {
                         ...state.planningRecords,
@@ -763,6 +801,8 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             return {
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), revertEvent] },
+                // Open branches always target the latest version (openBranches.ts).
+                branches: repointProjectOpenBranches(state.branches, projectId, newSpineId),
             };
         });
 

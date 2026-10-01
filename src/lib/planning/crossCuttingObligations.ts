@@ -123,7 +123,7 @@ export interface CrossCuttingObligationsInput {
     plan?: CrossCuttingPlanSections | null;
 }
 
-export const CROSS_CUTTING_OBLIGATION_LABELS: Record<CrossCuttingObligationKey, string> = {
+const CROSS_CUTTING_OBLIGATION_LABELS: Record<CrossCuttingObligationKey, string> = {
     security_privacy: 'Security & Privacy obligations',
     measurement: 'Measurement',
 };
@@ -134,7 +134,7 @@ export const CROSS_CUTTING_OBLIGATION_LABELS: Record<CrossCuttingObligationKey, 
  * These entries ARE the check (`evaluateSecurityPrivacy` iterates them), so the
  * list and the logic cannot drift apart.
  */
-export const SECURITY_CONTROL_LINK_FIELDS = [
+const SECURITY_CONTROL_LINK_FIELDS = [
     { field: 'requirementIds', gap: 'no linked requirement ids' },
     { field: 'taskIds', gap: 'no linked plan tasks' },
     { field: 'tests', gap: 'no verification checks' },
@@ -148,7 +148,7 @@ export const SECURITY_CONTROL_LINK_FIELDS = [
  * (plan §7 — a gate stricter than the generator makes every project
  * un-buildable).
  */
-export const MEASUREMENT_METRIC_CORE_FIELDS = [
+const MEASUREMENT_METRIC_CORE_FIELDS = [
     { field: 'eventName', gap: 'no event name' },
     { field: 'trigger', gap: 'no trigger' },
     { field: 'validation', gap: 'no validation' },

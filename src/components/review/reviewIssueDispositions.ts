@@ -12,7 +12,7 @@ export const recordTypeForAction = (action: ReviewIssueAction): PlanningRecord['
 
 export type InitialReviewIssueDispositionAction = Exclude<ReviewIssueDisposition['action'], 'reopen'>;
 
-export const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, InitialReviewIssueDispositionAction> = {
+const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, InitialReviewIssueDispositionAction> = {
     propose_decision: 'propose_record',
     add_assumption: 'propose_record',
     add_risk: 'propose_record',

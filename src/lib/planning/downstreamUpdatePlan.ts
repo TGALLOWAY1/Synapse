@@ -1,8 +1,8 @@
 import type { Artifact, ArtifactSlotKey, ArtifactVersion, PlanningRecord, SpineVersion } from '../../types';
 import { hashReviewValue } from '../review/hash';
 
-export const DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION = 1 as const;
-export const DOWNSTREAM_UPDATE_PLAN_EVENT_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_UPDATE_PLAN_EVENT_SCHEMA_VERSION = 1 as const;
 
 export type DownstreamUpdateArtifactSlot = Extract<ArtifactSlotKey, 'screen_inventory' | 'user_flows' | 'data_model' | 'implementation_plan'>;
 export type DownstreamImpactCertainty = 'possible' | 'likely' | 'definite';

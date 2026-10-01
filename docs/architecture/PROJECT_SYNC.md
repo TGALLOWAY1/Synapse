@@ -83,7 +83,11 @@ device-scoped and never syncs) and full design.
   **`$inc` the revision**, so a guarded push from a device still holding the
   pre-delete baseline gets a 409 instead of silently resurrecting the
   tombstoned row. It then subscribes to the store to **push** changed projects (debounced,
-  per-project) and remote-delete locally-deleted ones. Every push is a
+  per-project) and remote-delete locally-deleted ones. A change that only
+  refreshes an output-run lease heartbeat (`outputRun.heartbeatAt`, every 10 s
+  while a Build run is live — `isLeaseHeartbeatOnlyChange`) is coordination,
+  not content, and is not pushed; the latest heartbeat rides along with the
+  next real change. Every push is a
   **conditional write** — it sends the last-seen `expectedRevision`, so a stale
   push (server advanced on another device) is rejected (409 →
   `RevisionConflictError`) and becomes a `conflict` instead of clobbering the
@@ -96,7 +100,19 @@ device-scoped and never syncs) and full design.
   the cloud is stale. Conflict resolution is **explicit, never
   silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
   recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
-  local, re-baselined so the conditional push wins). The module-local
+  local, re-baselined so the conditional push wins). Both return a
+  `ConflictResolutionOutcome` — `resolved`, `failed` (nothing changed; the
+  conflict stands — a failed use-cloud restores the `conflict` UI state it had
+  flipped to `saving`), `cloud_missing` (use-cloud found no cloud copy; local
+  kept), `conflicted_again` (keep-local: the cloud advanced again), or
+  `upload_failed` (keep-local recorded, upload retries next sync) — and
+  `ProjectConflictBanner` reports every outcome but `resolved` with a toast.
+  Reconcile **reports partial failure**: a per-project bundle fetch that throws
+  no longer disappears into a debug log behind a clean "ready" — its id lands
+  in `useProjectSyncStore.failedPullIds` (`markPulled(migratedCount,
+  failedPullIds)`; phase stays `ready` because everything else synced) and
+  `SyncStatusBanner` shows "N projects couldn't be downloaded … Retry" until a
+  later reconcile pulls them. The module-local
   `recordSyncState(userId, projectId, { meta?, ui? })` helper writes the durable
   meta (`setProjectSyncMeta`) and the reactive per-project UI info
   (`patchProjectSync`) together at the sites that update both. `suspendPush`
@@ -105,13 +121,65 @@ device-scoped and never syncs) and full design.
   (`DEMO_PROJECT_ID`) is never synced. A `beforeunload` guard warns only when
   cloud state is genuinely stuck (`conflict`/`error`), never for normal pending
   pushes.
+- **Delete tombstones (per user).** `deleteProject` records `projectTombstones[id]
+  = deletedAt` (epoch ms) in the SAME store write that removes the project
+  (`src/lib/projectTombstones.ts`, pure). They live in the user's persisted
+  namespace blob — per user, not per project: never part of a `ProjectBundle`,
+  snapshot, or export, but reset/rehydrated with the namespace switch
+  (`emptyPersistedState`) and carried by cross-tab adoption. Bounded: entries
+  older than 30 days are pruned on write (hard cap 500, newest kept). What they
+  prevent: (1) the cross-tab merge resurrecting a project another tab deleted
+  (it drops any project whose tombstone is at least as new as its latest
+  activity — see STATE_AND_AUTH.md "Cross-tab write safety"); (2) sync undoing a
+  delete — a tombstoned id that is absent locally is **never pulled** (unless
+  its cloud copy changed after the deletion — next point), a
+  tombstoned copy is **never pushed** (`isTombstoned` in `projectServerSync.ts`,
+  also checked when applying pulled/refreshed bundles, so a project deleted
+  during reconcile's fetch window isn't re-added); (3) the legacy-import /
+  merged-account namespace merges re-adding it; (4) a failed remote delete
+  coming back — see the next point. A project with activity strictly AFTER its
+  tombstone (edited in another tab after the delete) is live again: the merge
+  keeps it and clears the tombstone.
+- **Failed remote deletes: newer wins.** `deleteRemote` keeps the tombstone on
+  failure, and the next reconcile decides what to do with the still-live
+  server copy (`resolveTombstonedServerCopy`) — a retried delete must never
+  erase cloud work newer than the deletion:
+  - **Kept in another tab** — the fresh persisted blob
+    (`readPersistedProjectSnapshot`) holds the project with activity after the
+    newest known deletion. This tab's memory can be stale, and the sync-meta
+    baseline is device-wide (another tab's push advances it, so the server
+    copy looks "unchanged"), so this is checked first: neither pull nor
+    delete; `requestCrossTabCatchUp` adopts the other tab's copy.
+  - **Changed in the cloud after the deletion** (`serverCopyOutlivesDeletion`):
+    the server moved past this device's last-synced baseline (revision, else
+    `updatedAt`; no baseline counts as moved) and its `updatedAt` is after
+    `deletedAt` (unreadable counts as after) — another device edited,
+    recreated or "keep local"-ed it. It is **pulled back**: `applyBundles`
+    re-adds it and calls `reviveDeletedProject` in the same write, which
+    clears the tombstone and, when the pulled content predates the deletion,
+    lifts its activity just past it — otherwise a stale tab still holding the
+    tombstone would drop it again and echo that drop as a remote delete.
+    Skipped if it was deleted again while the bundle was in flight.
+  - **Otherwise** — unchanged since this device last synced it, or changed
+    only before the deletion — the delete is **retried**, and only for a
+    project this device demonstrably synced (durable meta has a revision /
+    cloud-save baseline), so a tombstone can never delete cloud work this
+    device never saw; one it never synced stays hidden until the tombstone
+    expires.
+
+  A pulled bundle records its server baseline only when it was actually
+  applied — that baseline is what licenses a later delete retry. `deletedAt`
+  is this device's clock and `updatedAt` the server's, so a skewed device
+  clock can misorder a deletion and a cloud edit made within the skew.
 - **Sync UI state** (`src/store/projectSyncStore.ts`,
   `src/components/sync/ProjectSyncStatus.tsx`). Overall `phase`
-  (idle/loading/ready/error) + `online` + per-project
+  (idle/loading/ready/error) + `failedPullIds` (partial pull failure) +
+  `online` + per-project
   saving/saved/error/dirty/**conflict** (with `lastCloudSavedAt`/
   `lastCloudSaveError`/`conflict` details; `patchProjectSync` merges partial
-  updates). Surfaced as: a `SyncStatusBanner` (retry on failure, conflict count)
-  and per-row `ProjectSyncDot` in `ProjectDrawer`; a compact `ProjectCloudStatus`
+  updates). Surfaced as: a `SyncStatusBanner` (retry on failure or partial
+  pull, conflict count) and per-row `ProjectSyncDot` in `ProjectDrawer`; a
+  compact `ProjectCloudStatus`
   pill in the workspace header distinguishing saved-on-device / synced-to-cloud
   ("synced Nm ago") / cloud-sync-pending / cloud-save-failed / conflict; and a
   `ProjectConflictBanner` above the workspace body ("Cloud version changed on

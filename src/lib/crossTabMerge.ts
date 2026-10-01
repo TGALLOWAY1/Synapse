@@ -17,13 +17,28 @@
 // most recent activity. A project's slices are always taken wholesale from one
 // side, so every project stays an internally-consistent snapshot (version
 // arrays, preferred flags, and history all agree). Projects present on only
-// one side are kept — losing brand-new work is strictly worse than the rare
-// resurrection of a project deleted concurrently in another tab (server sync
-// re-applies remote deletions for signed-in users).
+// one side are kept — losing brand-new work is strictly worse than a stale
+// copy — EXCEPT a project the other tab deleted: both sides' delete tombstones
+// (`projectTombstones`, see projectTombstones.ts) are unioned, and a project
+// whose tombstone is at least as new as its latest activity is dropped
+// instead of resurrected. Activity strictly after the deletion wins (the
+// project is kept and its superseded tombstone cleared). One field is merged
+// across the sides instead of taken wholesale: a live output run's lease
+// heartbeat (`outputRun.heartbeatAt`, see outputRunLease.ts) — the newest
+// copy of the same run's marker wins, since heartbeats don't count as
+// activity.
 //
 // PURE — no store or storage imports (storage.ts must stay import-cycle-free).
 
 import { ARRAY_COLLECTIONS } from './projectBundle';
+import {
+  isSuppressedByTombstone,
+  mergeProjectTombstones,
+  pruneProjectTombstones,
+  readProjectTombstones,
+  type ProjectTombstones,
+} from './projectTombstones';
+import { newestOutputRunMarker, readOutputRunMarker } from './outputRunLease';
 
 interface PersistedEnvelope {
   state?: Record<string, unknown>;
@@ -91,8 +106,14 @@ export function latestProjectActivity(state: Record<string, unknown>, projectId:
  * - Per project id (union of both sides): the side with the newer
  *   `latestProjectActivity` wins WHOLESALE — its project record and its entry
  *   in every project-keyed collection are taken together; ties go to ours.
- * - Projects on only one side are kept (union).
- * - Non-collection keys and the envelope `version` come from ours.
+ * - Projects on only one side are kept (union) — unless deleted: delete
+ *   tombstones are unioned (newest per id, expired ones pruned) and any
+ *   project whose tombstone is at least as new as its winning side's latest
+ *   activity is dropped with all its collections. A project with activity
+ *   after its tombstone survives and the stale tombstone is cleared.
+ * - A project's `outputRun` marker keeps the newest heartbeat for the same
+ *   run, whichever side won it (heartbeats don't stamp activity).
+ * - Other non-collection keys and the envelope `version` come from ours.
  * - If either blob does not parse as a persist envelope, ours is returned
  *   unchanged (never let a corrupt blob poison the write).
  */
@@ -110,6 +131,13 @@ export function mergePersistedProjectBlobs(storedRaw: string, oursRaw: string): 
   const ids = new Set([...Object.keys(storedProjects), ...Object.keys(oursProjects)]);
   let changed = false;
 
+  // Union both tabs' delete tombstones. A deletion recorded by either tab
+  // must survive the other tab's write.
+  const oursTombstones = readProjectTombstones(oursState.projectTombstones);
+  let mergedTombstones: ProjectTombstones = pruneProjectTombstones(
+    mergeProjectTombstones(oursTombstones, readProjectTombstones(storedState.projectTombstones)),
+  );
+
   // Start from ours; graft in every project the stored side wins.
   const mergedState: Record<string, unknown> = { ...oursState };
   const mergedProjects: ProjectMap = { ...oursProjects };
@@ -119,28 +147,76 @@ export function mergePersistedProjectBlobs(storedRaw: string, oursRaw: string): 
     mergedCollections[key] = map && typeof map === 'object' ? { ...(map as CollectionMap) } : {};
   }
 
+  const dropProject = (id: string): void => {
+    delete mergedProjects[id];
+    for (const key of ARRAY_COLLECTIONS) delete mergedCollections[key][id];
+  };
+
   for (const id of ids) {
     const inStored = id in storedProjects;
     const inOurs = id in oursProjects;
     const storedWins = inStored
       && (!inOurs || latestProjectActivity(storedState, id) > latestProjectActivity(oursState, id));
-    if (!storedWins) continue;
-    changed = true;
-    mergedProjects[id] = storedProjects[id];
-    for (const key of ARRAY_COLLECTIONS) {
-      const storedMap = storedState[key];
-      const rows = storedMap && typeof storedMap === 'object' ? (storedMap as CollectionMap)[id] : undefined;
-      // Take the winning side's entry wholesale — including its ABSENCE, so the
-      // grafted project stays one coherent snapshot.
-      if (Array.isArray(rows)) mergedCollections[key][id] = rows;
-      else delete mergedCollections[key][id];
+    const deletedAt = mergedTombstones[id];
+    if (deletedAt !== undefined) {
+      const winnerActivity = latestProjectActivity(storedWins ? storedState : oursState, id);
+      if (isSuppressedByTombstone(deletedAt, winnerActivity)) {
+        // Deleted in one tab, still present (stale) in the other: keep it
+        // deleted instead of resurrecting it (a stored-only copy is simply
+        // not grafted in).
+        if (inOurs) {
+          dropProject(id);
+          changed = true;
+        }
+        continue;
+      }
+      // Activity after the deletion wins: the project is kept, and its stale
+      // tombstone is cleared so sync treats it as the live project it is.
+      mergedTombstones = { ...mergedTombstones };
+      delete mergedTombstones[id];
+    }
+    if (storedWins) {
+      changed = true;
+      mergedProjects[id] = storedProjects[id];
+      for (const key of ARRAY_COLLECTIONS) {
+        const storedMap = storedState[key];
+        const rows = storedMap && typeof storedMap === 'object' ? (storedMap as CollectionMap)[id] : undefined;
+        // Take the winning side's entry wholesale — including its ABSENCE, so the
+        // grafted project stays one coherent snapshot.
+        if (Array.isArray(rows)) mergedCollections[key][id] = rows;
+        else delete mergedCollections[key][id];
+      }
+    }
+    // Output-run lease: a heartbeat never stamps updatedAt (it is coordination,
+    // not content), so the side that won above may hold an OLDER heartbeat for
+    // the very same run. Keep the newest heartbeat whichever side won — a stale
+    // one would make a run that is alive in another tab look lapsed (and get
+    // resumed a second time). See outputRunLease.ts.
+    if (inStored && inOurs) {
+      const winner = mergedProjects[id] as Record<string, unknown> | undefined;
+      const loser = (storedWins ? oursProjects[id] : storedProjects[id]) as Record<string, unknown> | undefined;
+      const winnerRun = readOutputRunMarker(winner?.outputRun);
+      const freshest = newestOutputRunMarker(winnerRun, readOutputRunMarker(loser?.outputRun));
+      if (winner && freshest && freshest !== winnerRun) {
+        const withFreshestLease: Record<string, unknown> = { ...winner, outputRun: freshest };
+        mergedProjects[id] = withFreshestLease;
+        changed = true;
+      }
     }
   }
 
-  if (!changed) return oursRaw;
+  const tombstonesChanged = !sameTombstones(mergedTombstones, oursTombstones);
+  if (!changed && !tombstonesChanged) return oursRaw;
   mergedState.projects = mergedProjects;
   for (const key of ARRAY_COLLECTIONS) {
     mergedState[key] = mergedCollections[key];
   }
+  mergedState.projectTombstones = mergedTombstones;
   return JSON.stringify({ ...ours, state: mergedState });
+}
+
+function sameTombstones(a: ProjectTombstones, b: ProjectTombstones): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((id) => b[id] === a[id]);
 }

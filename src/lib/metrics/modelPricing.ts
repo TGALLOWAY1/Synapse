@@ -19,7 +19,7 @@ export interface ModelPrice {
  * Family keyword → price. Matched case-insensitively as a substring of the
  * model id, most-specific first (so 'flash-lite' wins over 'flash').
  */
-export const MODEL_PRICING: Array<{ match: string; price: ModelPrice }> = [
+const MODEL_PRICING: Array<{ match: string; price: ModelPrice }> = [
     { match: 'flash-lite', price: { input: 0.10, output: 0.40 } },
     { match: 'pro', price: { input: 1.25, output: 5.0 } },
     { match: 'flash', price: { input: 0.30, output: 2.5 } },
@@ -29,7 +29,7 @@ export const MODEL_PRICING: Array<{ match: string; price: ModelPrice }> = [
 /** Fallback when no family matches — a mid Flash-tier estimate. */
 const DEFAULT_PRICE: ModelPrice = { input: 0.30, output: 2.5 };
 
-export function priceForModel(model: string): ModelPrice {
+function priceForModel(model: string): ModelPrice {
     const id = (model || '').toLowerCase();
     for (const { match, price } of MODEL_PRICING) {
         if (id.includes(match)) return price;

@@ -174,7 +174,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > ai_model_risk 1`] = `
@@ -347,7 +347,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > architecture 1`] = `
@@ -520,7 +520,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > data_backend 1`] = `
@@ -693,7 +693,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > delivery_operations 1`] = `
@@ -866,7 +866,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > product_scope 1`] = `
@@ -1031,7 +1031,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > reliability_qa 1`] = `
@@ -1221,7 +1221,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > security_privacy 1`] = `
@@ -1411,7 +1411,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > ux_behavior 1`] = `
@@ -1576,7 +1576,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > adversarial review specialist prompts > with user focus 1`] = `
@@ -1741,7 +1741,7 @@ Evidence locator index (the only admissible evidence):
   }
 ]
 
-Return only the required JSON object. Keep findings concise and actionable."
+Return only the required JSON object. Keep findings concise and actionable. Return at most 12 findings, most material first."
 `;
 
 exports[`prompt surfaces — snapshot net > bounded planning-alignment reasoning prompt > system 1`] = `

@@ -14,6 +14,11 @@ const FINDING_TYPES: ReviewFindingType[] = [
 ];
 const SEVERITIES: ReviewSeverity[] = ['low', 'medium', 'high', 'critical'];
 const CONFIDENCES: ReviewConfidence[] = ['low', 'medium', 'high'];
+/** Upper bound on findings kept from one specialist response. The specialist
+ * prompt asks for at most this many, most material first (prompt.ts), and
+ * `parseSpecialistOutput` keeps the first N — never a response-schema
+ * `maxItems`, which the Gemini API rejects for this schema. */
+export const MAX_SPECIALIST_FINDINGS = 12;
 const COVERAGE_AREAS: ReviewCoverageArea[] = [
     'problem', 'primary_user', 'intended_outcome', 'first_release_scope',
     'material_assumptions', 'specialist_boundary',
@@ -48,9 +53,13 @@ export const specialistOutputSchema = {
                 required: ['area', 'conclusion', 'evidence'],
             },
         },
+        // No `maxItems` here: the Gemini API rejects this schema with HTTP 400
+        // INVALID_ARGUMENT when the findings array is bounded (verified
+        // against gemini-3.1-pro-preview and gemini-3.8-flash), which failed
+        // every specialist call. The cap is enforced after parsing instead
+        // (MAX_SPECIALIST_FINDINGS).
         findings: {
             type: 'ARRAY',
-            maxItems: 12,
             items: {
                 type: 'OBJECT',
                 properties: {
@@ -170,7 +179,6 @@ export function parseSpecialistOutput(raw: string): ParsedSpecialistOutput {
     if (!Array.isArray(parsed.coverageChecks) || parsed.coverageChecks.length === 0) {
         throw new SpecialistOutputValidationError('coverageChecks must be a non-empty array');
     }
-    if (parsed.findings.length > 12) throw new SpecialistOutputValidationError('findings exceeds the limit of 12');
     return {
         coverageSummary: requiredString(parsed, 'coverageSummary'),
         resolvedAreas: strings(parsed.resolvedAreas, 'resolvedAreas'),
@@ -184,6 +192,8 @@ export function parseSpecialistOutput(raw: string): ParsedSpecialistOutput {
                 evidence: parseEvidence(value.evidence, `coverageChecks[${index}].evidence`),
             };
         }),
-        findings: parsed.findings.map(parseFinding),
+        // Keep the first MAX_SPECIALIST_FINDINGS; anything beyond the cap is
+        // dropped before validation so it can neither fail nor bloat the run.
+        findings: parsed.findings.slice(0, MAX_SPECIALIST_FINDINGS).map(parseFinding),
     };
 }

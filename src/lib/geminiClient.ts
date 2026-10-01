@@ -1,6 +1,7 @@
 import { getCachedGeminiKey } from './geminiKeyVault';
 import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
-import { beginTrace } from './trace/traceRecorder';
+import { beginTrace, type TraceHandle } from './trace/traceRecorder';
+import { redactText } from './trace/traceRedaction';
 import type { LlmTraceMeta } from './trace/traceTypes';
 
 export interface JsonModeConfig {
@@ -161,11 +162,50 @@ const buildHeaders = (apiKey: string): HeadersInit => {
 // On mobile Safari, a transient connection drop during a long-running fetch
 // (the PRD pipeline can take 60–90s end-to-end) surfaces as a generic
 // `TypeError: Load failed`. Without retry, a single drop kills the whole
-// generation. We retry connection-level failures with exponential backoff;
-// any non-network error (auth, quota, abort, HTTP 4xx/5xx returned by the
-// server) bypasses retry and propagates immediately.
-const MAX_FETCH_RETRIES = 3;
+// generation. We retry connection-level failures with exponential backoff.
+//
+// Rate limits and transient server failures are retried the same way: the PRD
+// pipeline runs several section calls concurrently (and the artifact bundle up
+// to 4), so one 429 / 5xx burst used to fail sections that a short wait would
+// have saved. `RETRYABLE_HTTP_STATUSES` is a closed list — every other 4xx
+// (bad request, auth, not found, …) is deterministic and propagates
+// immediately, as does a caller abort. Both kinds of retry share one budget of
+// MAX_FETCH_RETRIES per request.
+export const MAX_FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
+const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Longest server-requested wait (`Retry-After`) we will sit through. A longer
+ * request means the quota window is far away — holding the generation open
+ * would only stall the UI — so the error surfaces instead of being retried.
+ */
+export const MAX_RETRY_AFTER_MS = 60_000;
+
+export const isRetryableHttpStatus = (status: number): boolean => RETRYABLE_HTTP_STATUSES.has(status);
+
+/**
+ * Exponential backoff with proportional jitter: ≈1s, 2s, 4s for retries 1–3,
+ * each stretched by up to 50% so concurrent calls that failed together (e.g.
+ * parallel PRD sections hitting the same 429) don't retry in lockstep.
+ */
+export const backoffDelayMs = (attempt: number, random: () => number = Math.random): number => {
+    const base = RETRY_BASE_MS * 2 ** attempt;
+    return Math.round(base + base * 0.5 * random());
+};
+
+/**
+ * Parse a `Retry-After` header (delta-seconds or an HTTP-date) into a wait in
+ * ms. Null when absent or unparseable, so the caller falls back to backoff.
+ */
+export const parseRetryAfterMs = (value: string | null, now: number = Date.now()): number | null => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000);
+    const at = Date.parse(trimmed);
+    if (Number.isNaN(at)) return null;
+    return Math.max(0, at - now);
+};
 
 /**
  * Hard ceiling on how long a single request may sit without producing any
@@ -183,8 +223,24 @@ export class GeminiTimeoutError extends Error {
     }
 }
 
+/**
+ * A non-OK HTTP response from Gemini, thrown once any transport retries are
+ * spent. Carries the status for callers; never classified as a network error
+ * (its message quotes the response body, which may itself contain words like
+ * "NetworkError" — that must not trigger another round of retries).
+ */
+export class GeminiHttpError extends Error {
+    readonly status: number;
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = 'GeminiHttpError';
+        this.status = status;
+    }
+}
+
 export const isRetryableNetworkError = (e: unknown): boolean => {
     if (e instanceof DOMException && e.name === 'AbortError') return false;
+    if (e instanceof GeminiHttpError) return false;
     if (e instanceof GeminiTimeoutError) return true;
     if (!(e instanceof Error)) return false;
     const msg = e.message.toLowerCase();
@@ -240,21 +296,81 @@ const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
         }, { once: true });
     });
 
-const fetchWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
+/** One transport-level retry decision (see fetchWithRetry). */
+export interface GeminiRetryEvent {
+    /** 1-based number of the retry about to be sent. */
+    retry: number;
+    /** Why the previous attempt is retried, e.g. "HTTP 429" or "network error: Load failed". */
+    reason: string;
+    /** Wait before the retry: the backoff, or the server's `Retry-After`. */
+    delayMs: number;
+}
+
+interface FetchRetryHooks {
+    /** Called once per retry, before its wait (trace + diagnostics). */
+    onRetry?: (event: GeminiRetryEvent) => void;
+    /**
+     * Called whenever the transport itself makes progress (a response arrived,
+     * a backoff wait finished) so the caller's inactivity watchdog measures
+     * server silence only — never our own deliberate backoff.
+     */
+    touch?: () => void;
+}
+
+/**
+ * fetch() with bounded retries for connection-level failures AND retryable
+ * HTTP statuses (429 / 5xx — see RETRYABLE_HTTP_STATUSES). Resolves with the
+ * first non-retryable response, or with the last retryable one once the budget
+ * is spent (the caller turns it into an error message). Waits honor the
+ * caller's abort signal, so a cancel during backoff rejects promptly. A
+ * response is always received before any streamed content is delivered, so
+ * status retries are safe for streaming calls too.
+ */
+const fetchWithRetry = async (url: string, init: RequestInit, hooks: FetchRetryHooks = {}): Promise<Response> => {
     const signal = init.signal as AbortSignal | undefined;
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+    for (let attempt = 0; ; attempt++) {
+        let response: Response;
         try {
-            return await fetch(url, init);
+            response = await fetch(url, init);
         } catch (e) {
-            lastError = e;
-            if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) throw e;
-            const delay = RETRY_BASE_MS * 2 ** attempt;
-            console.warn(`[gemini] fetch failed (${(e as Error).message}); retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
-            await sleepWithAbort(delay, signal);
+            if (!isRetryableNetworkError(e) || attempt >= MAX_FETCH_RETRIES) throw e;
+            const delayMs = backoffDelayMs(attempt);
+            console.warn(`[gemini] fetch failed (${(e as Error).message}); retrying in ${delayMs}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
+            hooks.onRetry?.({ retry: attempt + 1, reason: `network error: ${(e as Error).message}`, delayMs });
+            hooks.touch?.();
+            await sleepWithAbort(delayMs, signal);
+            hooks.touch?.();
+            continue;
         }
+        if (response.ok || !isRetryableHttpStatus(response.status) || attempt >= MAX_FETCH_RETRIES) {
+            return response;
+        }
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After'));
+        // The server asked for a longer pause than we will hold a generation
+        // open for — surface the error now instead of stalling.
+        if (retryAfterMs !== null && retryAfterMs > MAX_RETRY_AFTER_MS) return response;
+        const delayMs = retryAfterMs ?? backoffDelayMs(attempt);
+        // The discarded attempt's body is never read (only the final attempt's
+        // body feeds the error message) — release its connection.
+        response.body?.cancel().catch(() => undefined);
+        console.warn(`[gemini] HTTP ${response.status}; retrying in ${delayMs}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
+        hooks.onRetry?.({ retry: attempt + 1, reason: `HTTP ${response.status}`, delayMs });
+        hooks.touch?.();
+        await sleepWithAbort(delayMs, signal);
+        hooks.touch?.();
     }
-    throw lastError;
+};
+
+/** How much of a non-JSON (or message-less) error body the thrown message quotes. */
+const ERROR_BODY_SNIPPET_CHARS = 200;
+
+const bodySnippet = (rawBody: string): string => {
+    // Collapse whitespace (HTML gateway pages are mostly newlines) and scrub
+    // anything credential-shaped before it can reach a toast or a log.
+    const collapsed = redactText(rawBody.replace(/\s+/g, ' ').trim());
+    return collapsed.length > ERROR_BODY_SNIPPET_CHARS
+        ? `${collapsed.slice(0, ERROR_BODY_SNIPPET_CHARS)}…`
+        : collapsed;
 };
 
 /**
@@ -263,9 +379,13 @@ const fetchWithRetry = async (url: string, init: RequestInit): Promise<Response>
  * users know to check their billing project configuration rather than
  * assuming they just need to wait.
  */
-const formatGeminiError = (status: string, errorData: unknown): string => {
+const formatGeminiError = (status: string, errorData: unknown, rawBody = ''): string => {
     const raw = (errorData as { error?: { message?: string; status?: string } })?.error;
-    const message = raw?.message || 'Unknown error';
+    // A body with no Gemini error message (an HTML gateway page, a truncated
+    // reply, an empty 503) still says something useful — quote it instead of
+    // the old opaque "Unknown error".
+    const snippet = bodySnippet(rawBody);
+    const message = raw?.message || (snippet ? `Unexpected response body: ${snippet}` : 'Empty response body');
     const isQuota = raw?.status === 'RESOURCE_EXHAUSTED' || /quota|resource.exhausted|rate.limit/i.test(message);
     if (isQuota && /free.?tier|freetier|-FreeTier/i.test(message)) {
         return (
@@ -278,6 +398,38 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
         );
     }
     return `Gemini API Error: ${status} - ${message}`;
+};
+
+/**
+ * Read a failed response's body (exactly once) and build the thrown message:
+ * the HTTP status, Gemini's error message — or the first ~200 characters of a
+ * non-JSON body — and how many transport retries preceded it.
+ */
+const describeHttpError = async (response: Response, retries: number): Promise<string> => {
+    const status = `${response.status} ${response.statusText}`.trim();
+    const rawBody = await response.text().catch(() => '');
+    let errorData: unknown = null;
+    try {
+        errorData = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+        errorData = null;
+    }
+    const message = formatGeminiError(status, errorData, rawBody);
+    return retries > 0 ? `${message} (after ${retries} ${retries === 1 ? 'retry' : 'retries'})` : message;
+};
+
+const SAFETY_REFUSAL_MESSAGE =
+    'Gemini refused to generate content due to safety filters. Try adjusting your prompt or PRD content.';
+
+/** The prompt itself was blocked (`promptFeedback.blockReason`), so no candidate came back. */
+const promptBlockedMessage = (blockReason: string): string =>
+    blockReason === 'SAFETY'
+        ? SAFETY_REFUSAL_MESSAGE
+        : `Gemini blocked this request (blockReason: ${blockReason}) and returned no content. Try adjusting your prompt or PRD content.`;
+
+/** Record why a call needed transport retries on its trace (no-op when capture is off). */
+const annotateRetries = (trace: TraceHandle, reasons: string[]): void => {
+    if (reasons.length > 0) trace.annotate({ retryReason: reasons.join('; ') });
 };
 
 export const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig, signal?: AbortSignal) => {
@@ -321,8 +473,12 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     });
 
     const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
+    // Transport retries (429 / 5xx / connection drops) for the trace + message.
+    let retries = 0;
+    const retryReasons: string[] = [];
     let data: {
         candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
+        promptFeedback?: { blockReason?: string };
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
     } | undefined;
     try {
@@ -331,21 +487,27 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
             headers: buildHeaders(apiKey),
             body: JSON.stringify(body),
             signal: watchdog.signal,
+        }, {
+            onRetry: (event) => {
+                retries = event.retry;
+                retryReasons.push(event.reason);
+            },
+            touch: watchdog.touch,
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => null);
-            throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+            throw new GeminiHttpError(response.status, await describeHttpError(response, retries));
         }
 
         data = await response.json();
     } catch (e) {
+        annotateRetries(trace, retryReasons);
         if (watchdog.timedOut()) {
             const timeout = new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
-            trace.finishError(timeout);
+            trace.finishError(timeout, { retryCount: retries });
             throw timeout;
         }
-        trace.finishError(e);
+        trace.finishError(e, { retryCount: retries });
         throw e;
     } finally {
         watchdog.dispose();
@@ -356,15 +518,22 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     const candidate = data?.candidates?.[0];
     const finishReason = candidate?.finishReason;
     if (finishReason === 'SAFETY') {
-        const safetyErr = new Error('Gemini refused to generate content due to safety filters. Try adjusting your prompt or PRD content.');
-        trace.finishError(safetyErr, { finishReason });
+        const safetyErr = new Error(SAFETY_REFUSAL_MESSAGE);
+        annotateRetries(trace, retryReasons);
+        trace.finishError(safetyErr, { finishReason, retryCount: retries });
         throw safetyErr;
     }
     const text: string | undefined = candidate?.content?.parts?.[0]?.text;
     if (!text) {
+        // A blocked prompt comes back with no candidate at all — name the block
+        // instead of the generic "empty response".
+        const blockReason = data?.promptFeedback?.blockReason;
         const reason = finishReason ? ` (finishReason: ${finishReason})` : '';
-        const emptyErr = new Error(`Gemini returned an empty response${reason}. Please try again.`);
-        trace.finishError(emptyErr, { finishReason });
+        const emptyErr = new Error(blockReason
+            ? promptBlockedMessage(blockReason)
+            : `Gemini returned an empty response${reason}. Please try again.`);
+        annotateRetries(trace, retryReasons);
+        trace.finishError(emptyErr, { finishReason, retryCount: retries });
         throw emptyErr;
     }
     jsonMode?.onFinish?.({ finishReason });
@@ -400,11 +569,16 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
             parsedJson,
             usage,
             finishReason,
-            validation: { jsonParsed, finishReason },
+            retryCount: retries,
+            validation: {
+                jsonParsed,
+                finishReason,
+                ...(retryReasons.length > 0 ? { retryReason: retryReasons.join('; ') } : {}),
+            },
         });
     }
     const durationMs = performance.now() - startTime;
-    console.log(`[GEN] callGemini: ${durationMs.toFixed(0)}ms (${text.length} chars)`);
+    console.log(`[GEN] callGemini: ${durationMs.toFixed(0)}ms (${text.length} chars${retries > 0 ? `, ${retries} transport retries` : ''})`);
     return text;
 };
 
@@ -451,6 +625,11 @@ export const callGeminiStream = async (
         meta: jsonMode?.traceMeta,
     });
 
+    // Transport-level retries (429 / 5xx / connection drops before any content)
+    // across every stream attempt, for the trace and diagnostics.
+    let fetchRetries = 0;
+    const retryReasons: string[] = [];
+
     // Run a single stream attempt: connect, read SSE chunks, return the full
     // accumulated text along with the latest finishReason reported by the
     // server. Errors propagate to the outer retry loop so a mid-stream
@@ -460,17 +639,26 @@ export const callGeminiStream = async (
         // and every received chunk resets it — only true silence times out.
         const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
         let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+        let attemptRetries = 0;
         try {
+            // Status retries happen here, before the body is read — i.e. before
+            // any chunk reaches the caller — so they never replay content.
             const response = await fetchWithRetry(url, {
                 method: 'POST',
                 headers: buildHeaders(apiKey),
                 body: bodyJson,
                 signal: watchdog.signal,
+            }, {
+                onRetry: (event) => {
+                    attemptRetries += 1;
+                    fetchRetries += 1;
+                    retryReasons.push(event.reason);
+                },
+                touch: watchdog.touch,
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => null);
-                throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+                throw new GeminiHttpError(response.status, await describeHttpError(response, attemptRetries));
             }
 
             reader = response.body?.getReader();
@@ -480,6 +668,7 @@ export const callGeminiStream = async (
             let fullText = '';
             let buffer = '';
             let finishReason: string | undefined;
+            let blockReason: string | undefined;
             let usage: GeminiTokenUsage | undefined;
 
             while (true) {
@@ -507,6 +696,9 @@ export const callGeminiStream = async (
                         if (candidate?.finishReason) {
                             finishReason = candidate.finishReason;
                         }
+                        if (chunk.promptFeedback?.blockReason) {
+                            blockReason = chunk.promptFeedback.blockReason;
+                        }
                         // Gemini reports token usage on the final SSE chunk. The
                         // non-streaming path parses this too; capturing it here
                         // closes the artifact-generation token-metrics gap.
@@ -523,6 +715,12 @@ export const callGeminiStream = async (
                     }
                 }
             }
+
+            // A safety stop (or a blocked prompt) is a refusal, not a completion
+            // — say so instead of handing callers a partial or empty body that
+            // later fails as a generic parse error. Never retried.
+            if (finishReason === 'SAFETY') throw new Error(SAFETY_REFUSAL_MESSAGE);
+            if (!fullText && blockReason) throw new Error(promptBlockedMessage(blockReason));
 
             return { fullText, finishReason, usage };
         } catch (e) {
@@ -549,7 +747,7 @@ export const callGeminiStream = async (
         try {
             const { fullText, finishReason, usage } = await streamOnce();
             const durationMs = performance.now() - startTime;
-            console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, finishReason=${finishReason ?? 'unknown'}, attempts=${attempt + 1})`);
+            console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, finishReason=${finishReason ?? 'unknown'}, attempts=${attempt + 1}, transportRetries=${fetchRetries})`);
             if (usage) jsonMode?.onUsage?.(usage);
             if (trace.id) {
                 let parsedJson: unknown;
@@ -567,8 +765,12 @@ export const callGeminiStream = async (
                     parsedJson,
                     usage,
                     finishReason,
-                    retryCount: attempt,
-                    validation: { jsonParsed, finishReason },
+                    retryCount: attempt + fetchRetries,
+                    validation: {
+                        jsonParsed,
+                        finishReason,
+                        ...(retryReasons.length > 0 ? { retryReason: retryReasons.join('; ') } : {}),
+                    },
                 });
             }
             callbacks.onFinish?.({ finishReason });
@@ -577,11 +779,13 @@ export const callGeminiStream = async (
         } catch (e) {
             lastError = e;
             if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) {
-                trace.finishError(e, { retryCount: attempt });
+                annotateRetries(trace, retryReasons);
+                trace.finishError(e, { retryCount: attempt + fetchRetries });
                 if (e instanceof Error) callbacks.onError(e);
                 throw e;
             }
-            const delay = RETRY_BASE_MS * 2 ** attempt;
+            const delay = backoffDelayMs(attempt);
+            retryReasons.push(`stream restart: ${(e as Error).message}`);
             console.warn(`[gemini] stream failed (${(e as Error).message}); retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
             await sleepWithAbort(delay, signal);
             callbacks.onRestart?.();

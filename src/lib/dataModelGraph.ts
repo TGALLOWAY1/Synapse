@@ -622,7 +622,7 @@ export function placeEdgeLabels(
 // Summary
 // ---------------------------------------------------------------------------
 
-export function summarizeDataModel(parsed: ParsedDataModel, graph: DataModelGraph): DataModelSummary {
+function summarizeDataModel(parsed: ParsedDataModel, graph: DataModelGraph): DataModelSummary {
     let fieldCount = 0;
     let constraintCount = 0;
     let indexCount = 0;

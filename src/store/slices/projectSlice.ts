@@ -18,6 +18,8 @@ import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { deleteImagesForVersion } from '../../lib/mockupImageStore';
 import { deleteScreenImagesForArtifactVersion } from '../../lib/screenInventoryImageStore';
 import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore';
+import { addProjectTombstone } from '../../lib/projectTombstones';
+import { latestProjectActivity } from '../../lib/crossTabMerge';
 import { useMockupImageStore } from '../mockupImageStore';
 import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
 import { useMockupVariantImageStore } from '../mockupVariantImageStore';
@@ -26,6 +28,7 @@ export const DEMO_CACHE_POLICY_VERSION = 1;
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
+    projectTombstones: Record<string, number>;
     historyEvents: Record<string, HistoryEvent[]>;
     createProject: ProjectState['createProject'];
     deleteProject: ProjectState['deleteProject'];
@@ -34,6 +37,10 @@ export type ProjectSlice = {
     setProjectStage: ProjectState['setProjectStage'];
     setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
     markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
+    markOutputRunStarted: ProjectState['markOutputRunStarted'];
+    heartbeatOutputRun: ProjectState['heartbeatOutputRun'];
+    settleOutputRun: ProjectState['settleOutputRun'];
+    reviveDeletedProject: ProjectState['reviveDeletedProject'];
     loadDemoProject: ProjectState['loadDemoProject'];
     clearDemoProject: ProjectState['clearDemoProject'];
     resetDemoProject: ProjectState['resetDemoProject'];
@@ -281,6 +288,7 @@ async function wipeShowcaseProject(
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
     projects: {},
+    projectTombstones: {},
     historyEvents: {},
 
     createProject: (name: string, promptText: string, platform?: ProjectPlatform) => {
@@ -383,6 +391,10 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newDownstreamArtifactUpdateVerificationEvents[projectId];
             return {
                 projects: newProjects,
+                // Remember the deletion in the same write, so a stale tab's
+                // copy (cross-tab merge), the server (sync), or a namespace
+                // merge can't bring the project back. See projectTombstones.ts.
+                projectTombstones: addProjectTombstone(state.projectTombstones ?? {}, projectId),
                 spineVersions: newSpines,
                 historyEvents: newHistory,
                 branches: newBranches,
@@ -455,6 +467,106 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                     [projectId]: { ...project, needsDesignSetup: false, updatedAt: Date.now() },
                 },
             };
+        });
+    },
+
+    // Durable output-run marker (Project.outputRun) — the artifact-run
+    // counterpart of SpineVersion.generationPhase, held as a LEASE by the tab
+    // running it (src/lib/outputRunLease.ts). Written only by
+    // artifactJobController.startAll: stamp on launch (with the owning tab and
+    // a first heartbeat), heartbeat while live, settle on end. A page load
+    // turns a leftover 'running' marker into 'interrupted' only when this tab
+    // owned it or its heartbeat lapsed (markInterruptedOutputRuns), which
+    // resumeIfNeeded treats as resume evidence. Stamping and settling are
+    // project-record mutations and stamp updatedAt (cross-tab recency).
+    markOutputRunStarted: (projectId: string, spineVersionId: string, runId: string, ownerTabId?: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            const now = Date.now();
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: {
+                        ...project,
+                        outputRun: {
+                            spineVersionId,
+                            runId,
+                            startedAt: now,
+                            phase: 'running',
+                            heartbeatAt: now,
+                            ...(ownerTabId ? { ownerTabId } : {}),
+                        },
+                        updatedAt: now,
+                    },
+                },
+            };
+        });
+    },
+
+    // The owning tab's proof of life for its live run. Deliberately does NOT
+    // stamp `updatedAt`: a heartbeat is coordination, not project content —
+    // stamping it would make the owner's copy win every cross-tab merge over
+    // genuine edits made in another tab (the merge instead keeps the newest
+    // heartbeat explicitly), and server sync skips heartbeat-only changes.
+    heartbeatOutputRun: (projectId: string, runId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            const run = project?.outputRun;
+            if (!project || !run || run.runId !== runId || run.phase !== 'running') return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, outputRun: { ...run, heartbeatAt: Date.now() } },
+                },
+            };
+        });
+    },
+
+    // Only the run that stamped the marker may clear it: a superseded run
+    // settling late must not erase the marker of the run that replaced it.
+    settleOutputRun: (projectId: string, runId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project?.outputRun || project.outputRun.runId !== runId) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, outputRun: undefined, updatedAt: Date.now() },
+                },
+            };
+        });
+    },
+
+    // Un-delete a project whose cloud copy changed AFTER this device deleted
+    // it (server sync's newer-wins rule — see projectServerSync reconcile).
+    // Server sync calls it in the same synchronous turn that re-adds the
+    // pulled bundle, so both land in one persisted write. Clears the tombstone
+    // and, when the pulled content itself predates the deletion (offline edits
+    // pushed late, a "keep local" re-upload), stamps `updatedAt` just past it:
+    // activity after the delete is what keeps a project alive in the cross-tab
+    // merge, so a second tab still holding the tombstone keeps the revived
+    // copy instead of dropping it — and echoing that drop as a remote delete
+    // of the very cloud work being restored. Just past the deletion, not now:
+    // genuine post-delete work in another tab still wins the newest-wins merge.
+    reviveDeletedProject: (projectId: string, deletedAt: number) => {
+        set((state) => {
+            const supersededAt = Math.max(deletedAt, state.projectTombstones?.[projectId] ?? 0);
+            const project = state.projects[projectId];
+            const hasTombstone = !!state.projectTombstones && projectId in state.projectTombstones;
+            const needsStamp = !!project
+                && latestProjectActivity(state as unknown as Record<string, unknown>, projectId) <= supersededAt;
+            if (!hasTombstone && !needsStamp) return state;
+            const patch: Partial<ProjectState> = {};
+            if (hasTombstone) {
+                const tombstones = { ...state.projectTombstones };
+                delete tombstones[projectId];
+                patch.projectTombstones = tombstones;
+            }
+            if (project && needsStamp) {
+                patch.projects = { ...state.projects, [projectId]: { ...project, updatedAt: supersededAt + 1 } };
+            }
+            return patch;
         });
     },
 

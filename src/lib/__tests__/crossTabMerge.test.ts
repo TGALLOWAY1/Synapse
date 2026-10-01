@@ -203,3 +203,94 @@ describe('mergePersistedProjectBlobs', () => {
         expect(mergePersistedProjectBlobs(stored, ours)).toBe(ours);
     });
 });
+
+describe('mergePersistedProjectBlobs — delete tombstones', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    // The reported bug: tab A deleted a project; a stale tab B (hydrated
+    // before the delete) flushes a write. The project used to survive as
+    // "present on only one side" and come back in both tabs (and on the server).
+    it('drops a stale tab\'s copy of a project another tab deleted', () => {
+        const deletedAt = Date.now();
+        const stored = blob({ projects: {} }, { projectTombstones: { p1: deletedAt } });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: deletedAt - 5000 } },
+            historyEvents: { p1: [{ id: 'h1', createdAt: deletedAt - 4000 }] },
+        });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['projects']['p1']).toBeUndefined();
+        expect(merged['historyEvents']['p1']).toBeUndefined();
+        expect(merged['projectTombstones']).toEqual({ p1: deletedAt });
+    });
+
+    it('never grafts a deleted project back in from the stale stored blob', () => {
+        const deletedAt = Date.now();
+        const stored = blob({
+            projects: { p1: { id: 'p1', createdAt: deletedAt - 5000 } },
+            historyEvents: { p1: [{ id: 'h1', createdAt: deletedAt - 4000 }] },
+        });
+        const ours = blob({ projects: {} }, { projectTombstones: { p1: deletedAt } });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['projects']['p1']).toBeUndefined();
+        expect(merged['historyEvents']['p1']).toBeUndefined();
+    });
+
+    it('keeps a project with activity AFTER the deletion and clears its superseded tombstone', () => {
+        const deletedAt = Date.now() - 10_000;
+        const stored = blob({ projects: {} }, { projectTombstones: { p1: deletedAt } });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: deletedAt - 5000, updatedAt: deletedAt + 1000 } },
+        });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['projects']['p1']).toBeDefined();
+        // The superseded tombstone is not carried into the written blob.
+        expect(merged['projectTombstones']?.['p1']).toBeUndefined();
+    });
+
+    it('unions both tabs\' tombstones (newest per id) and prunes expired ones', () => {
+        const now = Date.now();
+        const stored = blob({ projects: {} }, {
+            projectTombstones: { a: now - 1000, expired: now - 31 * DAY },
+        });
+        const ours = blob({ projects: {} }, { projectTombstones: { a: now - 2000, b: now - 500 } });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['projectTombstones']).toEqual({ a: now - 1000, b: now - 500 });
+    });
+});
+
+describe('mergePersistedProjectBlobs — output-run lease', () => {
+    const lease = (heartbeatAt: number, runId = 'r1') => ({
+        spineVersionId: 's1', runId, startedAt: 1_000, phase: 'running', ownerTabId: 'owner-tab', heartbeatAt,
+    });
+
+    // Heartbeats don't count as activity, so the side that wins a project can
+    // hold an OLDER heartbeat than the other — the newest must survive, or a
+    // run that is alive in the owner tab would look lapsed and get resumed.
+    it('keeps the newest heartbeat for the same run, whichever side wins the project', () => {
+        const stored = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(90_000) } },
+        });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(60_000) } },
+            historyEvents: { p1: [{ id: 'h-newer', createdAt: 5_000 }] }, // ours wins the project
+        });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['historyEvents']['p1']).toEqual([{ id: 'h-newer', createdAt: 5_000 }]);
+        expect((merged['projects']['p1'] as { outputRun: { heartbeatAt: number } }).outputRun.heartbeatAt).toBe(90_000);
+    });
+
+    it('never transplants a marker from a different run', () => {
+        const stored = blob({ projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(90_000, 'other-run') } } });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(60_000) } },
+            historyEvents: { p1: [{ id: 'h', createdAt: 5_000 }] },
+        });
+
+        expect(mergePersistedProjectBlobs(stored, ours)).toBe(ours);
+    });
+});

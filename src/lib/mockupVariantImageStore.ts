@@ -38,9 +38,6 @@ export const buildVariantImageKey = (
 
 export const putVariantImage = (record: MockupVariantImageRecord): Promise<void> => store.put(record);
 
-export const getVariantImage = (key: string): Promise<MockupVariantImageRecord | undefined> =>
-    store.get(key);
-
 export const listVariantImagesForVersion = (
     versionId: string,
 ): Promise<MockupVariantImageRecord[]> => store.listByIndex(versionId);

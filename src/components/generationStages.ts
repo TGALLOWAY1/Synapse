@@ -6,23 +6,8 @@ export interface ProgressStage {
 
 // ── Pre-defined stage sets for common operations ──
 
-// Stage labels mirror the four phase strings emitted by the single-pass PRD
-// pipeline (see `prdPipeline.ts:phaseFor`). The `GenerationProgress` panel
-// derives the active stage from the latest progress message rather than a
-// timer, so `minDuration` is informational only.
-export const PRD_GENERATION_STAGES: ProgressStage[] = [
-    { label: 'Drafting vision and target users…' },
-    { label: 'Designing UX architecture and feature specs…' },
-    { label: 'Defining data model and acceptance criteria…' },
-    { label: 'Wrapping up structured PRD…' },
-];
-
-export const PRD_REGENERATION_STAGES: ProgressStage[] = [
-    { label: 'Drafting vision and target users…' },
-    { label: 'Designing UX architecture and feature specs…' },
-    { label: 'Defining data model and acceptance criteria…' },
-    { label: 'Wrapping up structured PRD…' },
-];
+// PRD generation has no stage list here: `ProgressTimeline` renders it from the
+// live per-section status (see `progress/buildGenerationSteps.ts`).
 
 export const MOCKUP_GENERATION_STAGES: ProgressStage[] = [
     { label: 'Resolving upstream artifacts…', minDuration: 1000 },
@@ -35,24 +20,6 @@ export const CONSOLIDATION_STAGES: ProgressStage[] = [
     { label: 'Identifying key changes...', minDuration: 2500 },
     { label: 'Synthesizing patch...', minDuration: 3500 },
     { label: 'Validating consistency...', minDuration: 4000 },
-];
-
-export const STALE_REFRESH_STAGES: ProgressStage[] = [
-    { label: 'Detecting outdated artifacts...', minDuration: 2000 },
-    { label: 'Reconciling with updated PRD...', minDuration: 3000 },
-    { label: 'Regenerating affected artifacts...', minDuration: 4000 },
-    { label: 'Validating updated outputs...', minDuration: 5000 },
-];
-
-/**
- * Visual scaffold for the artifact bundle progress panel.
- * No `minDuration` — the panel is driven by real completion state, not timers.
- */
-export const BUNDLE_GENERATION_STAGES: ProgressStage[] = [
-    { label: 'Preparing artifact pipeline...' },
-    { label: 'Generating foundational artifacts...' },
-    { label: 'Building dependent artifacts...' },
-    { label: 'Finalizing prompt pack...' },
 ];
 
 /** Returns per-artifact-type stage labels for individual generation */

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Github, ChevronRight, Bug, KeyRound } from 'lucide-react';
 import { getOwnerToken } from '../lib/snapshotClient';
 import { DEFAULT_GEMINI_MODEL, DEFAULT_FAST_MODEL, DEFAULT_STRONG_MODEL } from '../lib/geminiClient';
@@ -108,6 +109,7 @@ function Disclosure({
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
     const navigate = useNavigate();
+    useEscapeKey(onClose);
     // Owner-only affordances are gated on possession of the SYNAPSE_OWNER_TOKEN,
     // the same client signal the Snapshots panel uses.
     const hasOwnerToken = Boolean(getOwnerToken());
@@ -186,6 +188,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     <button
                         onClick={onClose}
                         className="w-9 h-9 rounded-full flex items-center justify-center text-neutral-400 bg-white/5 hover:text-white hover:bg-white/10 transition-all"
+                        aria-label="Close settings"
                     >
                         <X size={20} />
                     </button>

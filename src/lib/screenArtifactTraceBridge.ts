@@ -31,7 +31,6 @@ import type { TraceConfidence } from './screenStatusShared';
 // --- Types -------------------------------------------------------------------
 
 export type { TraceConfidence } from './screenStatusShared';
-export { TRACE_CONFIDENCE_LABELS } from './screenStatusShared';
 
 export type DataModelMatchSource =
     | 'explicit_screen_ref'

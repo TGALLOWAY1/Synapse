@@ -55,7 +55,7 @@ export interface ProjectOutputSyncReviewQueueInput {
     context?: DownstreamUpdatePlanCurrentContext;
 }
 
-export function outputSyncRegionLabel(region: DownstreamUpdateRegion): string {
+function outputSyncRegionLabel(region: DownstreamUpdateRegion): string {
     if (region.kind === 'screen') {
         return `${region.screenName} · ${region.label ?? region.aspect}`;
     }

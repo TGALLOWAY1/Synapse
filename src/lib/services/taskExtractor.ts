@@ -270,7 +270,7 @@ function buildLinkedNotes(task: ImplementationPlanTask): string[] {
     return notes;
 }
 
-export function extractTasksFromStructuredPlan(
+function extractTasksFromStructuredPlan(
     plan: StructuredImplementationPlan,
     context: ExtractContext,
 ): ImplementationTask[] {

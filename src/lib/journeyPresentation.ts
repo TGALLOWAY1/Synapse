@@ -43,7 +43,7 @@ export type JourneyPresentationInput = {
     canBuild?: boolean;
 };
 
-export const JOURNEY_STEPS: readonly JourneyStepDefinition[] = [
+const JOURNEY_STEPS: readonly JourneyStepDefinition[] = [
     {
         id: 'define',
         label: 'Define',

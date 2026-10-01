@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { artifactJobController } from '../services/artifactJobController';
+import { artifactJobController, MAX_AUTO_RESUME_ATTEMPTS } from '../services/artifactJobController';
+import { getTabId, OUTPUT_RUN_LEASE_MS } from '../outputRunLease';
 import { useProjectStore } from '../../store/projectStore';
 import { visibleCoreSubtypes } from '../coreArtifactPipeline';
-import type { Artifact, ArtifactVersion, CoreArtifactSubtype, StructuredPRD } from '../../types';
+import type {
+    Artifact, ArtifactSlotKey, ArtifactVersion, CoreArtifactSubtype, OutputRunMarker, SlotState, StructuredPRD,
+} from '../../types';
 
 // W4 (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md): unhiding `component_inventory`
 // changes auto-resume. While it was hidden, `resumeIfNeeded` deliberately never
@@ -129,7 +132,7 @@ describe('artifactJobController.resumeIfNeeded — component_inventory is no lon
         artifactJobController.resumeIfNeeded(args);
 
         expect(startAll).toHaveBeenCalledTimes(1);
-        expect(startAll).toHaveBeenCalledWith(args);
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
     });
 
     it('does not wake a run when every visible slot is already done', () => {
@@ -153,5 +156,155 @@ describe('artifactJobController.resumeIfNeeded — component_inventory is no lon
         artifactJobController.resumeIfNeeded(args);
 
         expect(startAll).not.toHaveBeenCalled();
+    });
+});
+
+/** No output exists for the spine at all (a reload before the first one landed). */
+function seedNothingGenerated(outputRun?: OutputRunMarker): void {
+    seedStore(visibleCoreSubtypes());
+    useProjectStore.setState((s) => ({
+        artifacts: { [projectId]: [] },
+        artifactVersions: { [projectId]: [] },
+        projects: { [projectId]: { ...s.projects[projectId], ...(outputRun ? { outputRun } : {}) } },
+    }));
+}
+
+const marker = (
+    phase: OutputRunMarker['phase'],
+    spineVersionId = spineId,
+    lease: Pick<OutputRunMarker, 'ownerTabId' | 'heartbeatAt'> = {},
+): OutputRunMarker => ({
+    spineVersionId,
+    runId: 'run-before-reload',
+    startedAt: 1,
+    phase,
+    ...lease,
+});
+
+function seedJob(slots: Partial<Record<ArtifactSlotKey, SlotState>>, spineVersionId = spineId): void {
+    useProjectStore.setState({
+        jobs: { [projectId]: { spineVersionId, startedAt: 1, slots: slots as Record<ArtifactSlotKey, SlotState> } },
+    });
+}
+
+describe('artifactJobController.resumeIfNeeded — a run interrupted before its first output', () => {
+    it('resumes when the durable output-run marker reads interrupted (reload mid-run)', () => {
+        seedNothingGenerated(marker('interrupted'));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('does not resume a run another tab is still heartbeating (its lease is fresh)', () => {
+        seedNothingGenerated(marker('running', spineId, { ownerTabId: 'other-tab', heartbeatAt: Date.now() }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+    });
+
+    it('resumes a running marker whose lease lapsed — its owner stopped heartbeating', () => {
+        seedNothingGenerated(marker('running', spineId, {
+            ownerTabId: 'other-tab',
+            heartbeatAt: Date.now() - OUTPUT_RUN_LEASE_MS - 1,
+        }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('resumes this tab\'s own running marker when no run is active here', () => {
+        seedNothingGenerated(marker('running', spineId, { ownerTabId: getTabId(), heartbeatAt: Date.now() }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('does not resume while another tab holds a live lease, even with other evidence', () => {
+        // Completed outputs for the spine are evidence on their own — but the
+        // run that produced them is still alive in another tab.
+        seedStore(['data_model']);
+        useProjectStore.setState((s) => ({
+            projects: {
+                [projectId]: {
+                    ...s.projects[projectId],
+                    outputRun: marker('running', spineId, { ownerTabId: 'other-tab', heartbeatAt: Date.now() }),
+                },
+            },
+        }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+    });
+
+    it('ignores a marker left by a run for a different spine', () => {
+        seedNothingGenerated(marker('interrupted', 'older-spine'));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+    });
+
+    it('resumes when this session\'s job for the spine still has in-progress slots', () => {
+        seedNothingGenerated();
+        seedJob({
+            design_system: { status: 'interrupted', attempt: 1 },
+            data_model: { status: 'queued', attempt: 0 },
+        });
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('does not treat a settled, all-failed job as an interrupted run', () => {
+        seedNothingGenerated();
+        seedJob({ design_system: { status: 'error', attempt: 1 }, data_model: { status: 'error', attempt: 1 } });
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+    });
+});
+
+describe('artifactJobController.resumeIfNeeded — automatic attempts are capped', () => {
+    const failing = (autoResumeAttempts: number): SlotState => ({
+        status: 'error',
+        attempt: 1,
+        autoResumeAttempts,
+        error: { message: 'boom', category: 'unknown', timestamp: 1 },
+    });
+
+    it('leaves a slot that used up its automatic attempts failed (no run)', () => {
+        seedStore(['data_model']);
+        seedJob({ data_model: failing(MAX_AUTO_RESUME_ATTEMPTS) });
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+        expect(useProjectStore.getState().jobs[projectId]?.slots.data_model?.status).toBe('error');
+    });
+
+    it('still resumes while a pending slot has automatic attempts left', () => {
+        seedStore(['data_model']);
+        seedJob({ data_model: failing(MAX_AUTO_RESUME_ATTEMPTS - 1) });
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('starts a fresh automatic budget for a new spine', () => {
+        seedStore(['data_model']);
+        // The exhausted counter belongs to an older spine's job.
+        seedJob({ data_model: failing(MAX_AUTO_RESUME_ATTEMPTS) }, 'older-spine');
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
     });
 });

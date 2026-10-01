@@ -8,7 +8,9 @@ import type {
     StructuredPRD,
 } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
-import { useProjectStore } from '../../store/projectStore';
+import { useProjectStore, readPersistedProjectSnapshot, requestCrossTabCatchUp } from '../../store/projectStore';
+import { latestProjectActivity } from '../crossTabMerge';
+import { getTabId, isOutputRunLiveElsewhere, OUTPUT_RUN_HEARTBEAT_MS } from '../outputRunLease';
 import { generateCoreArtifact, selectArtifactModel, ARTIFACT_TRUNCATED_BLOCKER } from './coreArtifactService';
 import type { GeminiTokenUsage } from '../geminiClient';
 import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
@@ -141,6 +143,13 @@ interface RunState {
      * undefined and DOES cause a concurrent startAll to no-op (idempotent).
      */
     single?: boolean;
+    /**
+     * Identity of this run. Stamped on the job it owns (ProjectJobState.runId)
+     * and passed with every job write, so once a newer run takes the job over
+     * this run's late writes (its final markAllInterrupted, a straggling
+     * progress line) are no-ops instead of clobbering the newer run's slots.
+     */
+    runId: string;
 }
 
 const runs = new Map<string, RunState>();
@@ -182,6 +191,102 @@ export function hasAnyCompletedSlotForSpine(projectId: string, spineVersionId: s
     return ALL_SLOT_KEYS.some(slot => isSlotDoneForSpine(projectId, slot, spineVersionId));
 }
 
+/**
+ * Evidence that an output run for this spine was in progress, so
+ * `resumeIfNeeded` may pick it back up:
+ * - an output already completed for the spine (the original signal);
+ * - this session's job for the spine still holds queued / generating /
+ *   interrupted slots (`resumeIfNeeded` only runs when no run is live);
+ * - the project's durable `outputRun` marker for the spine shows a run that
+ *   died: 'interrupted' (a page load killed it before its FIRST output
+ *   landed — see markInterruptedOutputRuns), or 'running' but no longer
+ *   alive anywhere — owned by this tab (whose own run isn't active) or with a
+ *   lapsed lease. A 'running' marker another tab is still heartbeating is NOT
+ *   evidence: that run is alive there (src/lib/outputRunLease.ts).
+ */
+export function hasResumeEvidence(projectId: string, spineVersionId: string): boolean {
+    if (hasAnyCompletedSlotForSpine(projectId, spineVersionId)) return true;
+    const store = useProjectStore.getState();
+    const job = store.getJob(projectId);
+    if (job?.spineVersionId === spineVersionId) {
+        const inProgress = Object.values(job.slots).some(
+            s => s?.status === 'queued' || s?.status === 'generating' || s?.status === 'interrupted',
+        );
+        if (inProgress) return true;
+    }
+    const marker = store.getProject(projectId)?.outputRun;
+    if (marker?.spineVersionId !== spineVersionId) return false;
+    return marker.phase === 'interrupted' || !isOutputRunLiveElsewhere(marker, Date.now(), getTabId());
+}
+
+/**
+ * Whether another tab holds a live lease on an output run for this project:
+ * then this tab must not resume, start, retry, or regenerate outputs over it
+ * — run ids are tab-local, so nothing else stops a duplicate (and doubly
+ * paid) generation. Consults this tab's memory AND what other tabs last
+ * persisted: this tab's store never sees another tab's heartbeats until it
+ * adopts a cross-tab merge. Reads the persisted blob — decision points only.
+ */
+function outputRunLiveElsewhere(projectId: string): boolean {
+    const now = Date.now();
+    const tabId = getTabId();
+    if (isOutputRunLiveElsewhere(useProjectStore.getState().projects[projectId]?.outputRun, now, tabId)) return true;
+    return isOutputRunLiveElsewhere(readPersistedProjectSnapshot(projectId)?.outputRun, now, tabId);
+}
+
+/**
+ * Gate for a generation entry point: refuse while another tab's run is live,
+ * and pull that tab's latest writes into this one so its Build view shows
+ * the run (read-only) instead of a stale idle state.
+ */
+function blockedByRunElsewhere(projectId: string): boolean {
+    if (!outputRunLiveElsewhere(projectId)) return false;
+    console.info('[artifactJobController] an output run for this project is live in another tab — not generating here');
+    requestCrossTabCatchUp();
+    return true;
+}
+
+// Cap automatic resumes per slot. `resumeIfNeeded` runs on every Build mount,
+// so without a cap a deterministically failing slot (bad schema, a dependency
+// that never validates) was re-run — and paid for — on every visit. After
+// this many automatic attempts for the same spine in a page session the slot
+// stays failed and the manual Retry (with its own MAX_RETRY_FAILURES cap)
+// owns it. Counted on the transient job slot (SlotState.autoResumeAttempts);
+// a reload starts a fresh budget, like the manual retry cap.
+export const MAX_AUTO_RESUME_ATTEMPTS = 2;
+
+function autoResumeAttemptsFor(projectId: string, spineVersionId: string, slot: ArtifactSlotKey): number {
+    const job = useProjectStore.getState().getJob(projectId);
+    if (!job || job.spineVersionId !== spineVersionId) return 0;
+    return job.slots[slot]?.autoResumeAttempts ?? 0;
+}
+
+// The durable marker is bookkeeping for crash recovery — it must never break
+// (or throw out of) a run's launch or settle path.
+function stampOutputRunStarted(projectId: string, spineVersionId: string, runId: string): void {
+    try {
+        useProjectStore.getState().markOutputRunStarted(projectId, spineVersionId, runId, getTabId());
+    } catch (e) {
+        console.warn('[artifactJobController] could not record the output-run marker', e);
+    }
+}
+
+function beatOutputRun(projectId: string, runId: string): void {
+    try {
+        useProjectStore.getState().heartbeatOutputRun(projectId, runId);
+    } catch (e) {
+        console.warn('[artifactJobController] could not refresh the output-run lease', e);
+    }
+}
+
+function settleOutputRunMarker(projectId: string, runId: string): void {
+    try {
+        useProjectStore.getState().settleOutputRun(projectId, runId);
+    } catch (e) {
+        console.warn('[artifactJobController] could not settle the output-run marker', e);
+    }
+}
+
 // Cap consecutive *failed* manual retries per slot. Without this a user can
 // hammer the retry button against a deterministic failure (bad key, exhausted
 // quota) and burn API calls indefinitely. A successful run clears the count;
@@ -190,14 +295,14 @@ const MAX_RETRY_FAILURES = 3;
 const retryFailures = new Map<string, number>();
 const retryFailureKey = (projectId: string, slot: ArtifactSlotKey) => `${projectId}:${slot}`;
 
-function recordError(projectId: string, slot: ArtifactSlotKey, e: unknown): void {
+function recordError(projectId: string, slot: ArtifactSlotKey, e: unknown, runId?: string): void {
     const err = normalizeError(e);
     console.error(`[artifactJobController] ${slot} failed`, err.raw);
     useProjectStore.getState().setSlotStatus(projectId, slot, {
         status: 'error',
         finishedAt: Date.now(),
         error: { message: err.message, category: err.category, timestamp: err.timestamp },
-    });
+    }, runId);
 }
 
 async function runCoreArtifactSlot(
@@ -207,6 +312,7 @@ async function runCoreArtifactSlot(
     generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>>,
     traceSessionId?: string,
     onUsage?: (usage: GeminiTokenUsage) => void,
+    runId?: string,
 ): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD } = args;
 
@@ -224,7 +330,7 @@ async function runCoreArtifactSlot(
             artifactVersionId: undefined,
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
-        });
+        }, runId);
         // Read the chosen design-system preset off the project here (rather than
         // threading it through every startAll/regenerate/resume call site) so
         // ALL generation paths consistently honor it. Only design_system uses it.
@@ -253,7 +359,7 @@ async function runCoreArtifactSlot(
                 projectId,
                 projectName: project?.productName || project?.name,
             },
-            onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
+            onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg, runId),
             onUsage,
         });
         content = result.content;
@@ -345,7 +451,7 @@ async function runCoreArtifactSlot(
     }
 
     const writeStore = useProjectStore.getState();
-    writeStore.appendSlotProgress(projectId, subtype, 'Saving artifact…');
+    writeStore.appendSlotProgress(projectId, subtype, 'Saving artifact…', runId);
     const existing = writeStore.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
     let artifactId: string;
     if (existing) {
@@ -415,7 +521,7 @@ async function runCoreArtifactSlot(
         artifactVersionId: versionId,
         error: undefined,
         finishedAt: Date.now(),
-    });
+    }, runId);
 }
 
 const readPreferredArtifactForSpine = (
@@ -454,7 +560,7 @@ const readPreferredArtifactRef = (
         : null;
 };
 
-async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void> {
+async function runMockupSlot(args: StartArgs, signal: AbortSignal, runId?: string): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform } = args;
     const settings = buildAutoMockupSettings(prdContent, structuredPRD, projectPlatform);
 
@@ -470,8 +576,8 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             artifactVersionId: undefined,
             attempt: (store.getSlot(projectId, 'mockup')?.attempt ?? 0) + 1,
             progressLog: [],
-        });
-        store.appendSlotProgress(projectId, 'mockup', 'Resolving upstream artifacts…');
+        }, runId);
+        store.appendSlotProgress(projectId, 'mockup', 'Resolving upstream artifacts…', runId);
 
         const screenInventoryRaw = readPreferredArtifactForSpine(
             projectId, 'screen_inventory', spineVersionId,
@@ -487,7 +593,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             ? parseComponentInventoryMarkdown(componentInventoryRaw)
             : null;
 
-        store.appendSlotProgress(projectId, 'mockup', 'Composing screen specs from inventory…');
+        store.appendSlotProgress(projectId, 'mockup', 'Composing screen specs from inventory…', runId);
         result = generateMockup(
             settings,
             structuredPRD,
@@ -498,7 +604,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         semaphore.release();
     }
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
-    useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving mockup spec…');
+    useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving mockup spec…', runId);
 
     const { payload, warnings } = result;
     const writeStore = useProjectStore.getState();
@@ -568,7 +674,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         artifactVersionId: newVersion.versionId,
         error: undefined,
         finishedAt: Date.now(),
-    });
+    }, runId);
 
     // Image generation is deliberately NOT fired here. The spec lands ready,
     // but the costly visual step waits behind an explicit flow-approval gate
@@ -577,7 +683,12 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     // approval, the workspace fires generation for the selected screens.
 }
 
-async function executeJob(args: StartArgs, controller: AbortController, slotKeys: ArtifactSlotKey[]): Promise<void> {
+async function executeJob(
+    args: StartArgs,
+    controller: AbortController,
+    slotKeys: ArtifactSlotKey[],
+    runId: string,
+): Promise<void> {
     const signal = controller.signal;
     const { projectId } = args;
 
@@ -622,7 +733,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                     const startedAt = Date.now();
                     let usage: GeminiTokenUsage | undefined;
                     try {
-                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId, (u) => { usage = u; });
+                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId, (u) => { usage = u; }, runId);
                         nodeObs.push({
                             nodeId: meta.subtype,
                             nodeName: meta.title,
@@ -654,7 +765,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             outputTokens: usage?.outputTokens,
                             totalTokens: usage?.totalTokens,
                         });
-                        recordError(projectId, meta.subtype, e);
+                        recordError(projectId, meta.subtype, e, runId);
                     }
                 });
             if (tasks.length === 0) continue;
@@ -673,7 +784,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                 await corePromise;
                 if (signal.aborted) return;
                 const startedAt = Date.now();
-                await runMockupSlot(args, signal);
+                await runMockupSlot(args, signal, runId);
                 nodeObs.push({
                     nodeId: 'mockup',
                     nodeName: 'Mockup',
@@ -687,7 +798,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                 });
             } catch (e) {
                 if (isAbortError(e) || signal.aborted) return;
-                recordError(projectId, 'mockup', e);
+                recordError(projectId, 'mockup', e, runId);
             }
         })()
         : Promise.resolve();
@@ -695,7 +806,10 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
     await Promise.all([corePromise, mockupPromise]);
 
     if (signal.aborted) {
-        useProjectStore.getState().markAllInterrupted(projectId);
+        // Scoped to this run: if a newer run already took the job over (a
+        // spine change superseded us), this is a no-op instead of flipping the
+        // new run's queued/generating slots to 'interrupted'.
+        useProjectStore.getState().markAllInterrupted(projectId, runId);
         return;
     }
 
@@ -774,6 +888,16 @@ export const artifactJobController = {
     },
 
     /**
+     * Whether another tab holds a live lease on an output run for this
+     * project (src/lib/outputRunLease.ts) — every generation entry point below
+     * refuses while it does. Reads what other tabs persisted, so keep it off
+     * hot render paths.
+     */
+    isRunLiveElsewhere(projectId: string): boolean {
+        return outputRunLiveElsewhere(projectId);
+    },
+
+    /**
      * Background early-generation of the design_system artifact. Fired from a
      * React effect as soon as a design-system preset is chosen AND the PRD has
      * settled successfully, so the later finalize `startAll` finds it already
@@ -812,28 +936,36 @@ export const artifactJobController = {
         // Silent gate: never interleave with an active run (idempotent).
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted) return;
+
+        // Silent gate: another tab's output run is live (its lease is fresh) —
+        // that run generates the design system too. Checked last: it reads the
+        // persisted blob.
+        if (outputRunLiveElsewhere(args.projectId)) return;
         if (existing) runs.delete(args.projectId);
 
         // design_system has no dependencies (dependsOn: []) — no closure to plan.
+        const runId = uuidv4();
         if (!store.getJob(args.projectId)) {
-            store.initJob(args.projectId, args.spineVersionId, [slot]);
+            store.initJob(args.projectId, args.spineVersionId, [slot], { runId });
+        } else {
+            store.claimJobRun(args.projectId, runId);
         }
         store.setSlotStatus(args.projectId, slot, {
             status: 'queued',
             artifactVersionId: undefined,
             error: undefined,
-        });
+        }, runId);
 
         const controller = new AbortController();
         const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
         const promise = (async () => {
             try {
-                await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts);
+                await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts, undefined, undefined, runId);
             } catch (e) {
                 if (isAbortError(e) || controller.signal.aborted) return;
                 // Silent: jobs are transient and finalize self-heals. Do NOT
                 // consume the manual retryFailures budget.
-                recordError(args.projectId, slot, e);
+                recordError(args.projectId, slot, e, runId);
             }
         })().finally(() => {
             const current = runs.get(args.projectId);
@@ -841,15 +973,21 @@ export const artifactJobController = {
                 runs.delete(args.projectId);
             }
         });
-        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true });
+        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true, runId });
     },
 
     /**
      * Kick off generation of every downstream slot not yet done for this
      * spine. Idempotent: a re-call while active is a no-op; a re-call after
      * completion only queues slots still missing.
+     *
+     * `autoResume` marks a run started by `resumeIfNeeded` rather than by the
+     * user: each slot it runs counts toward that slot's automatic budget, and a
+     * slot already at MAX_AUTO_RESUME_ATTEMPTS is left out (and left failed).
+     * Every launched run stamps the durable `Project.outputRun` marker and
+     * settles it when the run ends.
      */
-    startAll(args: StartArgs): void {
+    startAll(args: StartArgs, opts: { autoResume?: boolean } = {}): void {
         assertArtifactGenerationAllowed(args.projectId);
         // Downstream protection: a spine blocked by safety review — or an
         // incomplete (partial) PRD the user hasn't acknowledged — can never
@@ -857,6 +995,10 @@ export const artifactJobController = {
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
+        // Another tab's run is live: starting here would duplicate (and pay
+        // for) the same outputs. resumeIfNeeded already made this check
+        // against fresh state before calling with autoResume.
+        if (!opts.autoResume && blockedByRunElsewhere(args.projectId)) return;
 
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted && existing.spineVersionId === args.spineVersionId) {
@@ -870,7 +1012,7 @@ export const artifactJobController = {
             // double-finalize chains twice; the second re-entry sees the full
             // run active and no-ops.
             if (existing.single) {
-                void existing.promise.finally(() => this.startAll(args));
+                void existing.promise.finally(() => this.startAll(args, opts));
             }
             return;
         }
@@ -881,25 +1023,48 @@ export const artifactJobController = {
         }
 
         const pending = pendingSlotsForSpine(args);
-        if (pending.length === 0) return;
+        // An automatic resume never re-runs a slot that has used up its
+        // automatic budget for this spine: it stays failed (carried into the
+        // new job unchanged) and the manual Retry owns it.
+        const capped = opts.autoResume
+            ? pending.filter(k => autoResumeAttemptsFor(args.projectId, args.spineVersionId, k) >= MAX_AUTO_RESUME_ATTEMPTS)
+            : [];
+        const runSlots = pending.filter(k => !capped.includes(k));
+        if (runSlots.length === 0) return;
+        // Same wake rule as resumeIfNeeded: hidden slots ride along, but are
+        // never the sole reason an automatic run starts.
+        if (opts.autoResume && runSlots.every(isHiddenSlot)) return;
 
+        const runId = uuidv4();
         const store = useProjectStore.getState();
-        store.initJob(args.projectId, args.spineVersionId, pending);
+        store.initJob(args.projectId, args.spineVersionId, runSlots, {
+            runId,
+            autoResume: opts.autoResume,
+            carryOverSlots: capped,
+        });
         // Mark already-completed slots as 'done' so the UI shows them green.
         for (const key of ALL_SLOT_KEYS) {
             if (!pending.includes(key)) {
-                store.setSlotStatus(args.projectId, key, { status: 'done', finishedAt: Date.now() });
+                store.setSlotStatus(args.projectId, key, { status: 'done', finishedAt: Date.now() }, runId);
             }
         }
+        stampOutputRunStarted(args.projectId, args.spineVersionId, runId);
+        // Hold the lease while the run is live: other tabs see a fresh
+        // heartbeat and leave this run alone (outputRunLease.ts).
+        const heartbeat = setInterval(() => beatOutputRun(args.projectId, runId), OUTPUT_RUN_HEARTBEAT_MS);
 
         const controller = new AbortController();
-        const promise = executeJob(args, controller, pending).finally(() => {
+        const promise = executeJob(args, controller, runSlots, runId).finally(() => {
+            clearInterval(heartbeat);
+            // Settled (completed, failed, or cancelled) — not interrupted by a
+            // page load, so drop the marker. A no-op if a newer run re-stamped it.
+            settleOutputRunMarker(args.projectId, runId);
             const current = runs.get(args.projectId);
             if (current && current.controller === controller) {
                 runs.delete(args.projectId);
             }
         });
-        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise });
+        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, runId });
     },
 
     /**
@@ -916,6 +1081,7 @@ export const artifactJobController = {
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
+        if (blockedByRunElsewhere(args.projectId)) return;
 
         const visible = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
         if (visible.length === 0) return;
@@ -933,23 +1099,24 @@ export const artifactJobController = {
         if (existing && !existing.controller.signal.aborted) return;
         if (existing) runs.delete(args.projectId);
 
-        useProjectStore.getState().initJob(args.projectId, args.spineVersionId, filtered);
+        const runId = uuidv4();
+        useProjectStore.getState().initJob(args.projectId, args.spineVersionId, filtered, { runId });
 
         const controller = new AbortController();
-        const promise = executeJob(args, controller, filtered).finally(() => {
+        const promise = executeJob(args, controller, filtered, runId).finally(() => {
             const current = runs.get(args.projectId);
             if (current && current.controller === controller) {
                 runs.delete(args.projectId);
             }
         });
-        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise });
+        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, runId });
     },
 
     cancelAll(projectId: string): void {
         const run = runs.get(projectId);
         if (!run) return;
         run.controller.abort();
-        useProjectStore.getState().markAllInterrupted(projectId);
+        useProjectStore.getState().markAllInterrupted(projectId, run.runId);
         runs.delete(projectId);
     },
 
@@ -961,6 +1128,7 @@ export const artifactJobController = {
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
         assertArtifactGenerationAllowed(args.projectId);
+        if (blockedByRunElsewhere(args.projectId)) return;
         const failureKey = retryFailureKey(args.projectId, slot);
         if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {
             useProjectStore.getState().setSlotStatus(args.projectId, slot, {
@@ -997,16 +1165,21 @@ export const artifactJobController = {
         const existingRun = runs.get(args.projectId);
         const reuseExisting = existingRun && !existingRun.controller.signal.aborted;
         const controller = reuseExisting ? existingRun!.controller : new AbortController();
+        // Joining the live run shares its identity; a fresh single-slot run
+        // takes the job over so any older run's late writes are ignored.
+        const runId = reuseExisting ? existingRun!.runId : uuidv4();
 
         const store = useProjectStore.getState();
         if (!store.getJob(args.projectId)) {
-            store.initJob(args.projectId, args.spineVersionId, [slot]);
+            store.initJob(args.projectId, args.spineVersionId, [slot], { runId });
+        } else if (!reuseExisting) {
+            store.claimJobRun(args.projectId, runId);
         }
         store.setSlotStatus(args.projectId, slot, {
             status: 'queued',
             artifactVersionId: undefined,
             error: undefined,
-        });
+        }, runId);
 
         const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
         for (const meta of CORE_ARTIFACT_PIPELINE) {
@@ -1024,15 +1197,15 @@ export const artifactJobController = {
         const promise = (async () => {
             try {
                 if (slot === 'mockup') {
-                    await runMockupSlot(args, controller.signal);
+                    await runMockupSlot(args, controller.signal, runId);
                 } else {
-                    await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts);
+                    await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts, undefined, undefined, runId);
                 }
                 retryFailures.delete(failureKey);
             } catch (e) {
                 if (isAbortError(e) || controller.signal.aborted) return;
                 retryFailures.set(failureKey, (retryFailures.get(failureKey) ?? 0) + 1);
-                recordError(args.projectId, slot, e);
+                recordError(args.projectId, slot, e, runId);
             }
         })().finally(() => {
             // Only clear the run entry if we own it AND nothing else has
@@ -1047,18 +1220,26 @@ export const artifactJobController = {
         if (!reuseExisting) {
             // Registered as a single-slot run so a concurrent full startAll
             // chains onto it instead of no-op'ing (see startAll).
-            runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true });
+            runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true, runId });
         }
     },
 
     /**
      * On app boot or workspace mount, queue any slots missing for the current
-     * final spine. Skips when generation is already active.
+     * final spine. Skips when generation is already active, when there is no
+     * evidence an output run for this spine was in progress
+     * (hasResumeEvidence — including a run interrupted by a reload before its
+     * first output landed), and when every pending slot has used up its
+     * automatic budget (MAX_AUTO_RESUME_ATTEMPTS) — those stay failed for the
+     * manual Retry. Before spending, it decides against what other tabs
+     * persisted: never while another tab's run holds a live lease, and never
+     * from a stale view (another tab advanced the project past this tab's
+     * memory) — it catches up first and decides on the next mount.
      */
     resumeIfNeeded(args: StartArgs): void {
         assertArtifactGenerationAllowed(args.projectId);
         if (this.isActive(args.projectId)) return;
-        if (!hasAnyCompletedSlotForSpine(args.projectId, args.spineVersionId)) return;
+        if (!hasResumeEvidence(args.projectId, args.spineVersionId)) return;
         // Only auto-wake for *visible* pending slots. A hidden slot that errored
         // stays pending forever (no version), and without this filter every
         // workspace remount would spin up a run just to retry it — invisibly,
@@ -1066,7 +1247,32 @@ export const artifactJobController = {
         // pending, startAll still includes the hidden slot in its own pending
         // set, so hidden artifacts are best-effort regenerated alongside.
         const pending = pendingSlotsForSpine(args).filter(k => !isHiddenSlot(k));
-        if (pending.length === 0) return;
-        this.startAll(args);
+        const eligible = pending.filter(
+            k => autoResumeAttemptsFor(args.projectId, args.spineVersionId, k) < MAX_AUTO_RESUME_ATTEMPTS,
+        );
+        if (eligible.length === 0) return;
+
+        const now = Date.now();
+        const tabId = getTabId();
+        const memoryMarker = useProjectStore.getState().projects[args.projectId]?.outputRun;
+        const persisted = readPersistedProjectSnapshot(args.projectId);
+        // The run is alive in another tab (fresh lease): never resume it here.
+        if (isOutputRunLiveElsewhere(memoryMarker, now, tabId)
+            || isOutputRunLiveElsewhere(persisted?.outputRun, now, tabId)) {
+            requestCrossTabCatchUp();
+            return;
+        }
+        // Another tab moved this project past what this tab has in memory (e.g.
+        // it finished outputs this tab still thinks are missing): resuming now
+        // would regenerate them. Catch up; the next evaluation sees fresh state.
+        const memoryActivity = latestProjectActivity(
+            useProjectStore.getState() as unknown as Record<string, unknown>,
+            args.projectId,
+        );
+        if (persisted && persisted.activity > memoryActivity) {
+            requestCrossTabCatchUp();
+            return;
+        }
+        this.startAll(args, { autoResume: true });
     },
 };
