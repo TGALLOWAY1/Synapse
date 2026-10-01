@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callGemini } from '../geminiClient';
 import { callOpenAIImage, setImageProviderConfigured } from '../openaiClient';

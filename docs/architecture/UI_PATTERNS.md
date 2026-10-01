@@ -391,6 +391,13 @@ on direct load/refresh is provided by `vercel.json` `rewrites` (Vercel) and
 routing changes. `TourPage.tsx`'s header carries Synapse branding + an "Open
 Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
 
+- **Code-split route.** `App.tsx` loads `TourPage` through `React.lazy` (one
+  `Suspense` fallback wraps all routes), so framer-motion — used only by the
+  tour — lives in the `TourPage-*.js` chunk and stays out of the entry chunk
+  that `/` and `/p/:projectId` download. Keep it that way: never statically
+  import `TourPage`, `TourContainer`/`TourNav`, or framer-motion from code the
+  entry chunk reaches (verify: framer-motion absent from the entry chunk in the
+  `vite build` output).
 - **Two modes, one source of truth.** `src/lib/useTourState.ts` is a
   `useReducer` (`tourReducer` + `initialTourState`, both exported for tests)
   holding `{ activeIndex, mode, direction }`. **Guided** mode (first-timers)

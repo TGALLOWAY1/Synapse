@@ -141,6 +141,13 @@ not exceed 12.
 
 Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
 `src/components/__tests__/`, and `api/_lib/__tests__/` (+ `api/__tests__/`).
+`vitest.config.ts` runs two projects: suites under `src/lib/`, `src/store/` and
+`api/` use Vitest's `node` environment (no per-file jsdom startup), and
+everything else — components, hooks, any new directory — uses `jsdom`. A
+node-directory suite that really needs `window`/`document`/`localStorage` opts
+in with a first-line `// @vitest-environment jsdom` docblock (a
+`ReferenceError: localStorage is not defined` there means "add the docblock");
+don't widen the glob.
 There is no Playwright *assertion* suite; Playwright powers the screenshot
 capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
 (`npm run e2e` — real generation + visual screenshots + report; see
@@ -151,11 +158,18 @@ capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
 
 - React 19 + TypeScript + Vite 7
 - Tailwind CSS 3 + tailwind-merge + clsx
-- framer-motion (page/drag transitions in the interactive product tour)
+- framer-motion (page/drag transitions in the interactive product tour; ships
+  only in the lazy `/tour` chunk)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
 - React Router v7 (workspace, recruiter portal, admin pages, the interactive
   product tour at `/tour` + `/about` alias, /privacy)
+- Route-level code splitting in `src/App.tsx`: `/tour` (+ `/about`), `/gallery`,
+  `/metrics`, `/developer/llm-trace`, `/privacy` and `/admin/recruiters` are
+  `React.lazy` pages behind one `Suspense` fallback; `/` (including
+  `LoginPage`) and `/p/:projectId` stay static. Don't statically import a lazy
+  page (or framer-motion / `date-fns`, which only the tour and the admin page
+  use) from code the entry chunk reaches — check the `vite build` chunk list.
 - Deployed to Vercel (SPA + Node serverless functions under `api/`)
 
 

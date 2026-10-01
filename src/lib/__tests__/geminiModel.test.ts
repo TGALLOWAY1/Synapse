@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DEFAULT_GEMINI_MODEL } from '../geminiClient';
 import { migrateGeminiFlashModel } from '../modelMigration';

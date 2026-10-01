@@ -3,6 +3,9 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
+    // Generated stylesheets live in src/styles; scanning them only injects dead
+    // utility tokens (e.g. .ring-offset-8) into the app CSS.
+    "!./src/styles/**",
   ],
   theme: {
     extend: {

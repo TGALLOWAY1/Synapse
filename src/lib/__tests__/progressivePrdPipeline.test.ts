@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Mock the Gemini transport so the pipeline runs offline: one section's

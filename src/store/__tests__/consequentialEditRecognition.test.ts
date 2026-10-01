@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { StructuredPRD } from '../../types';
 import { buildDecisionImpact } from '../../lib/planning';

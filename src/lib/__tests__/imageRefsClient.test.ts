@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // upload() from the Blob client SDK does a real network handshake; mock it.

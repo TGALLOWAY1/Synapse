@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import type { ReactElement } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
@@ -6,19 +6,41 @@ import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { DemoRouteGate } from './components/DemoRouteGate';
-import { GalleryPage } from './components/GalleryPage';
 import { DEMO_PROJECT_ID, gallerySlotForProjectId } from './data/demoProject';
-import { TourPage } from './components/tour/TourPage';
-import { MetricsPage } from './components/metrics/MetricsPage';
-import { LlmTraceViewerPage } from './components/developer/LlmTraceViewerPage';
 import { getOwnerToken } from './lib/snapshotClient';
-import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
-import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
 import { useAuthStore } from './store/authStore';
 import { migrateGeminiFlashModel } from './lib/modelMigration';
 import { Analytics } from '@vercel/analytics/react';
+
+// Secondary routes are code-split so the entry chunk carries only the landing
+// page and the project workspace (`/` and `/p/:projectId` stay static — that
+// includes LoginPage, which `/` renders for signed-out visitors; lazy-loading
+// it would add a request to their critical path to save ~3 kB gzipped). In
+// particular framer-motion, used only by the tour, must stay out of the entry
+// chunk. Pages are named exports, hence the `default` adapter React.lazy needs.
+const GalleryPage = lazy(() => import('./components/GalleryPage').then((m) => ({ default: m.GalleryPage })));
+const TourPage = lazy(() => import('./components/tour/TourPage').then((m) => ({ default: m.TourPage })));
+const MetricsPage = lazy(() => import('./components/metrics/MetricsPage').then((m) => ({ default: m.MetricsPage })));
+const LlmTraceViewerPage = lazy(() =>
+  import('./components/developer/LlmTraceViewerPage').then((m) => ({ default: m.LlmTraceViewerPage })),
+);
+const PrivacyPolicyPage = lazy(() => import('./components/PrivacyPolicyPage').then((m) => ({ default: m.PrivacyPolicyPage })));
+const RecruiterAdminPage = lazy(() => import('./components/RecruiterAdminPage').then((m) => ({ default: m.RecruiterAdminPage })));
+
+/**
+ * Suspense fallback while a code-split route chunk loads — the same centered
+ * spinner the auth guards show while the session resolves.
+ */
+function RouteFallback() {
+  return (
+    <div role="status" className="min-h-screen flex items-center justify-center">
+      <Loader2 className="animate-spin text-neutral-400" size={24} />
+      <span className="sr-only">Loading…</span>
+    </div>
+  );
+}
 
 function HomeRoute() {
   const user = useAuthStore((s) => s.user);
@@ -155,31 +177,33 @@ function App() {
   return (
     <GlobalErrorBoundary>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<HomeRoute />} />
-          <Route path="/about" element={<TourPage />} />
-          <Route path="/tour" element={<TourPage />} />
-          <Route path="/p/:projectId" element={<ProjectRoute />} />
-          <Route path="/gallery" element={<GalleryPage />} />
-          <Route
-            path="/metrics"
-            element={
-              <RequireAuth>
-                <MetricsPage />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/developer/llm-trace"
-            element={
-              <RequireOwner>
-                <LlmTraceViewerPage />
-              </RequireOwner>
-            }
-          />
-          <Route path="/privacy" element={<PrivacyPolicyPage />} />
-          <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
-        </Routes>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<HomeRoute />} />
+            <Route path="/about" element={<TourPage />} />
+            <Route path="/tour" element={<TourPage />} />
+            <Route path="/p/:projectId" element={<ProjectRoute />} />
+            <Route path="/gallery" element={<GalleryPage />} />
+            <Route
+              path="/metrics"
+              element={
+                <RequireAuth>
+                  <MetricsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/developer/llm-trace"
+              element={
+                <RequireOwner>
+                  <LlmTraceViewerPage />
+                </RequireOwner>
+              }
+            />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
+          </Routes>
+        </Suspense>
         <ToastContainer />
       </BrowserRouter>
       <Analytics />

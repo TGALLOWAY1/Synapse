@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import type { ImplementationTask } from '../../types/tasks';
