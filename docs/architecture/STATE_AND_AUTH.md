@@ -24,7 +24,17 @@
   back via `branchService.consolidateBranch()`. Spine versioning uses
   `isLatest` flags (`isFinal` is legacy: the removed Finalize flow set it,
   nothing does now, and it survives only as a durable incomplete-PRD
-  acknowledgement for old projects). Spine ids are opaque — new versions
+  acknowledgement for old projects). **Incomplete-PRD acknowledgement:**
+  `acknowledgeIncompleteSpine` records the user's explicit "Generate anyway"
+  as `SpineVersion.incompleteAcknowledgedAt` (inside the `set` updater, in
+  `PERSISTENT_STORE_ACTIONS`) — only on the latest, settled version with
+  failed sections, and only once. The generation gate honours it exactly like
+  legacy `isFinal`. It is bound to that version: the spread-based appends
+  (`editSpineStructuredPRD`, `compareAndAppendStructuredPRD` — decision
+  applies and section retries — and `revertSpineToVersion`) clear it on the
+  version they create, while `mergeBranch` / staged apply / `regenerateSpine`
+  build fresh spines without it; only an in-place decision amend of the same
+  version keeps it. Spine ids are opaque — new versions
   (`regenerateSpine`, `mergeBranch`) get UUIDs, while the first spine and
   legacy localStorage data keep `v1`-style ids. Never parse a version
   number out of the id; display labels ("Version N") derive from array

@@ -354,8 +354,9 @@ rationale and detail.
     modules, unit-tested, honest "estimated/derived" labels, advisory-only —
     nothing gates rendering or generation. There is **no commitment gate**:
     the Finalize/readiness-commit layer was removed, so only the incomplete-PRD
-    and safety gates may stop output generation, and nothing gates copying,
-    export, or task conversion on readiness. Do not re-add one.
+    and safety gates may stop output generation (plus the integrity guard that
+    only the latest spine generates — never a historical one), and nothing
+    gates copying, export, or task conversion on readiness. Do not re-add one.
     → SCREENS_EXPERIENCE.md, PLANNING_AND_DECISIONS.md
 11. **Every version-creating path stamps `provenance.changeSource`**, and
     revert/restore always **appends** a new version — history is never mutated

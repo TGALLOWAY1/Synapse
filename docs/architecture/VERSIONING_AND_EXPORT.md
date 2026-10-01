@@ -76,7 +76,13 @@ Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts
 (pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
 nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 **Version History** overflow-menu item) and adds **Compare with current** /
-**Restore this version** to the read-only historical-version banner;
+**Restore this version** to the read-only historical-version banner (History
+Mode — a historical spine picked from the Plan stage's Timeline). History Mode
+is a Plan-only view: the journey's Build step is inert, an output stage
+presents the historical Plan instead of `ArtifactWorkspace`, navigating to an
+output stage leaves History Mode first (`applyPresentationStage`), and the
+generation gate refuses any non-latest spine (`not_latest`), so no output can
+be regenerated from an old PRD and become current;
 `ArtifactWorkspace` shows a **Version history** button + a "Generated from PRD
 Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
 generated artifact. Restores route

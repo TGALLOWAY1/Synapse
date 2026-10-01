@@ -724,9 +724,19 @@ export type SpineVersion = {
     /** Legacy: true only on spines committed through the removed Finalize
      * checkpoint — new spines are created `false` and nothing sets it now.
      * Still honoured where older data carries it (the incomplete-PRD gate
-     * reads it as a recorded acknowledgement; decision edits never amend a
-     * final version in place). */
+     * reads it as a recorded acknowledgement; it confirms a downstream update
+     * plan's source change; decision edits never amend a final version in
+     * place). Newer spines get downstream confirmation from their
+     * `provenance.changeSource` instead (`isSourceChangeConfirmed`). */
     isFinal: boolean;
+    /** When the user explicitly confirmed "Generate anyway" for THIS
+     * incomplete version (one or more PRD sections failed) — the durable
+     * incomplete-PRD acknowledgement that replaced legacy `isFinal`, so
+     * resume, Sync outputs, and dependency-graph regeneration keep working
+     * after the first run. Bound to this version: a later spine version
+     * (edit, decision apply, section retry, restore, merge, regenerate) never
+     * inherits it. Optional — written by `acknowledgeIncompleteSpine`. */
+    incompleteAcknowledgedAt?: number;
     structuredPRD?: StructuredPRD;
     preflightSession?: PreflightSession;
     generationError?: {

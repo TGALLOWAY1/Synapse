@@ -380,7 +380,7 @@ export function ArtifactWorkspace({
         getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
         updateArtifactOverlay, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
-        acceptArtifactValidationIssue,
+        acceptArtifactValidationIssue, acknowledgeIncompleteSpine,
     } = useProjectStore();
     // Canonical freshness for every artifact-status surface in this workspace
     // (version-controls strip, Screens artifact controls, mockup drift banner,
@@ -1232,9 +1232,14 @@ export function ArtifactWorkspace({
             outputSyncRows.filter(row => row.isDrifted).length === 1 ? '' : 's'
         } need review against the current plan.`;
     const generationGate = evaluateSpineGenerationGate(latestSpine);
+    // An incomplete PRD nobody has acknowledged yet: the Sync modal offers the
+    // same explicit incomplete-PRD confirmation inline, which records the
+    // durable acknowledgement on this spine version.
+    const needsIncompleteAcknowledgement = !generationGate.allowed
+        && generationGate.reason === 'incomplete_unacknowledged';
     const regenerationDisabledReason = !generationGate.allowed
-        ? generationGate.reason === 'incomplete_unacknowledged'
-            ? 'Acknowledge the incomplete PRD before regenerating outputs.'
+        ? needsIncompleteAcknowledgement
+            ? 'This PRD has failed sections. Confirm the incomplete-PRD "Generate anyway" before regenerating outputs from it.'
             : 'The current PRD cannot drive output generation.'
         : !designSystemPreset
             ? 'Choose a design direction before regenerating outputs.'
@@ -2442,6 +2447,14 @@ export function ArtifactWorkspace({
                     }}
                     quickDisabled={isActive || artifactJobController.isActive(projectId)}
                     regenerationDisabledReason={regenerationDisabledReason}
+                    incompletePrdAcknowledgement={needsIncompleteAcknowledgement
+                        && latestSpineId
+                        && capabilities.canGenerateArtifacts
+                        ? {
+                            failedSectionCount: generationGate.incompleteSections.length,
+                            onAcknowledge: () => acknowledgeIncompleteSpine(projectId, latestSpineId),
+                        }
+                        : undefined}
                     onCancel={() => setOutputSyncSession(null)}
                 />
             )}

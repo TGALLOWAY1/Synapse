@@ -52,6 +52,18 @@ request…").
   drive workspace/screens/architecture/implementation artifacts. Domain types
   (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
   live in `src/types`; the safety module re-exports them.
+- **The incomplete-PRD gate shares that chokepoint**
+  (`evaluateSpineGenerationGate`, `src/lib/artifactGenerationGate.ts`; full
+  detail in UI_PATTERNS.md). After the safety and latest-spine checks, a spine
+  with `generationMeta.failedSections` generates only with an explicit user
+  acknowledgement: the per-run `acknowledgeIncomplete` flag, or the durable
+  `SpineVersion.incompleteAcknowledgedAt` that the same "Generate anyway"
+  confirmation records (`acknowledgeIncompleteSpine`), or a legacy `isFinal`.
+  The durable record is what keeps `resumeIfNeeded`, `regenerateSlots` (Sync
+  outputs, dependency-graph updates) and the design-system early run working
+  for that version after the first run. It is bound to the version and never
+  inherited by a later one, and no acknowledgement can override the safety,
+  latest-spine, or structured-PRD checks.
 
 ### Artifact validation: blocking vs advisory (`src/lib/artifactBlockingValidation.ts`)
 

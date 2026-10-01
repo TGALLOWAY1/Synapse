@@ -12,8 +12,10 @@ opens the Decision Center slide-over and carries the open-item badge
 (`planningReadiness.openItems` — open decisions plus assumptions to confirm);
 the outputs stage (`workspace`) is always **Build**. There is no Finalize /
 commitment step and no "unavailable" state: a step with nothing to show yet
-(Decide and Build before a safe structured plan exists) is simply inert.
-Project history opens as a panel.
+(Decide and Build before a safe structured plan exists) is simply inert, and
+Build is also inert while a historical PRD version is selected (History Mode
+is a read-only Plan view; see VERSIONING_AND_EXPORT.md). Project history opens
+as a panel.
 The **Decision Center is a universal slide-over** that preserves the originating
 surface and exact return context; it is also available from the workspace
 overflow menu. The Refine review surface opens on a **tab-free specialist
@@ -93,12 +95,25 @@ impact previews / the write-barrier apply path in
   snapshots, sync, and retention so old projects round-trip; `readinessSlice`
   now only declares the two empty collections. A legacy `isFinal` spine still
   counts as a durable incomplete-PRD acknowledgement
-  (`artifactGenerationGate.ts`) and still marks a downstream update plan's
-  source change as confirmed (`downstreamUpdatePlanGeneration.ts`); for every
-  newer spine only a confirmed/resolved planning record does, so a PRD edit not
-  tied to one reads "Source change remains provisional" and its proposals stay
-  conservative (no direct removals). `HistoryView` renders old
-  checkpoint/commitment events as plain, neutral entries.
+  (`artifactGenerationGate.ts`; newer spines record the explicit "Generate
+  anyway" as `incompleteAcknowledgedAt` instead) and still confirms a
+  downstream update plan's source change. `HistoryView` renders old checkpoint/commitment events as
+  plain, neutral entries.
+- **Downstream source-change confirmation comes from the surviving authority**
+  (`isSourceChangeConfirmed`, `downstreamUpdatePlanGeneration.ts`), not from a
+  commitment. A plan's source change (the latest spine) is confirmed when it is
+  user-authored — `provenance.changeSource` is `user_edit` (inline edits, and
+  decision-impact applies through `compareAndAppendStructuredPRD`),
+  `decision_edit`, `branch_merge` (consolidation / staged apply), `revert`
+  (restore), or `ai_section_retry` (a section re-run the user triggered) — or
+  when a confirmed/resolved planning record produced it, or (legacy) the spine
+  is `isFinal`. Only a fresh model draft with no user decision behind its
+  content (`ai_generation`, `ai_regeneration` from Regenerate Draft) or a
+  legacy spine with no provenance stays provisional; the review says "no edit
+  or decision has confirmed it yet", and the next user-authored change
+  confirms it. A confirmed change lets the bounded planners propose definite
+  removals of obsolete downstream elements; a provisional one keeps them
+  review items. Keep the distinction: do not confirm wholesale model churn.
 - **Challenge coverage** (`challengeCoverage.ts`, `deriveChallengeCoverage`) is
   the pure projection of "has the exact current plan been substantively
   challenged, and which consequential findings are still unresolved?". It feeds
@@ -235,7 +250,8 @@ impact previews / the write-barrier apply path in
   straight to the Build stage, and output generation starts without a
   pre-generation interstitial. Do not re-introduce a decision-count or
   readiness gate on Challenge, `workspace`, or artifact generation
-  (`artifactGenerationGate.ts` stays safety/PRD-only).
+  (`artifactGenerationGate.ts` stays safety/PRD-only: safe, latest,
+  structured, and acknowledged-if-incomplete).
 - **No planning record is a hard stop.** The materiality gate
   (`deriveMaterialityGateSnapshot`, which made explicit `materiality:
   'blocking'` records hard stops on Finalize, build-bundle export, and task

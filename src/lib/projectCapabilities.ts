@@ -111,7 +111,7 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'mergeBranch', 'stageBranch', 'unstageBranch', 'applyStagedBranchesToSpine',
     'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
     'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
-    'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
+    'updateProjectProductMetadata', 'markSpineGenerationStarted', 'acknowledgeIncompleteSpine', 'setSpineSafetyReview',
     'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
     'setPreflightIndex', 'setPreflightSummary', 'completePreflightSession', 'setPreflightError',
     'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'markOutputRunStarted', 'heartbeatOutputRun',

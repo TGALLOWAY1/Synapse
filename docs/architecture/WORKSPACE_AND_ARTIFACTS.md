@@ -120,12 +120,25 @@ the pill's hover copy adds the advisory build-packet state ("estimated"). Do
 not re-add a readiness or commitment condition to the pill or the banner.
 `handleGenerateAssets` interposes the explicit incomplete-PRD confirmation
 ("Generate assets from an incomplete PRD?") whenever the spine has
-`generationMeta.failedSections` (a legacy `isFinal` spine already recorded that
-acknowledgement) — `startAssetGeneration`'s `acknowledgeIncomplete` flag may
-only ever carry a real user acknowledgement. There is no pre-generation
+`generationMeta.failedSections` and is not yet acknowledged — confirming it
+records `incompleteAcknowledgedAt` on that spine version, so it is asked once
+per version (a legacy `isFinal` spine counts as acknowledged) —
+`startAssetGeneration`'s `acknowledgeIncomplete` flag may only ever carry a
+real user acknowledgement. Sync outputs offers the same confirmation inline
+for an unacknowledged version (see UI_PATTERNS.md). There is no pre-generation
 interstitial: generating always proceeds, and the hard generation gate stays
-safety/PRD-only plus the incomplete-PRD acknowledgement
-(`artifactGenerationGate.ts`).
+safety/PRD-only (safe, latest, structured PRD) plus the incomplete-PRD
+acknowledgement (`artifactGenerationGate.ts`).
+
+**The Build stage only ever works on the latest PRD.** While a historical
+spine is selected (History Mode), the journey's Build step is inert, an output
+stage presents the read-only historical Plan instead of `ArtifactWorkspace`
+(whose retry/regenerate actions would otherwise pass the old spine id to the
+job controller), and navigating to an output stage leaves History Mode first.
+Behind the UI, `evaluateSpineGenerationGate` refuses a non-latest spine
+(`not_latest`) for `startAll` / `regenerateSlots` /
+`ensureDesignSystemForSpine`, and `retrySlot` refuses one too
+(`isHistoricalSpine`).
 
 After a job observed active in the current session settles,
 `WorkflowCheckpointSummaryCard` presents one non-persisted completion summary:

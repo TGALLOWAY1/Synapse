@@ -212,7 +212,14 @@ describe('durable output-run marker (reload before the first output lands)', () 
 describe('a superseded run cannot clobber the run that replaced it (N8)', () => {
     it('ignores the old run\'s late markAllInterrupted and leaves the new run\'s marker in place', async () => {
         const { projectId, spineId } = seedCompleteProject();
-        // A newer spine (e.g. after an edit) becomes the latest.
+        genMock.mockImplementation(hangUntilAborted);
+
+        // The first run starts while its spine is still the latest.
+        artifactJobController.startAll(args(projectId, spineId));
+        await flush();
+        expect(useProjectStore.getState().jobs[projectId]?.slots.data_model?.status).toBe('generating');
+
+        // A newer spine (e.g. after an edit) becomes the latest mid-run.
         const nextSpine: SpineVersion = {
             id: 'spine-2',
             projectId,
@@ -230,11 +237,6 @@ describe('a superseded run cannot clobber the run that replaced it (N8)', () => 
                 [projectId]: [...s.spineVersions[projectId].map((sp) => ({ ...sp, isLatest: false })), nextSpine],
             },
         }));
-        genMock.mockImplementation(hangUntilAborted);
-
-        artifactJobController.startAll(args(projectId, spineId));
-        await flush();
-        expect(useProjectStore.getState().jobs[projectId]?.slots.data_model?.status).toBe('generating');
 
         // The new spine's run supersedes (aborts) the old one.
         artifactJobController.startAll(args(projectId, 'spine-2'));
@@ -251,6 +253,107 @@ describe('a superseded run cannot clobber the run that replaced it (N8)', () => 
         artifactJobController.cancelAll(projectId);
         await flush();
         expect(useProjectStore.getState().jobs[projectId]?.slots.data_model?.status).toBe('interrupted');
+    });
+});
+
+describe('only the latest spine may drive generation', () => {
+    // History Mode can select an old PRD; a run started from it would make
+    // outputs regenerated from that old plan the project's current ones.
+    it('refuses startAll, regenerateSlots and retrySlot for a historical spine', async () => {
+        const { projectId, spineId } = seedCompleteProject();
+        const nextSpine: SpineVersion = {
+            id: 'spine-2',
+            projectId,
+            promptText: 'idea',
+            responseText: 'md',
+            createdAt: Date.now(),
+            isLatest: true,
+            isFinal: false,
+            generationPhase: 'complete',
+            structuredPRD: prd(),
+        };
+        useProjectStore.setState((s) => ({
+            spineVersions: {
+                ...s.spineVersions,
+                [projectId]: [...s.spineVersions[projectId].map((sp) => ({ ...sp, isLatest: false })), nextSpine],
+            },
+        }));
+
+        artifactJobController.startAll(args(projectId, spineId));
+        artifactJobController.regenerateSlots(['data_model'], args(projectId, spineId));
+        artifactJobController.retrySlot('data_model', args(projectId, spineId));
+        await flush(4);
+
+        expect(genMock).not.toHaveBeenCalled();
+        expect(artifactJobController.isActive(projectId)).toBe(false);
+        expect(useProjectStore.getState().jobs[projectId]).toBeUndefined();
+        expect(useProjectStore.getState().projects[projectId]?.outputRun).toBeUndefined();
+
+        // The latest spine still generates.
+        artifactJobController.startAll(args(projectId, 'spine-2'));
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(1);
+    });
+});
+
+describe('an incomplete PRD acknowledged once keeps generating ("Generate anyway" is durable)', () => {
+    // Finalize used to leave `isFinal` behind as the durable acknowledgement.
+    // Without a durable record, the per-run flag dies with the run, so
+    // regenerateSlots (Sync outputs / dependency graph) and resumeIfNeeded
+    // silently refused every spine with failed sections.
+    function seedIncompleteProject(): { projectId: string; spineId: string } {
+        const store = useProjectStore.getState();
+        const { projectId, spineId } = store.createProject('P', 'idea');
+        store.updateSpineStructuredPRD(projectId, spineId, prd(), 'md', {
+            generationMeta: { ...completeMeta(), failedSections: ['risks'] },
+        });
+        return { projectId, spineId };
+    }
+
+    it('regenerateSlots runs once the version is acknowledged, and not before', async () => {
+        const { projectId, spineId } = seedIncompleteProject();
+
+        artifactJobController.regenerateSlots(['design_system'], args(projectId, spineId));
+        await flush(4);
+        expect(genMock).not.toHaveBeenCalled();
+
+        useProjectStore.getState().acknowledgeIncompleteSpine(projectId, spineId);
+        artifactJobController.regenerateSlots(['design_system'], args(projectId, spineId));
+        await settle(projectId);
+        expect(callsFor('design_system')).toBe(1);
+    });
+
+    it('resumeIfNeeded resumes a run started with "Generate anyway" after the per-run flag is gone', async () => {
+        const { projectId, spineId } = seedIncompleteProject();
+        genMock.mockImplementation(async (subtype: string) => {
+            if (subtype === 'data_model' && callsFor('data_model') === 1) throw new Error('schema rejected');
+            return { content: `${subtype} content`, metadata: {} };
+        });
+
+        // "Generate anyway": the per-run flag AND the durable record.
+        useProjectStore.getState().acknowledgeIncompleteSpine(projectId, spineId);
+        artifactJobController.startAll({ ...args(projectId, spineId), acknowledgeIncomplete: true });
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(1);
+
+        // A later Build mount resumes with plain args (no per-run flag).
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(2);
+    });
+
+    it('without the durable record a resume after the run is still refused', async () => {
+        const { projectId, spineId } = seedIncompleteProject();
+        genMock.mockImplementation(async (subtype: string) => {
+            if (subtype === 'data_model') throw new Error('schema rejected');
+            return { content: `${subtype} content`, metadata: {} };
+        });
+
+        artifactJobController.startAll({ ...args(projectId, spineId), acknowledgeIncomplete: true });
+        await settle(projectId);
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(1);
     });
 });
 
