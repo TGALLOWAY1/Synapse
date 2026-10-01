@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Branch, SpineVersion, HistoryEvent, StructuredPRD } from '../../types';
+import type { Branch, BranchPendingReply, SpineVersion, HistoryEvent, StructuredPRD } from '../../types';
 import type { ProjectState } from '../types';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
 
@@ -8,6 +8,7 @@ export type BranchSlice = {
     branches: Record<string, Branch[]>;
     createBranch: ProjectState['createBranch'];
     addBranchMessage: ProjectState['addBranchMessage'];
+    setBranchPendingReply: ProjectState['setBranchPendingReply'];
     mergeBranch: ProjectState['mergeBranch'];
     stageBranch: ProjectState['stageBranch'];
     unstageBranch: ProjectState['unstageBranch'];
@@ -55,7 +56,10 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                 if (b.id === branchId) {
                     return {
                         ...b,
-                        messages: [...b.messages, { id: uuidv4(), role, content, createdAt: Date.now() }]
+                        messages: [...b.messages, { id: uuidv4(), role, content, createdAt: Date.now() }],
+                        // An assistant reply landing settles any pending-reply
+                        // marker, whichever surface started the request.
+                        ...(role === 'assistant' ? { pendingReply: undefined } : {}),
                     };
                 }
                 return b;
@@ -65,6 +69,26 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                     ...state.branches,
                     [projectId]: updatedBranches
                 }
+            };
+        });
+    },
+
+    // Mark (or clear, with null) the assistant reply in flight for a branch.
+    // Persisted so a reload mid-request leaves evidence: the request itself
+    // cannot be resumed, so the branch UI offers to send it again.
+    setBranchPendingReply: (projectId: string, branchId: string, pendingReply: BranchPendingReply | null) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
+        set((state) => {
+            const projectBranches = state.branches[projectId] || [];
+            const target = projectBranches.find(b => b.id === branchId);
+            if (!target || (!pendingReply && !target.pendingReply)) return state;
+            return {
+                branches: {
+                    ...state.branches,
+                    [projectId]: projectBranches.map(b =>
+                        b.id === branchId ? { ...b, pendingReply: pendingReply ?? undefined } : b,
+                    ),
+                },
             };
         });
     },

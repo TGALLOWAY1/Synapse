@@ -94,6 +94,15 @@ describe('projectStore', () => {
             expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId]).toBeUndefined();
             expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId]).toBeUndefined();
         });
+
+        it('records a delete tombstone in the same write so the project cannot be resurrected', () => {
+            const { projectId } = useProjectStore.getState().createProject('Test', 'prompt');
+            const before = Date.now();
+
+            useProjectStore.getState().deleteProject(projectId);
+
+            expect(useProjectStore.getState().projectTombstones[projectId]).toBeGreaterThanOrEqual(before);
+        });
     });
 
     describe('markSpineFinal', () => {

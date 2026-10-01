@@ -12,6 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
 import { MobileSelectionToolbar } from './MobileSelectionToolbar';
 import { v4 as uuidv4 } from 'uuid';
+import { beginBranchReplyRequest, endBranchReplyRequest } from '../lib/branchReplyInFlight';
 import type { StructuredPRD, Feature, PlanningRecord } from '../types';
 import {
     parseEntities,
@@ -140,7 +141,7 @@ function DeleteFeatureButton({ featureName, onConfirm }: { featureName: string; 
 }
 
 export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions, onBranchCreated }: StructuredPRDViewProps) {
-    const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
+    const { editSpineStructuredPRD, createBranch, addBranchMessage, setBranchPendingReply, branches } = useProjectStore();
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PLANNING_RECORDS);
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
     const [editValue, setEditValue] = useState('');
@@ -242,11 +243,18 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // the one-tap action chips (mobile). Same history-tracked flow as before.
     const submitBranch = async (rawIntent: string) => {
         if (!selection || !rawIntent.trim() || isSubmitting) return;
+        let pendingBranchId: string | null = null;
         try {
             setIsSubmitting(true);
             const anchorText = selection.text;
             const userIntent = rawIntent.trim();
             const { branchId } = createBranch(projectId, spineId, anchorText, userIntent);
+            // The first reply is in flight: mark it (persisted) so a reload
+            // mid-request shows "Reply was interrupted — send again" in the
+            // branch list instead of a silently unanswered thread.
+            pendingBranchId = branchId;
+            beginBranchReplyRequest(branchId);
+            setBranchPendingReply(projectId, branchId, { startedAt: Date.now(), message: userIntent });
             // Reveal the branches sidebar right away — before awaiting the AI
             // reply — so the new thread and its Consolidate bar are visible.
             onBranchCreated?.();
@@ -254,8 +262,20 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             setIntent('');
             setMobileSelectMode(false);
             const response = await replyInBranch({ anchorText, intent: userIntent, threadHistory: [] });
+            // Landing the reply also clears the pending-reply marker.
             addBranchMessage(projectId, branchId, 'assistant', response);
+        } catch (e) {
+            // A failed reply is not an interrupted one — don't leave the marker.
+            if (pendingBranchId) {
+                try {
+                    setBranchPendingReply(projectId, pendingBranchId, null);
+                } catch {
+                    // Project deleted mid-request — nothing left to clear.
+                }
+            }
+            throw e;
         } finally {
+            if (pendingBranchId) endBranchReplyRequest(pendingBranchId);
             setIsSubmitting(false);
         }
     };

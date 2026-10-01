@@ -28,6 +28,11 @@ protect. It is consistent with how the rest of the app gates owner-only UI.
 - **Chokepoint.** Every LLM call in the app flows through
   `callGemini` / `callGeminiStream` (`src/lib/geminiClient.ts`). Both call
   `beginTrace()` at the start and `finishSuccess`/`finishError` at the end.
+- **Retries are part of the call.** One trace covers a call and all of its
+  transport retries (HTTP 429/5xx and connection drops, plus stream
+  restarts): `retryCount` counts them and `validation.retryReason` lists why
+  (e.g. `HTTP 429; HTTP 503`), so the viewer's "retries only" filter finds
+  rate-limited calls.
 - **Off by default.** `isTraceCaptureEnabled()` is false unless the viewer's
   **Capture** toggle is on (localStorage `synapse-llm-trace`) or the URL carries
   `?llmtrace`. When off, `beginTrace` returns a zero-cost no-op handle — nothing

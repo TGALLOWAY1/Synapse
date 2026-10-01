@@ -47,12 +47,16 @@ interface SyncStore {
   error: string | null;
   /** Count of local projects uploaded during the most recent reconcile. */
   migratedCount: number;
+  /** Projects whose cloud copy could not be downloaded during the most recent
+   *  reconcile (a per-project fetch failed while the rest synced) — a partial
+   *  failure, reported alongside phase 'ready'. Empty after a clean pull. */
+  failedPullIds: string[];
   /** Per-project sync status. */
   projects: Record<string, ProjectSyncInfo>;
 
   setPhase: (phase: SyncPhase, error?: string | null) => void;
   setOnline: (online: boolean) => void;
-  markPulled: (migratedCount: number) => void;
+  markPulled: (migratedCount: number, failedPullIds?: string[]) => void;
   setProjectSync: (projectId: string, info: ProjectSyncInfo) => void;
   /** Merge a partial update into a project's sync info (preserves other fields
    *  like a standing conflict or last-saved timestamp). */
@@ -61,18 +65,28 @@ interface SyncStore {
   reset: () => void;
 }
 
+// Stable empty list so a clean reconcile never hands selectors a fresh array.
+const NO_FAILED_PULLS: string[] = [];
+
 export const useProjectSyncStore = create<SyncStore>((set) => ({
   phase: 'idle',
   online: typeof navigator === 'undefined' ? true : navigator.onLine,
   lastPulledAt: null,
   error: null,
   migratedCount: 0,
+  failedPullIds: NO_FAILED_PULLS,
   projects: {},
 
   setPhase: (phase, error = null) => set({ phase, error: error ?? null }),
   setOnline: (online) => set({ online }),
-  markPulled: (migratedCount) =>
-    set({ phase: 'ready', error: null, lastPulledAt: Date.now(), migratedCount }),
+  markPulled: (migratedCount, failedPullIds) =>
+    set({
+      phase: 'ready',
+      error: null,
+      lastPulledAt: Date.now(),
+      migratedCount,
+      failedPullIds: failedPullIds && failedPullIds.length > 0 ? [...failedPullIds] : NO_FAILED_PULLS,
+    }),
   setProjectSync: (projectId, info) =>
     set((s) => ({ projects: { ...s.projects, [projectId]: info } })),
   patchProjectSync: (projectId, patch) =>
@@ -88,5 +102,12 @@ export const useProjectSyncStore = create<SyncStore>((set) => ({
       delete next[projectId];
       return { projects: next };
     }),
-  reset: () => set({ phase: 'idle', lastPulledAt: null, error: null, migratedCount: 0, projects: {} }),
+  reset: () => set({
+    phase: 'idle',
+    lastPulledAt: null,
+    error: null,
+    migratedCount: 0,
+    failedPullIds: NO_FAILED_PULLS,
+    projects: {},
+  }),
 }));

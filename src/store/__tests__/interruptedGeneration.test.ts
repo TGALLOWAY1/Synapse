@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { markInterruptedGenerations } from '../interruptedGeneration';
-import type { SpineVersion, StructuredPRD, PreflightSession } from '../../types';
+import { markInterruptedGenerations, markInterruptedOutputRuns } from '../interruptedGeneration';
+import type { Project, SpineVersion, StructuredPRD, PreflightSession } from '../../types';
 
 const baseSpine = (overrides: Partial<SpineVersion>): SpineVersion => ({
     id: 'v1',
@@ -103,5 +103,26 @@ describe('markInterruptedGenerations', () => {
         };
         expect(markInterruptedGenerations(versions)).toBe(false);
         expect(versions.p1[0].generationError).toBeUndefined();
+    });
+});
+
+describe('markInterruptedOutputRuns', () => {
+    const project = (overrides: Partial<Project>): Project => ({ id: 'p1', name: 'P', createdAt: 1, ...overrides });
+
+    it('turns a leftover running output-run marker into interrupted (a page load killed the run)', () => {
+        const projects = {
+            p1: project({ outputRun: { spineVersionId: 's1', runId: 'r1', startedAt: 5, phase: 'running' } }),
+        };
+        expect(markInterruptedOutputRuns(projects)).toBe(true);
+        expect(projects.p1.outputRun).toEqual({ spineVersionId: 's1', runId: 'r1', startedAt: 5, phase: 'interrupted' });
+    });
+
+    it('leaves projects without a running marker untouched', () => {
+        const interrupted = project({ outputRun: { spineVersionId: 's1', runId: 'r1', startedAt: 5, phase: 'interrupted' } });
+        const legacy = project({ id: 'p2' });
+        const projects = { p1: interrupted, p2: legacy };
+        expect(markInterruptedOutputRuns(projects)).toBe(false);
+        expect(projects.p1).toBe(interrupted);
+        expect(projects.p2).toBe(legacy);
     });
 });

@@ -1,5 +1,5 @@
 import type {
-    Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
+    Project, SpineVersion, HistoryEvent, Branch, BranchPendingReply, StructuredPRD,
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackStatus,
@@ -37,6 +37,16 @@ import type {
     DownstreamArtifactUpdateOperation,
 } from '../lib/planning/downstreamArtifactUpdateProposal';
 import type { PrepareCurrentDownstreamProposalsResult } from '../lib/planning/outputSyncReviewQueue';
+
+/** Options for `initJob` (generation jobs slice). */
+export interface InitJobOptions {
+    /** The run that owns the new job (guards later writes; see ProjectJobState.runId). */
+    runId?: string;
+    /** This is an automatic resume run: count it toward each run slot's `autoResumeAttempts`. */
+    autoResume?: boolean;
+    /** Slots left out of this run whose prior same-spine state is kept as-is (e.g. failed and out of automatic attempts). */
+    carryOverSlots?: ArtifactSlotKey[];
+}
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -126,6 +136,13 @@ export type AssumptionEvidenceMutationResult =
 
 export interface ProjectState {
     projects: Record<string, Project>;
+    // Per-user delete tombstones (project id → deletedAt epoch ms), persisted
+    // in the user's namespace blob next to the projects they suppress. Written
+    // by deleteProject; read by the cross-tab merge, server sync, and the
+    // namespace-merge imports so a deleted project can't be resurrected. NOT a
+    // project collection — never part of a bundle/snapshot. See
+    // src/lib/projectTombstones.ts.
+    projectTombstones: Record<string, number>;
     spineVersions: Record<string, SpineVersion[]>;
     historyEvents: Record<string, HistoryEvent[]>;
     branches: Record<string, Branch[]>;
@@ -161,7 +178,10 @@ export interface ProjectState {
     regenerateSpine: (projectId: string) => { newSpineId: string };
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
+    // An 'assistant' message also clears the branch's pendingReply marker.
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
+    // Set (or clear, with null) the in-flight reply marker (Branch.pendingReply).
+    setBranchPendingReply: (projectId: string, branchId: string, pendingReply: BranchPendingReply | null) => void;
     mergeBranch: (projectId: string, branchId: string, newSpineText: string, opts?: { structuredPRD?: StructuredPRD }) => { newSpineId: string };
     // Staged-edits (batch consolidation) flow: hold a concrete replacement on a
     // branch ('resolved'), then apply several at once as one spine version.
@@ -195,6 +215,12 @@ export interface ProjectState {
     // preset ("decide later") — the Mark-as-Final gate still asks before
     // assets generate.
     markDesignSetupComplete: (projectId: string) => void;
+
+    // Durable output-run lifecycle marker (`Project.outputRun`): stamped when
+    // a full artifact run launches, settled (removed) when that same run ends.
+    // Only the run that stamped the marker can settle it.
+    markOutputRunStarted: (projectId: string, spineVersionId: string, runId: string) => void;
+    settleOutputRun: (projectId: string, runId: string) => void;
 
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home
@@ -643,15 +669,18 @@ export interface ProjectState {
     getProjectOutputAlignment: (projectId: string) => ProjectOutputAlignmentSummary;
 
 
-    // Background generation jobs (transient — excluded from persist)
+    // Background generation jobs (transient — excluded from persist). Writes
+    // that pass a `runId` no-op unless that run owns the job (see
+    // ProjectJobState.runId), so a superseded run can't clobber a newer one.
     jobs: Record<string, ProjectJobState | undefined>;
-    initJob: (projectId: string, spineVersionId: string, slotKeys: ArtifactSlotKey[]) => void;
-    setSlotStatus: (projectId: string, slot: ArtifactSlotKey, partial: Partial<SlotState>) => void;
-    appendSlotProgress: (projectId: string, slot: ArtifactSlotKey, message: string) => void;
+    initJob: (projectId: string, spineVersionId: string, slotKeys: ArtifactSlotKey[], opts?: InitJobOptions) => void;
+    claimJobRun: (projectId: string, runId: string) => void;
+    setSlotStatus: (projectId: string, slot: ArtifactSlotKey, partial: Partial<SlotState>, runId?: string) => void;
+    appendSlotProgress: (projectId: string, slot: ArtifactSlotKey, message: string, runId?: string) => void;
     clearJob: (projectId: string) => void;
     getSlot: (projectId: string, slot: ArtifactSlotKey) => SlotState | undefined;
     getJob: (projectId: string) => ProjectJobState | undefined;
-    markAllInterrupted: (projectId: string) => void;
+    markAllInterrupted: (projectId: string, runId?: string) => void;
 
     // PRD generation progress (transient — excluded from persist)
     prdProgress: Record<string, { messages: string[]; updatedAt: number } | undefined>;

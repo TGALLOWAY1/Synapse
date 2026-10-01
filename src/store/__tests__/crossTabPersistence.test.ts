@@ -35,6 +35,7 @@ beforeEach(() => {
         feedbackItems: {},
         tasks: {},
         workflowRuns: {},
+        projectTombstones: {},
     });
 });
 
@@ -127,6 +128,56 @@ describe('cross-tab persistence guard', () => {
         expect(versions.map(v => v.id)).toContain('mock-v1');
         const preferred = useProjectStore.getState().getPreferredVersion(projectId, 'mock-art');
         expect(preferred?.sourceRefs.some(r => r.sourceType === 'spine')).toBe(true);
+    });
+
+    it('a stale tab\'s write does not resurrect a project another tab deleted', async () => {
+        applyProjectUser('tab-user');
+
+        // THIS store plays the stale tab: it still holds the project.
+        const { projectId } = useProjectStore.getState().createProject('Doomed', 'the idea');
+        flushPersist();
+        const ns = namespaceFor('tab-user');
+
+        // ANOTHER tab deleted it: its blob lacks the project everywhere and
+        // carries the delete tombstone.
+        const otherTab = JSON.parse(localStorage.getItem(ns)!) as PersistedBlob;
+        for (const map of Object.values(otherTab.state)) {
+            if (map && typeof map === 'object') delete map[projectId];
+        }
+        const deletedAt = Date.now() + 10_000;
+        otherTab.state.projectTombstones = { [projectId]: deletedAt };
+        localStorage.setItem(ns, JSON.stringify(otherTab));
+
+        // The stale tab makes an unrelated change and flushes.
+        const { projectId: survivorId } = useProjectStore.getState().createProject('Unrelated', 'idea');
+        flushPersist();
+
+        const stored = JSON.parse(localStorage.getItem(ns)!) as PersistedBlob;
+        expect(stored.state.projects[projectId]).toBeUndefined();
+        expect(stored.state.spineVersions[projectId]).toBeUndefined();
+        expect(stored.state.projects[survivorId]).toBeDefined();
+        expect(stored.state.projectTombstones[projectId]).toBe(deletedAt);
+
+        // …and the stale tab adopts the deletion instead of re-showing (and,
+        // for a signed-in user, re-pushing) the project.
+        await Promise.resolve();
+        expect(useProjectStore.getState().projects[projectId]).toBeUndefined();
+        expect(useProjectStore.getState().projectTombstones[projectId]).toBe(deletedAt);
+    });
+
+    it('keeps delete tombstones per user across a namespace switch', () => {
+        applyProjectUser('user-a');
+        const { projectId } = useProjectStore.getState().createProject('A project', 'idea');
+        useProjectStore.getState().deleteProject(projectId);
+        flushPersist();
+        expect(useProjectStore.getState().projectTombstones[projectId]).toBeGreaterThan(0);
+
+        applyProjectUser('user-b');
+        flushPersist();
+        expect(useProjectStore.getState().projectTombstones).toEqual({});
+
+        applyProjectUser('user-a');
+        expect(useProjectStore.getState().projectTombstones[projectId]).toBeGreaterThan(0);
     });
 
     it('keeps the in-memory tab\'s copy when it is the newer one', () => {

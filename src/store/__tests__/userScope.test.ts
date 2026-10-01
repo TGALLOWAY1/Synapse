@@ -177,4 +177,39 @@ describe('mergeNamespaceInto (account-linking recovery — R3)', () => {
     expect(mergeNamespaceInto('canonical', 'nonexistent')).toBe(false);
     expect(mergeNamespaceInto('same', 'same')).toBe(false);
   });
+
+  it('never re-adds a project the canonical account deleted (recovery runs on every sign-in)', () => {
+    localStorage.setItem(
+      namespaceFor('canonical'),
+      JSON.stringify({ state: { projects: { mine: {} }, projectTombstones: { gone: Date.now() } } }),
+    );
+    localStorage.setItem(namespaceFor('old'), '{"state":{"projects":{"gone":{},"p1":{}},"spineVersions":{"gone":[{"id":"v1"}]}}}');
+
+    expect(mergeNamespaceInto('canonical', 'old')).toBe(true);
+    const state = JSON.parse(localStorage.getItem(namespaceFor('canonical'))!).state;
+    expect(Object.keys(state.projects).sort()).toEqual(['mine', 'p1']);
+    expect(state.spineVersions.gone).toBeUndefined();
+    // The canonical account's tombstone itself is preserved.
+    expect(state.projectTombstones.gone).toBeGreaterThan(0);
+  });
+});
+
+describe('legacy import respects delete tombstones', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActiveProjectUser(null);
+  });
+
+  it('neither offers nor imports a project the user deleted', () => {
+    localStorage.setItem(BASE, LEGACY); // p1, p2
+    localStorage.setItem(
+      namespaceFor('userA'),
+      JSON.stringify({ state: { projects: { mine: {} }, projectTombstones: { p1: Date.now() } } }),
+    );
+
+    expect(getLegacyImportOffer('userA')).toEqual({ available: true, projectCount: 1 });
+    expect(importLegacyProjectsForUser('userA')).toBe(true);
+    const projects = JSON.parse(localStorage.getItem(namespaceFor('userA'))!).state.projects;
+    expect(Object.keys(projects).sort()).toEqual(['mine', 'p2']);
+  });
 });

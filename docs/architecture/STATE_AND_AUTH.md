@@ -7,7 +7,13 @@
 `useProjectStore` is one Zustand store composed from the slices in
 `src/store/slices/`:
 
-- `projectSlice` — Project CRUD, current stage
+- `projectSlice` — Project CRUD, current stage. `deleteProject` also records a
+  per-user **delete tombstone** (`projectTombstones`: project id → deletedAt) in
+  the same write — see "Cross-tab write safety" below and PROJECT_SYNC.md. The
+  durable output-run marker (`Project.outputRun`, `markOutputRunStarted` /
+  `settleOutputRun`) is the artifact-run counterpart of
+  `SpineVersion.generationPhase` — see WORKSPACE_AND_ARTIFACTS.md "Artifact job
+  runs".
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
@@ -57,7 +63,14 @@
   clone (`changeSource: 'revert'`, `Reverted` event) — old versions are never
   mutated or deleted. `VersionProvenance` (on `SpineVersion` and
   `ArtifactVersion`, all-optional/back-compat) records change attribution.
-- `branchSlice` — Branches and their messages
+- `branchSlice` — Branches and their messages. `Branch.pendingReply`
+  (optional, persisted) marks an assistant reply in flight; it is set when a
+  reply starts (`setBranchPendingReply`) and cleared when the reply lands (any
+  `addBranchMessage(…, 'assistant', …)`) or fails. The request cannot survive a
+  reload, so a marker with no live request in this page load
+  (`src/lib/branchReplyInFlight.ts`) means the reply was interrupted: the
+  branch list says "Reply was interrupted — send again" and restores the
+  user's message into the input — never re-sending automatically.
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
   tracking; source-ref staleness detection against the current spine.
   `revertArtifactToVersion` restores an older version by appending a **cloned**
@@ -68,7 +81,9 @@
   feedback remains available to history/snapshot consumers, but no live UI
   creates new feedback items; the unused creation action was retired.
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
-  from persistence)
+  from persistence). Writes tagged with a run id no-op unless that run owns the
+  job (`ProjectJobState.runId`), and `SlotState.autoResumeAttempts` caps
+  automatic resumes — see WORKSPACE_AND_ARTIFACTS.md "Artifact job runs".
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
   (transient; stripped from persistence). Consecutive-duplicate-deduped.
 - `tasksSlice` — Persisted implementation tasks (`ProjectTask[]` keyed by
@@ -105,7 +120,12 @@ load kills any in-flight PRD pipeline, so spines still marked
 placeholder with no structured PRD — are converted into a settled
 `generationError` (`category: 'interrupted'`), which renders the existing
 error card with Try Again instead of an eternal "Generating…" state. Spines
-with an open preflight session or a blocked safety review are skipped.
+with an open preflight session or a blocked safety review are skipped. The same
+callback runs `markInterruptedOutputRuns`: a project still carrying a
+`'running'` `outputRun` marker (an artifact output run the load killed) is
+flipped to `'interrupted'`, the evidence `artifactJobController.resumeIfNeeded`
+uses to resume that run on the next Build mount even when no output had
+completed yet. It also defaults `projectTombstones` to `{}` for legacy blobs.
 
 **Concurrency rule:** store actions that append a version (e.g.
 `createArtifactVersion`, `regenerateSpine`, `mergeBranch`) must do **all** state
@@ -169,9 +189,14 @@ side, the side with the newer `latestProjectActivity` (max `createdAt`/
 **wholesale** — a project's slices always come from ONE side so they stay an
 internally-consistent snapshot (version arrays, preferred flags, and history
 agree); projects present on only one side are kept (union — losing brand-new
-work is strictly worse than the rare resurrection of a project deleted
-concurrently in another tab, which server sync re-deletes for signed-in
-users). Ties go to the in-memory tab — and to keep real changes out of tie
+work is strictly worse than a stale copy) **unless deleted**: both sides'
+per-user delete tombstones (`projectTombstones`, `src/lib/projectTombstones.ts`)
+are unioned (newest per id, entries older than 30 days pruned), and a project
+whose tombstone is at least as new as its winning side's latest activity is
+dropped with all its collections instead of resurrected — so a stale tab can
+no longer bring a deleted project back (and, signed in, re-push it). Activity
+strictly after the deletion wins: the project is kept and its superseded
+tombstone cleared. Ties go to the in-memory tab — and to keep real changes out of tie
 territory, **every in-place mutation stamps `updatedAt`**: spine mutations
 (streaming PRD fill, decision-edit amend, preflight patches,
 finality/error/safety settles — `SpineVersion.updatedAt`) and project-record
@@ -180,7 +205,7 @@ optional fields (legacy data predates them); the activity scan also reads
 generic `at` stamps on event rows. After a merged value lands (and no newer
 write is already pending), the storage fires the handler's `onApplied`, which
 adopts the merged blob into memory on the next microtask by setState-ing the
-persisted project-keyed collections **directly — never via
+persisted project-keyed collections (plus `projectTombstones`) **directly — never via
 `persist.rehydrate()`**, whose `onRehydrateStorage` interruption fixups assume
 a page load killed all in-flight work and would mark a project mid-generation
 in the *other* tab as interrupted. The merge is
@@ -357,7 +382,14 @@ rules:
   (plus `MERGEABLE_COLLECTIONS` in `userScope.ts`, `bundleSourceOf` in
   `projectServerSync.ts`, and `projectRecovery.ts`) all derive from it via
   `emptyBundleSource()`/`pickBundleSource()`, so adding a tenth collection is a
-  one-line change there rather than five hand-edits.
+  one-line change there rather than five hand-edits. The per-user delete
+  tombstones (`projectTombstones`) are deliberately **not** in that list — they
+  never travel in a bundle, snapshot, or export — but they live in the same
+  namespace blob: `emptyPersistedState()` resets them explicitly on a switch
+  (the new namespace's own come back with the rehydrate), cross-tab adoption
+  carries them, and the legacy-import / merged-account merges
+  (`mergeStoredBlobs`) never re-add a project the target namespace tombstoned
+  (nor import the source's tombstones).
   - **Sign-out ordering — stop sync BEFORE the namespace switches:**
     `authStore.setUser` calls `stopProjectSync()` whenever the active user
     CHANGES (sign-out or account switch) **before** `applyProjectUser` runs.

@@ -1,4 +1,4 @@
-import type { SpineVersion } from '../types';
+import type { Project, SpineVersion } from '../types';
 
 /**
  * Detect spines whose PRD generation was interrupted (page refreshed or
@@ -50,6 +50,30 @@ export function markInterruptedGenerations(
                 },
             };
         });
+    }
+    return changed;
+}
+
+/**
+ * The artifact-output counterpart of `markInterruptedGenerations`: a page load
+ * kills any in-flight output run, so a project still carrying a `'running'`
+ * `outputRun` marker was interrupted mid-run. Flip it to `'interrupted'` —
+ * the durable evidence `artifactJobController.resumeIfNeeded` uses to resume
+ * the run on the next Build mount even when NO output had completed yet.
+ * (Only a load converts: a `'running'` marker adopted from another tab or
+ * pulled from another device may belong to a run that is still live there.)
+ *
+ * Mutates `projects` in place (onRehydrateStorage hands us the draft state)
+ * and returns whether anything was changed.
+ */
+export function markInterruptedOutputRuns(projects: Record<string, Project>): boolean {
+    let changed = false;
+    for (const projectId of Object.keys(projects)) {
+        const project = projects[projectId];
+        const run = project?.outputRun;
+        if (!run || run.phase !== 'running') continue;
+        projects[projectId] = { ...project, outputRun: { ...run, phase: 'interrupted' } };
+        changed = true;
     }
     return changed;
 }
