@@ -94,10 +94,6 @@ describe('deriveHeaderPlanStatus', () => {
         generationFailed: false,
         clarifying: false,
         generating: false,
-        commitmentUnverifiable: false,
-        displaysCurrentCommitment: false,
-        legacyCommitted: false,
-        acceptedRisk: false,
     };
 
     it('reads "Clarifying…" during the interview and "Generating…" only once a run is in flight', () => {
@@ -109,14 +105,5 @@ describe('deriveHeaderPlanStatus', () => {
     it('keeps blocked and failed states ahead of the run states', () => {
         expect(deriveHeaderPlanStatus({ ...none, blocked: true, clarifying: true })).toBe('Blocked');
         expect(deriveHeaderPlanStatus({ ...none, generationFailed: true, generating: true })).toBe('Generation failed');
-    });
-
-    it('reports commitment states unchanged', () => {
-        expect(deriveHeaderPlanStatus({ ...none, commitmentUnverifiable: true })).toBe('Readiness unavailable');
-        expect(deriveHeaderPlanStatus({ ...none, displaysCurrentCommitment: true })).toBe('Plan committed');
-        expect(deriveHeaderPlanStatus({ ...none, displaysCurrentCommitment: true, acceptedRisk: true }))
-            .toBe('Proceeding with accepted risk');
-        expect(deriveHeaderPlanStatus({ ...none, displaysCurrentCommitment: true, legacyCommitted: true }))
-            .toBe('Legacy commitment · readiness not recorded');
     });
 });

@@ -1,5 +1,13 @@
 # Uncertainty-first planning
 
+> **Status note (2026-10).** The readiness review and user-commitment steps
+> described below (§6–7 and the "commit" end of the loop) were removed with the
+> Finalize layer. The workspace journey is now **Plan · Decide · Build**: open
+> decisions and assumptions are answered in the Decision Center, output
+> generation needs no commitment step, and the build-packet checks are advisory.
+> Old readiness reviews and commitment events stay readable in History. Current
+> behavior: `docs/architecture/PLANNING_AND_DECISIONS.md`.
+
 ## Product position
 
 Synapse is a planning system, not an artifact factory. Its purpose is to help a

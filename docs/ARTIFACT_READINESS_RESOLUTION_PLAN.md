@@ -14,6 +14,18 @@ gates on a manual QA pass and an `/e2e` run, plus the §6 deferrals. Where an
 implementation deviated from the design here, the deviation is recorded in the
 landing commit's message and in the topic doc named by the workstream.
 
+**Superseded in part (2026-10, Finalize removal).** The Finalize/commitment layer
+was later removed. W6's evaluator now reports **seven advisory checks** — the
+"product reasoning is committed" criterion and the committed-checkpoint authority
+described in §W6 below no longer exist, an unresolved measurement obligation is a
+warning, and nothing gates on the packet. W7's Final Review is an advisory
+checklist whose one primary is always the next build step ("Approve build packet"
+is an optional sign-off; there is no "Resolve N blockers" or "unavailable"
+primary). The sections below are kept as the historical design record; the
+current behavior lives in `docs/architecture/PLANNING_AND_DECISIONS.md` ("Two
+readiness evaluators") and `docs/architecture/WORKSPACE_AND_ARTIFACTS.md`
+("Final Review").
+
 ---
 
 ## 1. What this plan does and does not attempt

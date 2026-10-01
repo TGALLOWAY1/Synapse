@@ -152,6 +152,41 @@ describe('UpdateAssetsPlanModal', () => {
         expect(screen.getByText(/Choose a design direction/)).toBeInTheDocument();
     });
 
+    // An unacknowledged incomplete PRD: the modal carries the explicit
+    // incomplete-PRD confirmation itself instead of a dead-end reason.
+    it('offers the incomplete-PRD confirmation inline and unlocks Sync once it is recorded', () => {
+        const onAcknowledge = vi.fn();
+        const { rerender } = render(
+            <UpdateAssetsPlanModal
+                prdLabel="Version 2"
+                rows={rows}
+                onConfirm={() => {}}
+                onCancel={() => {}}
+                regenerationDisabledReason="This PRD has failed sections."
+                incompletePrdAcknowledgement={{ failedSectionCount: 2, onAcknowledge }}
+            />,
+        );
+        const group = screen.getByRole('group', { name: 'Incomplete PRD' });
+        expect(within(group).getByText(/2 sections of this PRD failed/)).toBeInTheDocument();
+        expect(screen.queryByText('This PRD has failed sections.')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Sync 3$/ })).toBeDisabled();
+
+        fireEvent.click(within(group).getByRole('button', { name: 'Generate anyway' }));
+        expect(onAcknowledge).toHaveBeenCalledTimes(1);
+
+        // The parent re-renders from the store: acknowledged → nothing blocks.
+        rerender(
+            <UpdateAssetsPlanModal
+                prdLabel="Version 2"
+                rows={rows}
+                onConfirm={() => {}}
+                onCancel={() => {}}
+            />,
+        );
+        expect(screen.queryByRole('group', { name: 'Incomplete PRD' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Sync 3$/ })).toBeEnabled();
+    });
+
     it('exposes one labeled radio group per output', () => {
         setup();
         const group = screen.getByRole('group', { name: 'Sync action for Design System' });

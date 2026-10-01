@@ -4,7 +4,6 @@ export interface ProjectCapabilities {
     isReadOnly: boolean;
     canExplore: boolean;
     canEditProjectContent: boolean;
-    canChangeFinality: boolean;
     canEditArtifacts: boolean;
     canReviewArtifacts: boolean;
     canGenerateArtifacts: boolean;
@@ -21,7 +20,6 @@ const EDITABLE_CAPABILITIES: ProjectCapabilities = Object.freeze({
     isReadOnly: false,
     canExplore: true,
     canEditProjectContent: true,
-    canChangeFinality: true,
     canEditArtifacts: true,
     canReviewArtifacts: true,
     canGenerateArtifacts: true,
@@ -34,7 +32,6 @@ const READ_ONLY_CAPABILITIES: ProjectCapabilities = Object.freeze({
     isReadOnly: true,
     canExplore: true,
     canEditProjectContent: false,
-    canChangeFinality: false,
     canEditArtifacts: false,
     canReviewArtifacts: false,
     canGenerateArtifacts: false,
@@ -110,11 +107,11 @@ export function canPerformProjectAction(projectId: string | undefined, action: P
 /** Store actions which change persisted project data. Keep this list explicit:
  * adding a new write is a conscious policy decision, not a UI convention. */
 export const PERSISTENT_STORE_ACTIONS = new Set<string>([
-    'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage', 'setBranchPendingReply',
+    'updateSpineText', 'regenerateSpine', 'createBranch', 'addBranchMessage', 'setBranchPendingReply',
     'mergeBranch', 'stageBranch', 'unstageBranch', 'applyStagedBranchesToSpine',
     'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
     'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
-    'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
+    'updateProjectProductMetadata', 'markSpineGenerationStarted', 'acknowledgeIncompleteSpine', 'setSpineSafetyReview',
     'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
     'setPreflightIndex', 'setPreflightSummary', 'completePreflightSession', 'setPreflightError',
     'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'markOutputRunStarted', 'heartbeatOutputRun',
@@ -130,8 +127,6 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'supersedeOpenReviewIssues',
     'updatePlanningRecordStatusByUser', 'appendPlanningDecisionEvent', 'importPlanningAssumptions',
     'addPlanningAssessment', 'setPlanningRecordDecisionOptions',
-    'createReadinessReview', 'authorizeReadinessCommitment',
-    'commitReadinessReview', 'reopenReadinessCommitment',
     'recordDownstreamUpdatePlan', 'generateDownstreamUpdatePlans', 'appendDownstreamUpdatePlanEvent',
     'recordDownstreamArtifactUpdateProposal', 'appendDownstreamArtifactUpdateReviewEvent',
     'recordDownstreamArtifactUpdateApplication', 'recordDownstreamArtifactUpdateVerification',

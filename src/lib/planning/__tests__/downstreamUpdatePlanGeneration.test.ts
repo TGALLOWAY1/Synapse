@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Artifact, ArtifactVersion, SpineVersion, StructuredPRD } from '../../../types';
-import { deriveDownstreamUpdatePlans } from '../downstreamUpdatePlanGeneration';
+import type { Artifact, ArtifactVersion, SpineVersion, StructuredPRD, VersionChangeSource } from '../../../types';
+import { deriveDownstreamUpdatePlans, isSourceChangeConfirmed } from '../downstreamUpdatePlanGeneration';
 
 const basePrd = (patch: Partial<StructuredPRD> = {}): StructuredPRD => ({
     vision: 'Help teams plan work.', coreProblem: 'Planning is fragmented.', targetUsers: ['Enterprise administrators'],
@@ -220,5 +220,47 @@ Stores local display choices.
         const first = derive(basePrd(), basePrd({ features: [] }), [{ artifact: screens, content: screenContent }]);
         const second = derive(basePrd(), basePrd({ features: [] }), [{ artifact: screens, content: screenContent }]);
         expect(second).toEqual(first);
+    });
+});
+
+// The Finalize commitment that used to confirm a source change is gone. A
+// change is confirmed by the surviving authority: a user-authored change, a
+// confirmed/resolved planning record, or (legacy) an old Finalize commitment.
+describe('downstream source-change confirmation', () => {
+    const latestWith = (changeSource?: VersionChangeSource, isFinal = false): SpineVersion => ({
+        ...spine('s2', basePrd({ features: [] }), true),
+        isFinal,
+        ...(changeSource ? { provenance: { changeSource } } : {}),
+    });
+    const deriveWith = (latest: SpineVersion) => {
+        const screens = artifact('screens', 'screen_inventory', 'Screens');
+        return deriveDownstreamUpdatePlans({
+            projectId: 'p1', artifacts: [screens], artifactVersions: [version(screens, screenContent)],
+            spineVersions: [spine('s1', basePrd(), false), latest], planningRecords: [], createdAt: 10,
+        });
+    };
+
+    it('confirms a user-authored change — a restore, edit, merge, decision, or section re-run — with no commitment', () => {
+        for (const changeSource of ['revert', 'user_edit', 'branch_merge', 'decision_edit', 'ai_section_retry'] as const) {
+            expect(isSourceChangeConfirmed({ isFinal: false, provenance: { changeSource } })).toBe(true);
+            const plans = deriveWith(latestWith(changeSource));
+            expect(plans).toHaveLength(1);
+            expect(plans[0].source.confirmed).toBe(true);
+        }
+    });
+
+    it('keeps a fresh model draft, or a spine of unknown origin, provisional', () => {
+        for (const latest of [latestWith('ai_regeneration'), latestWith('ai_generation'), latestWith()]) {
+            expect(isSourceChangeConfirmed(latest)).toBe(false);
+            expect(deriveWith(latest)[0].source.confirmed).toBe(false);
+        }
+    });
+
+    it('still honours a legacy Finalize commitment and a confirmed or resolved planning record', () => {
+        expect(deriveWith(latestWith('ai_regeneration', true))[0].source.confirmed).toBe(true);
+        const draft = { isFinal: false, provenance: { changeSource: 'ai_regeneration' as const } };
+        expect(isSourceChangeConfirmed(draft, { status: 'confirmed' })).toBe(true);
+        expect(isSourceChangeConfirmed(draft, { status: 'resolved' })).toBe(true);
+        expect(isSourceChangeConfirmed(draft, { status: 'open' })).toBe(false);
     });
 });

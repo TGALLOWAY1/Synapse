@@ -42,14 +42,14 @@ const record: PlanningRecord = {
     sourceFindingIds: [], createdBy: 'user', createdAt: 1, updatedAt: 1,
 };
 
-function makePlan(): DownstreamUpdatePlan {
+function makePlan(confirmed = true): DownstreamUpdatePlan {
     return sealDownstreamUpdatePlan({
         schemaVersion: 1, id: 'plan-current', projectId, authoredBy: 'synapse', createdAt: 10,
         source: {
             kind: 'planning_change', summary: 'Collaboration was removed from the first release.',
             targetSpineVersionId: spine.id, targetSpineContentHash: hashReviewValue(spine.responseText),
             planningContextHash: downstreamPlanningContextHash([record]), planningRecordId: record.id,
-            confirmed: true,
+            confirmed,
         },
         artifact: {
             artifactId: artifact.id, artifactVersionId: version.id,
@@ -117,6 +117,14 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(screen.getByText('Definite impact')).toBeInTheDocument();
         expect(screen.getByText('Review recommended')).toBeInTheDocument();
         expect(screen.getAllByText(/What remains safe/)).toHaveLength(2);
+    });
+
+    it('says how a provisional source change becomes confirmed', () => {
+        useProjectStore.setState({ downstreamUpdatePlans: { [projectId]: [makePlan(false)] } });
+        renderReview();
+
+        expect(screen.getByText(/Source change remains provisional — no edit or decision has confirmed it yet/)).toBeInTheDocument();
+        expect(screen.queryByText(/Confirmed source change/)).not.toBeInTheDocument();
     });
 
     it('records user dispositions only through append-only plan events and requires rationale', () => {

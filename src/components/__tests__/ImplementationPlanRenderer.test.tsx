@@ -100,12 +100,14 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack/)).toBeInTheDocument();
         expect(screen.queryByText(/quality gate/)).not.toBeInTheDocument();
         // §W7: the header no longer owns a copy action; the plan surface has
-        // exactly one primary, and with no build-packet context it is the
-        // honest "readiness unavailable" state — never a copy CTA.
+        // exactly one primary — the next build step. The packet checks are
+        // advisory, so even with no build-packet context the primary is the
+        // enabled "copy the first prompt", never a disabled readiness state.
         expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
         const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('data-cta-state', 'unavailable');
-        expect(primary).toBeDisabled();
+        expect(primary).toHaveAttribute('data-cta-action', 'start_build');
+        expect(primary).toHaveAccessibleName(/Copy first implementation prompt/);
+        expect(primary).toBeEnabled();
         // Overview content: strategy, stack, risks with handling.
         expect(screen.getByText('Walking skeleton first.')).toBeInTheDocument();
         expect(screen.getByText('React + Vite')).toBeInTheDocument();

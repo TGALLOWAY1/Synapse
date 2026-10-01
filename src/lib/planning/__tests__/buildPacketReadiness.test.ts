@@ -33,8 +33,6 @@ import {
 // per-criterion tests underneath break.
 // ---------------------------------------------------------------------------
 
-const SPINE_ID = 'spine-1';
-
 const feature = (overrides: Partial<Feature> & Pick<Feature, 'id' | 'name'>): Feature => ({
     description: `${overrides.name} description`,
     userValue: 'Clear user value',
@@ -223,13 +221,6 @@ const wellFormedInput = (
     dataModel: dataModel(),
     apiEndpoints: endpoints(),
     plan: plan(),
-    committedReadiness: {
-        reviewId: 'readiness-review-1',
-        spineVersionId: SPINE_ID,
-        conclusion: 'ready_to_build',
-        committedAt: 1_700_000_000_000,
-    },
-    currentSpineVersionId: SPINE_ID,
     evaluatedAt: 1_700_000_001_000,
     ...overrides,
 });
@@ -450,8 +441,8 @@ describe('deriveBuildPacketReadiness — packet input currency', () => {
         expect(blocker.title).toBe('Data Model is out of date');
         expect(blocker.consequence).toContain('Version 2 is current');
         expect(blocker.actionTarget).toMatchObject({ kind: 'artifact_slot', nodeId: 'data_model' });
-        // The reasoning-side criteria are untouched: this is a packet fact.
-        expect(criterion(result, 'reasoning_committed').blocking).toBe(false);
+        // Every other packet check is untouched: this is a currency fact.
+        expect(criterion(result, 'validation_clear').blocking).toBe(false);
     });
 
     it('blocks a plan that reads up_to_date while a MISSING dependency shows only in impactedBy', () => {
@@ -780,16 +771,24 @@ describe('deriveBuildPacketReadiness — first-slice API contracts', () => {
 // ---------------------------------------------------------------------------
 
 describe('deriveBuildPacketReadiness — cross-cutting obligations', () => {
-    it('blocks a project with success metrics and no measurement mapping', () => {
+    it('reports an undischarged measurement obligation as a warning, never an open check', () => {
+        // The generator is not reliably prompted to produce an instrumented
+        // measurement plan, so the check must not be stricter than it (§7):
+        // a fresh, otherwise complete bundle must not open on this.
         const source = plan();
         const result = deriveBuildPacketReadiness(wellFormedInput({
             plan: { ...source, measurement: undefined },
         }));
 
-        const blocker = blockersFor(result, 'cross_cutting')[0];
-        expect(result.isPacketComplete).toBe(false);
-        expect(blocker.title).toBe('Measurement not discharged');
-        expect(blocker.consequence).toContain('no declared success metric');
+        expect(blockersFor(result, 'cross_cutting')).toEqual([]);
+        expect(result.isPacketComplete).toBe(true);
+        const warning = result.warnings.find(item => item.criterionId === 'cross_cutting')!;
+        expect(warning.title).toBe('Measurement not discharged');
+        expect(warning.impact).toContain('no declared success metric');
+        expect(warning.owner).toBe('user');
+        expect(warning.rationale).toContain('never stricter than the generator');
+        expect(criterion(result, 'cross_cutting')).toMatchObject({ blocking: false, status: 'met' });
+        expect(criterion(result, 'cross_cutting').explanation).toContain('reported as a warning');
     });
 
     it('blocks a safety-flagged project with no security controls linked to tasks', () => {
@@ -930,93 +929,46 @@ describe('deriveBuildPacketReadiness — first slice', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Criterion 8 — committed, not projected. The authority question.
+// No commitment criterion: the packet report is advisory.
 // ---------------------------------------------------------------------------
 
-describe('deriveBuildPacketReadiness — committed product reasoning', () => {
-    it('blocks when nothing is committed, even though the live projection reads ready', () => {
-        const result = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: null,
-            planningProjectionReadyToBuild: true,
-        }));
-
-        const blocker = blockersFor(result, 'reasoning_committed')[0];
-        expect(result.isPacketComplete).toBe(false);
-        expect(blocker.title).toBe('The product reasoning has not been committed');
-        // The projection may only inform when a commit action is OFFERED.
-        expect(blocker.remedy).toContain('ready to commit');
-        expect(criterion(result, 'reasoning_committed').evidence[0].summary)
-            .toContain('never that one happened');
+describe('deriveBuildPacketReadiness — no commitment criterion', () => {
+    it('evaluates exactly the seven packet checks — no product-reasoning commitment', () => {
+        expect([...BUILD_PACKET_CRITERION_ORDER]).toEqual([
+            'artifacts_present', 'sources_current', 'validation_clear', 'requirement_coverage',
+            'api_contract', 'cross_cutting', 'first_slice',
+        ]);
+        const result = deriveBuildPacketReadiness(wellFormedInput());
+        expect(result.criteria.map(item => item.id)).not.toContain('reasoning_committed');
     });
 
-    it('blocks identically whether or not the projection reads ready', () => {
-        const withProjection = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: null,
-            planningProjectionReadyToBuild: true,
-        }));
-        const withoutProjection = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: null,
-            planningProjectionReadyToBuild: false,
-        }));
-
-        expect(withProjection.isPacketComplete).toBe(false);
-        expect(withoutProjection.isPacketComplete).toBe(false);
-        expect(criterion(withProjection, 'reasoning_committed').blocking).toBe(true);
-        expect(criterion(withoutProjection, 'reasoning_committed').blocking).toBe(true);
-    });
-
-    it('fails CLOSED when the commitment is unverifiable, even with a commitment present', () => {
-        const result = deriveBuildPacketReadiness(wellFormedInput({ commitmentUnverifiable: true }));
-
-        expect(blockersFor(result, 'reasoning_committed')[0].title)
-            .toBe('The readiness commitment cannot be verified');
-        expect(result.isPacketComplete).toBe(false);
-    });
-
-    it('blocks a commitment bound to a different plan version', () => {
-        const result = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: {
-                reviewId: 'readiness-review-0',
-                spineVersionId: 'spine-0',
-                conclusion: 'ready_to_build',
-                committedAt: 1,
-            },
-        }));
-
-        expect(blockersFor(result, 'reasoning_committed')[0].title)
-            .toBe('The commitment belongs to a different plan version');
-    });
-
-    it('accepts a not_ready commitment as a warning when its rationale is recorded', () => {
-        const result = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: {
-                reviewId: 'readiness-review-1',
-                spineVersionId: SPINE_ID,
-                conclusion: 'not_ready',
-                committedAt: 1,
-                acceptedRiskRationale: 'The pricing assumption stays open; we ship the free tier first.',
-            },
-        }));
-
-        expect(blockersFor(result, 'reasoning_committed')).toEqual([]);
+    it('completes a well-formed packet with no commitment or rationale anywhere in its input', () => {
+        // The removed Finalize layer used to fail a fresh bundle closed on a
+        // missing commitment rationale. The packet needs no plan-level sign-off.
+        const result = deriveBuildPacketReadiness(wellFormedInput());
         expect(result.isPacketComplete).toBe(true);
-        const warning = result.warnings.find(item => item.criterionId === 'reasoning_committed')!;
-        expect(warning.title).toBe('Committed with accepted risk');
-        expect(warning.rationale).toContain('pricing assumption');
+        expect(result.summary).not.toMatch(/commit/i);
     });
 
-    it('blocks a not_ready commitment with no recorded rationale', () => {
-        const result = deriveBuildPacketReadiness(wellFormedInput({
-            committedReadiness: {
-                reviewId: 'readiness-review-1',
-                spineVersionId: SPINE_ID,
-                conclusion: 'not_ready',
-                committedAt: 1,
-            },
-        }));
+    it('describes open checks as advisory, never as a gate', () => {
+        const result = deriveBuildPacketReadiness(wellFormedInput({ freshness: null }));
+        expect(result.isPacketComplete).toBe(false);
+        expect(result.summary).toMatch(/advisory/);
+        expect(result.summary).toMatch(/nothing here blocks/);
+    });
 
-        expect(blockersFor(result, 'reasoning_committed')[0].title)
-            .toBe('Committed with accepted risk, with no recorded rationale');
+    it('routes every fix to an artifact slot or a PRD feature — never a readiness checkpoint', () => {
+        for (const input of [wellFormedInput(), wellFormedInput({ plan: null }), {}]) {
+            const result = deriveBuildPacketReadiness(input);
+            const targets = [
+                ...result.criteria.map(item => item.actionTarget),
+                ...result.blockers.map(item => item.actionTarget),
+                ...result.warnings.map(item => item.actionTarget),
+            ];
+            for (const target of targets) {
+                expect(['artifact_slot', 'feature']).toContain(target.kind);
+            }
+        }
     });
 });
 
@@ -1029,7 +981,7 @@ describe('deriveBuildPacketReadiness — report discipline', () => {
         ['well formed', wellFormedInput()],
         ['no plan', wellFormedInput({ plan: null })],
         ['no freshness', wellFormedInput({ freshness: null })],
-        ['not committed', wellFormedInput({ committedReadiness: null })],
+        ['no measurement section', wellFormedInput({ plan: { ...plan(), measurement: undefined } })],
         ['no prd', wellFormedInput({ prd: null })],
         ['empty input', {}],
     ];

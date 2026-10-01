@@ -11,7 +11,16 @@ import {
     sealAssumptionValidationEvent,
     sealAssumptionValidationPlan,
 } from '..';
-import { derivePlanningReadiness, planningRecordNeedsAlignment, reviewIssueNeedsResolutionBeforeBuild } from '../planningReadiness';
+import {
+    derivePlanningReadiness,
+    planningRecordNeedsAlignment,
+    reviewIssueNeedsResolutionBeforeBuild,
+    type PlanningReadiness,
+    type PlanningReadinessCriterion,
+} from '../planningReadiness';
+
+const criterionOf = (readiness: PlanningReadiness, id: PlanningReadinessCriterion['id']): PlanningReadinessCriterion =>
+    readiness.criteria.find(item => item.id === id)!;
 
 const prd: StructuredPRD = {
     vision: 'Help teams decide what to build', coreProblem: 'Teams build polished plans before resolving product uncertainty.',
@@ -99,7 +108,8 @@ describe('planning readiness', () => {
             hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 8, staleOutputCount: 0,
         });
         expect(result.phase).toBe('needs_decisions');
-        expect(result.nextAction).toMatchObject({ kind: 'resolve_decision', planningRecordId: 'open_question-1' });
+        expect(criterionOf(result, 'decisions')).toMatchObject({ status: 'attention' });
+        expect(criterionOf(result, 'decisions').explanation).toContain('1 key choice');
     });
 
     it('blocks on an unresolved definite update item and targets its exact output', () => {
@@ -118,9 +128,8 @@ describe('planning readiness', () => {
             },
         });
         expect(result).toMatchObject({ phase: 'needs_alignment', isReadyToBuild: false });
-        expect(result.nextAction).toMatchObject({
-            kind: 'align_outputs', artifactId: 'screens', nodeId: 'screen_inventory',
-        });
+        expect(criterionOf(result, 'alignment')).toMatchObject({ status: 'attention' });
+        expect(criterionOf(result, 'alignment').explanation).toContain('1 definite downstream update');
     });
 
     it('keeps possible update items advisory when output alignment is otherwise clear', () => {
@@ -163,7 +172,7 @@ describe('planning readiness', () => {
             blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
         });
         expect(result.isReadyToBuild).toBe(false);
-        expect(result.nextAction.kind).toBe('confirm_scope');
+        expect(criterionOf(result, 'scope')).toMatchObject({ status: 'attention' });
     });
 
     it('surfaces source drift before a nominally confirmed decision', () => {
@@ -173,7 +182,8 @@ describe('planning readiness', () => {
             blockingReviewIssueCount: 0, generatedOutputCount: 1, staleOutputCount: 0,
         });
         expect(result.isReadyToBuild).toBe(false);
-        expect(result.nextAction.kind).toBe('review_source_change');
+        expect(result.changedSourceCount).toBe(1);
+        expect(criterionOf(result, 'decisions').explanation).toContain('1 changed source');
     });
 
     it('blocks build readiness for a high-impact assumption but not a low-impact one', () => {
@@ -187,9 +197,8 @@ describe('planning readiness', () => {
     it('routes a material assumption to validation and clears it only with credible synchronized evidence', () => {
         const open = { ...record('assumption', 'open'), id: 'assumption-to-validate', materiality: 'high' as const };
         const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0, evaluatedAt: 40 };
-        expect(derivePlanningReadiness({ ...shared, planningRecords: [open] }).nextAction).toMatchObject({
-            kind: 'validate_assumption', planningRecordId: 'assumption-to-validate',
-        });
+        expect(criterionOf(derivePlanningReadiness({ ...shared, planningRecords: [open] }), 'decisions').explanation)
+            .toContain('1 material assumption');
         expect(derivePlanningReadiness({ ...shared, planningRecords: [validatedAssumption()] }).isReadyToBuild).toBe(true);
     });
 
@@ -201,7 +210,7 @@ describe('planning readiness', () => {
         for (const assumption of [weak, irrelevant, interpreted]) {
             const readiness = derivePlanningReadiness({ ...shared, planningRecords: [assumption] });
             expect(readiness.isReadyToBuild).toBe(false);
-            expect(readiness.nextAction.kind).toBe('validate_assumption');
+            expect(criterionOf(readiness, 'decisions').explanation).toContain('1 material assumption');
         }
     });
 
@@ -249,7 +258,7 @@ describe('planning readiness', () => {
             currentSpineVersionId: 'spine-1', currentSpineContentHash: 'spine-content-hash',
         });
         expect(result.isReadyToBuild).toBe(false);
-        expect(result.nextAction).toMatchObject({ kind: 'validate_assumption', planningRecordId: validated.id });
+        expect(criterionOf(result, 'decisions').explanation).toContain('1 material assumption');
     });
 
     it('preserves evidence-backed readiness across ordinary JSON persistence', () => {
@@ -266,10 +275,9 @@ describe('planning readiness', () => {
         const expires = validatedAssumption({ expiresAt: 50 });
         const shared = { prd, planningRecords: [expires], incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };
         expect(derivePlanningReadiness({ ...shared, evaluatedAt: 49 }).isReadyToBuild).toBe(true);
-        expect(derivePlanningReadiness({ ...shared, evaluatedAt: 51 })).toMatchObject({
-            isReadyToBuild: false,
-            nextAction: { kind: 'validate_assumption', planningRecordId: 'validated-assumption' },
-        });
+        const expired = derivePlanningReadiness({ ...shared, evaluatedAt: 51 });
+        expect(expired.isReadyToBuild).toBe(false);
+        expect(criterionOf(expired, 'decisions').explanation).toContain('1 material assumption');
     });
 
     it('keeps low-impact provenance drift visible without turning it into a blocker', () => {
@@ -287,7 +295,7 @@ describe('planning readiness', () => {
         });
         expect(result.isReadyToBuild).toBe(true);
         expect(result.changedSourceCount).toBe(0);
-        expect(result.nextAction.kind).toBe('commit_plan');
+        expect(result.phase).toBe('ready_to_build');
     });
 
     it('keeps legacy assumptions, material risks, and consequential deferrals visible', () => {
@@ -313,7 +321,7 @@ describe('planning readiness', () => {
             hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
         });
         expect(result.isReadyToBuild).toBe(false);
-        expect(result.nextAction).toMatchObject({ kind: 'resolve_decision', planningRecordId: 'decision-1' });
+        expect(criterionOf(result, 'decisions').explanation).toContain('1 key choice');
     });
 
     it('blocks on unapplied or deferred propagation but allows explicit downstream not-affected reviews', () => {
@@ -363,7 +371,8 @@ describe('planning readiness', () => {
             hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
         });
         expect(readiness.isReadyToBuild).toBe(false);
-        expect(readiness.nextAction).toMatchObject({ kind: 'align_plan', planningRecordId: 'decision-1' });
+        expect(readiness.phase).toBe('needs_alignment');
+        expect(criterionOf(readiness, 'alignment').explanation).toContain('1 resolved decision still needs plan alignment review');
     });
 
     it('treats a material legacy verdict with affected context as unreviewed alignment', () => {
@@ -439,6 +448,32 @@ describe('planning readiness', () => {
             const result = derivePlanningReadiness({ ...shared, planningRecords: [deferredMaterial] });
             expect(result.openDecisionCount).toBe(0);
             expect(result.unresolvedCount).toBeGreaterThan(0);
+        });
+    });
+
+    describe('openItems (the Plan bar and Decide badge)', () => {
+        const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: false, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };
+        const openItems = (records: PlanningRecord[]) => derivePlanningReadiness({ ...shared, planningRecords: records }).openItems;
+
+        it('splits records awaiting an answer into decisions and assumptions to confirm', () => {
+            expect(openItems([
+                record('decision', 'open'), record('open_question', 'proposed'),
+                record('conflict', 'open'), record('assumption', 'open'),
+            ])).toEqual({ decisions: 3, assumptions: 1 });
+        });
+
+        it('counts an open risk as a decision — the Decision Center lists it under "Needs attention" too', () => {
+            expect(openItems([record('risk', 'open')])).toEqual({ decisions: 1, assumptions: 0 });
+        });
+
+        it('drops answered, deferred, and settled records', () => {
+            const answered = appendDecisionEvent(record('decision', 'open'), {
+                id: 'verdict', planningRecordId: 'decision-1', actor: 'user', type: 'custom_answered', answer: 'Guests may check out', at: 5,
+            });
+            if (!answered.ok) throw new Error(answered.reason);
+            expect(openItems([
+                answered.record, record('assumption', 'deferred'), record('decision', 'confirmed'),
+            ])).toEqual({ decisions: 0, assumptions: 0 });
         });
     });
 });

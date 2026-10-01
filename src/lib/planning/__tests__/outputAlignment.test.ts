@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Artifact, ArtifactVersion, SpineVersion, StructuredPRD } from '../../../types';
+import type { Artifact, ArtifactSlotKey, ArtifactVersion, SpineVersion, StructuredPRD } from '../../../types';
 import { deriveProjectOutputAlignment } from '../outputAlignment';
+import {
+    computeArtifactInputHashes,
+    selectArtifactPrdInput,
+    type ArtifactProjectInputs,
+} from '../../artifactInputSlices';
 
 const prd = (overrides: Partial<StructuredPRD> = {}): StructuredPRD => ({
     vision: 'Help independent creators plan a launch',
@@ -244,6 +249,58 @@ describe('deriveProjectOutputAlignment', () => {
             state: 'possibly_affected',
             confidence: 'possible',
             blocksBuildReadiness: false,
+        });
+    });
+
+    describe('with input fingerprints', () => {
+        const project: ArtifactProjectInputs = { name: 'Launch', platform: 'web', designSystemPreset: 'saas_minimal' };
+        const fingerprinted = (artifactId: string, slot: ArtifactSlotKey, from: SpineVersion, generatedWith = project) => ({
+            ...version(artifactId, from.id),
+            provenance: {
+                changeSource: 'ai_generation' as const,
+                inputHashes: computeArtifactInputHashes(slot, selectArtifactPrdInput(slot, {
+                    structuredPRD: from.structuredPRD!,
+                    prdMarkdown: from.responseText,
+                    project: generatedWith,
+                }), {}),
+            },
+        });
+
+        it('a restore to identical content reads aligned through the fingerprint (no prd_changed at all)', () => {
+            const a = artifact('data', 'data_model');
+            const s1 = spine('s1', prd(), false);
+            const restored = { ...spine('s3', prd(), true), responseText: s1.responseText };
+            const result = deriveProjectOutputAlignment({
+                artifacts: [a],
+                artifactVersions: [fingerprinted(a.id, 'data_model', s1)],
+                spineVersions: [s1, spine('s2', prd({ risks: ['Churn'] }), false), restored],
+                project,
+            });
+            expect(result.outputs[0]).toMatchObject({ state: 'aligned', blocksBuildReadiness: false });
+            expect(result.outputs[0].summary).toBe('This output reflects the current planning foundation.');
+        });
+
+        it('falls back to version ids without the project (the engine cannot fingerprint the current inputs)', () => {
+            const a = artifact('data', 'data_model');
+            const s1 = spine('s1', prd(), false);
+            const result = deriveProjectOutputAlignment({
+                artifacts: [a],
+                artifactVersions: [fingerprinted(a.id, 'data_model', s1)],
+                spineVersions: [s1, spine('s2', prd({ risks: ['Churn'] }), true)],
+            });
+            expect(result.outputs[0].state).toBe('possibly_affected');
+        });
+
+        it('treats a changed design preset on the design system as a definite visual-direction change', () => {
+            const a = artifact('design', 'design_system');
+            const s1 = spine('s1', prd(), true);
+            const result = deriveProjectOutputAlignment({
+                artifacts: [a],
+                artifactVersions: [fingerprinted(a.id, 'design_system', s1)],
+                spineVersions: [s1],
+                project: { ...project, designSystemPreset: 'enterprise_professional' },
+            });
+            expect(result.outputs[0]).toMatchObject({ state: 'stale', confidence: 'definite', blocksBuildReadiness: true });
         });
     });
 });

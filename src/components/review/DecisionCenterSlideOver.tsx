@@ -8,7 +8,7 @@ interface DecisionCenterSlideOverProps {
     projectId: string;
     initialRecordId?: string;
     onClose: () => void;
-    onContinueToExplore?: () => void;
+    onContinueToBuild?: () => void;
     /** Closes the layer and navigates to the asset region behind an advisory
      * open item. The workspace owns the navigation intent. */
     onNavigateToAsset?: (destination: PlanningDestination) => void;
@@ -33,7 +33,7 @@ export function DecisionCenterSlideOver({
     projectId,
     initialRecordId,
     onClose,
-    onContinueToExplore,
+    onContinueToBuild,
     onNavigateToAsset,
 }: DecisionCenterSlideOverProps) {
     const titleId = useId();
@@ -119,7 +119,7 @@ export function DecisionCenterSlideOver({
                     <DecisionCenterContainer
                         projectId={projectId}
                         initialRecordId={initialRecordId}
-                        onContinueToExplore={onContinueToExplore}
+                        onContinueToBuild={onContinueToBuild}
                         onNavigateToAsset={onNavigateToAsset}
                     />
                 </div>

@@ -7,7 +7,6 @@ import {
     FileText,
     Link2,
     Network,
-    ShieldCheck,
 } from 'lucide-react';
 import { ScreenShell } from '../components/ScreenShell';
 import { NodeGraph, type GraphSelection } from '../components/NodeGraph';
@@ -35,18 +34,15 @@ function PrdHubCard() {
                 <span className="inline-flex items-center gap-1">
                     <Clock size={11} /> {TOUR_PROJECT.updated}
                 </span>
-                <span className="inline-flex items-center gap-1 text-emerald-400">
-                    <ShieldCheck size={11} /> Plan committed
-                </span>
             </span>
         </span>
     );
 }
 
 /**
- * Screen 7 — the connected workspace. A project rail showing the six-step
- * Define → Refine → Finalize → Generate → Review → Build journey, the committed plan's PRD wired to
- * its generated artifacts (tap any node to trace dependencies), and a tappable
+ * Screen 7 — the connected workspace. A project rail showing the
+ * Plan → Decide → Build journey, the plan's PRD wired to its generated
+ * artifacts (tap any node to trace dependencies), and a tappable
  * recent-activity timeline. Teaches that Synapse keeps the whole project
  * consistent.
  */
@@ -72,8 +68,8 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
                         {TOUR_PROJECT.name}
                     </div>
                     <nav className="space-y-1">
-                        {/* "Build" is active — this screen shows the committed
-                            plan's generated outputs and their connections. */}
+                        {/* "Build" is active — this screen shows the plan's
+                            generated outputs and their connections. */}
                         {WORKSPACE_NAV.map((item) => (
                             <span
                                 key={item}

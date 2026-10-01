@@ -4,7 +4,7 @@ import { JourneyRail } from '../JourneyRail';
 import { deriveJourneyPresentation } from '../../lib/journeyPresentation';
 
 describe('JourneyRail', () => {
-    it('renders the six stable journey steps in order', () => {
+    it('renders Plan · Decide · Build in order with the current step marked', () => {
         render(
             <JourneyRail
                 presentation={deriveJourneyPresentation({
@@ -16,18 +16,33 @@ describe('JourneyRail', () => {
         );
 
         expect(screen.getAllByRole('button').map(button => (
-            button.textContent?.match(/Define|Refine|Finalize|Generate|Review|Build/)?.[0]
-        ))).toEqual(['Define', 'Refine', 'Finalize', 'Generate', 'Review', 'Build']);
-        expect(screen.queryByRole('button', { name: /History/i })).toBeNull();
-        expect(screen.getByRole('button', { name: /Refine/i })).toHaveAttribute(
-            'aria-current',
-            'step',
-        );
+            button.textContent?.match(/Plan|Decide|Build/)?.[0]
+        ))).toEqual(['Plan', 'Decide', 'Build']);
+        const nav = screen.getByRole('navigation', { name: 'Product journey' });
+        expect(nav.textContent).not.toMatch(/Finalize|History|Review readiness/);
+        expect(screen.getByRole('button', { name: /Plan/ })).toHaveAttribute('aria-current', 'step');
+        // No status captions — in particular no "Unavailable" state.
+        expect(nav.textContent).not.toMatch(/unavailable|current step|complete/i);
     });
 
-    it('keeps disabled steps inert and emits enabled step identities', () => {
-        const onStepChange = vi.fn();
+    it('shows the open-item count on Decide', () => {
         render(
+            <JourneyRail
+                presentation={deriveJourneyPresentation({
+                    currentStage: 'prd',
+                    hasStructuredPlan: true,
+                    openItemCount: 3,
+                })}
+                onStepChange={() => undefined}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: /Decide/ }).textContent).toContain('3 open items');
+    });
+
+    it('keeps inert steps disabled and emits enabled step identities', () => {
+        const onStepChange = vi.fn();
+        const { rerender } = render(
             <JourneyRail
                 presentation={deriveJourneyPresentation({
                     currentStage: 'prd',
@@ -37,15 +52,45 @@ describe('JourneyRail', () => {
             />,
         );
 
-        const review = screen.getAllByRole('button').find(button => (
-            button.textContent?.includes('Review')
-            && button.textContent?.includes('5 ·')
-        ))!;
-        expect(review).toBeDisabled();
-        fireEvent.click(review);
+        const build = screen.getByRole('button', { name: /Build/ });
+        expect(build).toBeDisabled();
+        fireEvent.click(build);
         expect(onStepChange).not.toHaveBeenCalled();
 
-        fireEvent.click(screen.getByRole('button', { name: /Define/i }));
-        expect(onStepChange).toHaveBeenCalledWith('define');
+        rerender(
+            <JourneyRail
+                presentation={deriveJourneyPresentation({
+                    currentStage: 'prd',
+                    hasStructuredPlan: true,
+                })}
+                onStepChange={onStepChange}
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Decide/ }));
+        expect(onStepChange).toHaveBeenCalledWith('decide');
+        fireEvent.click(screen.getByRole('button', { name: /Build/ }));
+        expect(onStepChange).toHaveBeenCalledWith('build');
+    });
+
+    it('disables Build while a historical PRD version is selected, even from the Build stage', () => {
+        const onStepChange = vi.fn();
+        render(
+            <JourneyRail
+                presentation={deriveJourneyPresentation({
+                    currentStage: 'workspace',
+                    hasStructuredPlan: true,
+                    viewingHistoricalVersion: true,
+                })}
+                onStepChange={onStepChange}
+            />,
+        );
+
+        const build = screen.getByRole('button', { name: /Build/ });
+        expect(build).toBeDisabled();
+        expect(build).not.toHaveAttribute('aria-current');
+        expect(screen.getByRole('button', { name: /Plan/ })).toHaveAttribute('aria-current', 'step');
+        fireEvent.click(build);
+        expect(onStepChange).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: /Decide/ })).toBeEnabled();
     });
 });

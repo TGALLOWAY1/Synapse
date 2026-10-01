@@ -643,25 +643,25 @@ describe('DecisionCenter', () => {
         });
     });
 
-    it('offers a way through to Explore and explains what each attention group needs', () => {
+    it('offers a way through to Build and explains what each attention group needs', () => {
         const decisionRecord: DecisionCenterRecordView = {
             ...openRecord, id: 'dec-1', type: 'decision', title: 'How should mixed days render?', status: 'open',
         };
-        const onContinueToExplore = vi.fn();
-        render(<DecisionCenter records={[openRecord, decisionRecord]} {...callbacks()} onContinueToExplore={onContinueToExplore} />);
+        const onContinueToBuild = vi.fn();
+        render(<DecisionCenter records={[openRecord, decisionRecord]} {...callbacks()} onContinueToBuild={onContinueToBuild} />);
 
         expect(screen.getByText(/Open items never block your design assets/)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Continue to Explore' }));
-        expect(onContinueToExplore).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Continue to Build' }));
+        expect(onContinueToBuild).toHaveBeenCalledTimes(1);
 
         // Each queue group says what to do with its items in plain language.
         expect(screen.getByText('Synapse recommends an answer for each — approve it or choose your own.')).toBeInTheDocument();
         expect(screen.getByText(/Confirm or correct what Synapse assumed/)).toBeInTheDocument();
     });
 
-    it('keeps the Explore link out of the header when no navigation is provided', () => {
+    it('keeps the Build link out of the header when no navigation is provided', () => {
         render(<DecisionCenter records={[openRecord]} {...callbacks()} />);
-        expect(screen.queryByRole('button', { name: 'Continue to Explore' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Continue to Build' })).toBeNull();
     });
 
     it('shows Accept N only for two valid visible candidates', () => {

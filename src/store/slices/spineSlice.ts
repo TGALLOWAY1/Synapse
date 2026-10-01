@@ -18,7 +18,6 @@ import {
     planningContentHash,
     projectDecision,
     recordConsequentialPrdEdit,
-    deriveReadinessCommitmentState,
     type ConsequentialPrdEditRecognition,
 } from '../../lib/planning';
 
@@ -26,7 +25,6 @@ export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
     updateSpineText: ProjectState['updateSpineText'];
     regenerateSpine: ProjectState['regenerateSpine'];
-    markSpineFinal: ProjectState['markSpineFinal'];
     getSpineVersions: ProjectState['getSpineVersions'];
     getLatestSpine: ProjectState['getLatestSpine'];
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
@@ -36,6 +34,7 @@ export type SpineSlice = {
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
+    acknowledgeIncompleteSpine: ProjectState['acknowledgeIncompleteSpine'];
     setSpineError: ProjectState['setSpineError'];
     setSpineSafetyReview: ProjectState['setSpineSafetyReview'];
     initPreflightSession: ProjectState['initPreflightSession'];
@@ -137,35 +136,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     getLatestSpine: (projectId: string) => {
         const versions = get().spineVersions[projectId] || [];
         return versions.find(v => v.isLatest);
-    },
-
-    markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
-        assertProjectCapability(get().projects[projectId], 'canChangeFinality');
-        // Phase 3 authority boundary: only commitReadinessReview may project a
-        // reviewed user commitment onto `isFinal`. Keep this legacy action for
-        // reopening old persisted commitments, but never let a caller create
-        // new authority by toggling a boolean directly.
-        if (isFinal) return;
-        set((state) => {
-            const hasDurableCommitment = (state.readinessReviews[projectId] ?? []).some(review => (
-                review.spineVersionId === spineId
-                && Boolean(deriveReadinessCommitmentState(
-                    review,
-                    state.readinessCommitmentEvents[projectId] ?? [],
-                ).activeCommit)
-            ));
-            if (hasDurableCommitment) return state;
-            const projectSpines = state.spineVersions[projectId] || [];
-            const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, isFinal, updatedAt: Date.now() } : s
-            );
-            return {
-                spineVersions: {
-                    ...state.spineVersions,
-                    [projectId]: updatedSpines
-                }
-            };
-        });
     },
 
     // --- Preflight clarification --------------------------------------------
@@ -398,12 +368,14 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             const latest = currentVersions.find(v => v.isLatest);
 
             // Never amend a version that downstream artifacts were generated
-            // against: freshness compares each artifact's recorded spine ref to
-            // the latest spine id, so mutating content under a referenced id
-            // would leave those artifacts reading "current" against changed
-            // content (e.g. finalize → generate assets → unfinalize → confirm,
-            // or an early design-system run against a decision-edit version).
-            // Appending instead makes the freshness engine flag them normally.
+            // against: freshness compares a legacy artifact's recorded spine
+            // ref to the latest spine id (fingerprinted ones compare their
+            // inputs and would catch it), so mutating content under a
+            // referenced id would leave those artifacts reading "current"
+            // against changed content (e.g. confirm → Generate outputs →
+            // confirm, or an early design-system run against a decision-edit
+            // version). Appending instead makes the freshness engine flag them
+            // normally.
             const latestHasArtifactRefs =
                 !!latest
                 && Object.values(state.artifactVersions).some(versions =>
@@ -493,6 +465,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // A new version is a new plan: it never inherits the previous
+                // version's incomplete-PRD acknowledgement.
+                incompleteAcknowledgedAt: undefined,
                 structuredPRD: nextStructuredPRD,
                 responseText: opts?.responseText ?? src.responseText,
                 // A user edit / retry is a settled state, never an in-flight run.
@@ -695,6 +670,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // Never inherited: a decision apply or a section retry that
+                // leaves sections failed needs its own "Generate anyway".
+                incompleteAcknowledgedAt: undefined,
                 structuredPRD: nextStructuredPRD,
                 responseText: renderPremiumMarkdown(nextStructuredPRD),
                 generationPhase: 'complete',
@@ -775,6 +753,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // A restore appends a new version; it never carries the
+                // restored version's incomplete-PRD acknowledgement.
+                incompleteAcknowledgedAt: undefined,
                 generationPhase: 'complete',
                 generationError: undefined,
                 provenance: {
@@ -830,6 +811,24 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
                 s.id === spineId ? { ...s, generationPhase: 'running' as const, updatedAt: Date.now() } : s
+            );
+            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    acknowledgeIncompleteSpine: (projectId: string, spineId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const spine = projectSpines.find(s => s.id === spineId);
+            // Only the latest, settled, incomplete version can be
+            // acknowledged, and the first acknowledgement is the record.
+            if (!spine || !spine.isLatest || spine.incompleteAcknowledgedAt) return state;
+            if (spine.generationPhase === 'running') return state;
+            if ((spine.generationMeta?.failedSections?.length ?? 0) === 0) return state;
+            const now = Date.now();
+            const updatedSpines = projectSpines.map(s =>
+                s.id === spineId ? { ...s, incompleteAcknowledgedAt: now, updatedAt: now } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });

@@ -18,7 +18,7 @@ interface WorkflowCheckpointSummaryCardProps {
  * notices above the content, so it renders as a neutral one-liner with a
  * success mark rather than a caution box. Amber is kept for `attention`
  * (failed slots, blocking validation, build-blocking alignment, critique to
- * resolve, accepted planning risks).
+ * resolve).
  */
 const TONE_STYLES: Record<WorkflowCheckpointTone, {
     container: string;
@@ -57,11 +57,7 @@ export function WorkflowCheckpointSummaryCard({
 }: WorkflowCheckpointSummaryCardProps) {
     const tone = summary.tone;
     const styles = TONE_STYLES[tone];
-    const acceptedRisks = summary.planningVerdict.acceptedRisks ?? [];
-    const hasDetails = summary.rows.length > 0
-        || acceptedRisks.length > 0
-        || !!summary.planningVerdict.rationale
-        || !!summary.planningVerdict.containment;
+    const hasDetails = summary.rows.length > 0;
     // Anything needing action opens expanded so a failure is never hidden
     // behind a disclosure; advisory notes stay collapsed until asked for.
     // `undefined` means "follow the tone", so a tone change still tracks until
@@ -83,18 +79,9 @@ export function WorkflowCheckpointSummaryCard({
                     ? <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
                     : <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />}
                 <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <h3 className={`text-sm font-bold ${styles.heading}`}>
-                            {summary.headline}
-                        </h3>
-                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                            summary.planningVerdict.kind === 'finalized'
-                                ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
-                                : 'border-neutral-200 bg-white text-neutral-600'
-                        }`}>
-                            {summary.planningVerdict.label}
-                        </span>
-                    </div>
+                    <h3 className={`text-sm font-bold ${styles.heading}`}>
+                        {summary.headline}
+                    </h3>
                     {!hasDetails && (
                         <p className={`mt-1 text-xs leading-5 ${styles.body}`}>
                             {summary.supportingText}
@@ -134,28 +121,6 @@ export function WorkflowCheckpointSummaryCard({
                     <p className={`mt-2 text-xs leading-5 ${styles.body}`}>
                         {summary.supportingText}
                     </p>
-                    {summary.planningVerdict.rationale && (
-                        <p className={`mt-2 text-xs leading-5 ${styles.body}`}>
-                            <span className="font-semibold">Rationale:</span>{' '}
-                            {summary.planningVerdict.rationale}
-                        </p>
-                    )}
-                    {summary.planningVerdict.containment && (
-                        <p className={`mt-1 text-xs leading-5 ${styles.body}`}>
-                            <span className="font-semibold">Containment:</span>{' '}
-                            {summary.planningVerdict.containment}
-                        </p>
-                    )}
-                    {acceptedRisks.length > 0 && (
-                        <div className={`mt-2 text-xs leading-5 ${styles.body}`}>
-                            <p className="font-semibold">Accepted planning risks</p>
-                            <ul className="list-disc pl-4">
-                                {acceptedRisks.map(risk => (
-                                    <li key={risk}>{risk}</li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
                     {summary.rows.length > 0 && (
                         <ul className="mt-3 space-y-2">
                             {summary.rows.map(row => (

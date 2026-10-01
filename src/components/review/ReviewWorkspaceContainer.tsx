@@ -17,8 +17,8 @@ interface Props {
     initialReviewId?: string;
     initialIssueId?: string;
     initialFindingId?: string;
-    /** Jumps to the Explore/Build stage from the Decision Center. */
-    onContinueToExplore?: () => void;
+    /** Jumps to the Build stage from the Decision Center. */
+    onContinueToBuild?: () => void;
 }
 
 // Open planning items are useful context before critique, but never a gate.

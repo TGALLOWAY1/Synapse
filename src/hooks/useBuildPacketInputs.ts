@@ -5,8 +5,8 @@
 // assembles the part of that input that comes out of the project store —
 // per-slot artifact state, the freshness evaluation, the resolved Data Model /
 // API endpoints, and the consolidated plan — so the component only has to add
-// the pieces it already computes (PRD, safety context, the current committed
-// readiness checkpoint).
+// the pieces it already computes (PRD, safety context). The evaluator is
+// advisory — nothing gates on its result.
 //
 // Nothing here is persisted (cross-cutting rule 10), and staleness is CONSUMED
 // from `useProjectFreshness` — the one freshness engine (rule 9) — never
@@ -39,7 +39,7 @@ export interface BuildPacketStoreInputs {
     freshness: BuildPacketFreshnessInput;
     /**
      * Resolved through the SAME resolver the advisory cross-cutting card uses
-     * (`resolveDataModelForTrace`), so the gate and that card can never
+     * (`resolveDataModelForTrace`), so the packet checks and that card can never
      * disagree about which obligations a project owes.
      */
     dataModel: DataModelContent | null;
@@ -53,7 +53,7 @@ export interface BuildPacketStoreInputs {
     /**
      * The CURRENT artifact-version manifest — §W7's "which version of each
      * artifact does this approval cover?" Built in the SAME slot → artifact →
-     * preferred-version loop as `artifacts` above, deliberately, so the gate's
+     * preferred-version loop as `artifacts` above, deliberately, so the checklist's
      * evidence and the manifest the user signs can never describe different
      * versions. `deriveBuildPacketReadiness` ignores the extra key.
      */

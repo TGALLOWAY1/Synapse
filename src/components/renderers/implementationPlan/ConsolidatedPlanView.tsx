@@ -51,24 +51,24 @@ interface Props {
     initialFinalReviewSection?: 'coverage';
     /**
      * Build-packet context for the Final Review surface (plan §W7). Absent in
-     * isolated renders (previews, unit tests) — Final Review then reports the
-     * readiness as unavailable rather than promoting a build action.
+     * isolated renders (previews, unit tests) — Final Review then shows no
+     * packet checklist; the build action stays available either way.
      */
     finalReview?: PlanFinalReviewContext;
 }
 
 /**
  * The consolidated Implementation Plan view — a guided build launcher, not a
- * generated report: an identity strip, the **Final Review** decision surface
- * (plan §W7 — exactly one primary action, the one blocker list, the pinned
- * artifact-version manifest, the traceability matrix), then Build Brief /
- * Roadmap / Prompts tabs. Synapse ends at the plan + prompts handoff, so there
- * is no validation/quality-gate tracking surface.
+ * generated report: an identity strip, the **Final Review** surface (plan §W7
+ * — exactly one primary action, the advisory packet checklist, the optional
+ * sign-off with its pinned artifact-version manifest, the traceability
+ * matrix), then Build Brief / Roadmap / Prompts tabs. Synapse ends at the plan
+ * + prompts handoff, so there is no validation/quality-gate tracking surface.
  *
  * ONE PRIMARY ACTION, ALWAYS. Final Review renders above the tabs so its single
  * primary is on screen whichever tab is open, and no tab may introduce a second
- * primary: the Prompts tab's copy buttons stay secondary until the packet is
- * approved. Tabs scroll horizontally on mobile.
+ * primary: the Prompts tab's copy buttons are permanently secondary. Tabs
+ * scroll horizontally on mobile.
  */
 export function ConsolidatedPlanView({
     plan,
@@ -155,8 +155,6 @@ export function ConsolidatedPlanView({
     ];
 
     // ONE derivation of the plan surface's single primary action (plan §W7).
-    // Both the Final Review card and the prompt-copy emphasis below read it, so
-    // they can never disagree about whether the packet is approved.
     const cta = deriveFinalReviewCta({
         packet: finalReview?.packet,
         approval: finalReview?.approval,

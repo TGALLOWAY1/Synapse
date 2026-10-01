@@ -16,7 +16,7 @@ interface ChangeDirectionModalProps {
 }
 
 /**
- * Post-finalization "Change your visual direction" screen. Deliberately mirrors
+ * Post-generation "Change your visual direction" screen. Deliberately mirrors
  * the setup-stage `DesignSetupStep` a user sees right after their initial prompt
  * — same light surface and large preview cards — so switching direction feels
  * like the original choice, not a different control. A prominent warning makes

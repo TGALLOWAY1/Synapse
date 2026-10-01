@@ -136,9 +136,9 @@ interface Props {
         revisitCondition?: string;
     }) => void;
     onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
-    /** Jumps to the Explore/Build stage. Open items never block exploring
+    /** Jumps to the Build stage. Open items never block generating
      * design assets, and the Decision Center says so explicitly. */
-    onContinueToExplore?: () => void;
+    onContinueToBuild?: () => void;
     recommendationBatchBusy?: boolean;
     recommendationBatchResult?: BatchVerdictResult;
     onAcceptRecommendations?: (candidates: BatchVerdictCandidate[]) => void;
@@ -247,7 +247,7 @@ export function DecisionCenter({
     onRecordAssumptionOutcome = () => {},
     onRecordAssumptionTreatment = () => {},
     onReopenAssumptionOutcome = () => {},
-    onContinueToExplore,
+    onContinueToBuild,
     recommendationBatchBusy,
     recommendationBatchResult,
     onAcceptRecommendations,
@@ -471,11 +471,11 @@ export function DecisionCenter({
                         </div>
                     )}
                 </div>
-                {onContinueToExplore && (
+                {onContinueToBuild && (
                     <p className="mt-2 text-xs text-neutral-500">
                         Open items never block your design assets.{' '}
-                        <button type="button" onClick={onContinueToExplore} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
-                            Continue to Explore
+                        <button type="button" onClick={onContinueToBuild} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
+                            Continue to Build
                         </button>
                     </p>
                 )}

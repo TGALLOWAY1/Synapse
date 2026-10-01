@@ -187,9 +187,8 @@
     - **Two-view PRD IA — Overview · Features
       (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
       **one canonical artifact presented through two coordinated tab views**,
-      NOT two artifacts — they share the same spine version, finalization
-      state, revision history, freshness/provenance, and downstream
-      relationships. `StructuredPRDView` is the single tabbed shell (rendered by
+      NOT two artifacts — they share the same spine version, revision
+      history, freshness/provenance, and downstream relationships. `StructuredPRDView` is the single tabbed shell (rendered by
       BOTH hosts — the editable `ProjectWorkspace` PRD stage and the read-only
       `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
       **Decision feedback (assumptions, decision log, deferred scope, risks) is
@@ -230,15 +229,15 @@
       jumps back) switch the tab and scroll after the target view renders. All
       derivations in `prdViews.ts` are pure and unit-tested; the workflow
       (confirm/edit → `editSpineStructuredPRD`) is unchanged, so
-      versioning/finalization/downstream all still work.
+      versioning/downstream all still work.
     - **PRD Review & Confirm + Decision Log (2026-07 mobile cleanup pass).**
       **Update (Decisions sub-tab removal):** the interactive assumption
       Review & Confirm / Decision Log / Deferred & Risks sections no longer
       render inside the PRD view — assumption/decision feedback now lives in the
       **Decision Center** (Challenge stage), reached via `onOpenDecisions`. The
       store-level mechanics below still apply (feature confirmations from the
-      Features view, and the same append/coalesce path the Decision Center and
-      the Plan overview's Sharpen flow use). Historically the PRD carried two
+      Features view, and the same append/coalesce path the Decision Center
+      uses). Historically the PRD carried two
       mirrored sections near the top:
       **Review & Confirm** (unresolved assumptions, sorted by confidence
       highest-first, each with Confirm / "Not right"+correction actions) and
@@ -262,11 +261,13 @@
       appended version used to carry a full `responseText` + `structuredPRD`
       clone). **The coalesce chain breaks** (the next decision edit appends
       normally) when the latest version's provenance isn't `decision_edit`, the
-      latest is `isFinal`, the edited version isn't the latest, or **any
+      latest is a legacy `isFinal` spine, the edited version isn't the latest, or **any
       `ArtifactVersion` carries a spine `sourceRef` to the latest version id**
       (an artifact was generated against it — amending under a referenced id
-      would let the freshness engine read changed content as "current"; e.g.
-      finalize → generate → unfinalize → confirm, or an early design-system run
+      would let the freshness engine read changed content as "current" for a
+      legacy output it judges by spine id; a fingerprinted output would catch
+      the change, but the guard stays for the legacy ones; e.g.
+      confirm → Generate outputs → confirm, or an early design-system run
       against a decision-edit version). A bulk **"Confirm all (N)"** control
       (inline two-step confirm) confirms every remaining unresolved assumption
       in ONE call → one version; this now lives in the Decision Center, not the
@@ -496,19 +497,20 @@
       `SYNAPSE_DEFAULT_DESIGN_PRESET`, written only via the explicit "Use this
       as my default" checkbox). Choosing calls `setProjectDesignSystemPreset`
       (which also clears `needsDesignSetup` — from any picker); "Decide later"
-      calls `markDesignSetupComplete` and defers to the finalize gate.
-    - **The Mark-as-Final gate (`DesignSystemPresetChoice` in
+      calls `markDesignSetupComplete` and defers to the generate-outputs gate.
+    - **The generate-outputs preset gate (`DesignSystemPresetChoice` in
       `ProjectWorkspace`) is now the fallback**, still shown when a real
-      project reaches finalize with no preset (setup skipped, or a legacy
+      project starts output generation (`handleGenerateAssets` →
+      `proceedToAssetGeneration`) with no preset (setup skipped, or a legacy
       project) — so visual artifact generation still never starts without an
       explicit preset decision. It renders the **same shared `DesignPresetGrid`
       live preview cards** as the setup step and `ChangeDirectionModal` (a
       select-then-Continue flow with the "Use this as my default" checkbox), so
       every visual-direction surface is one consistent preview picker — there is
       no separate text-only preset list.
-    - **Post-finalization re-selection.** The preset is **no longer one-time**.
-      Because the Mark-as-Final gate only fires once (and never for projects
-      finalized before presets existed), the **Design System artifact** carries a
+    - **Re-selection after generation.** The preset is **no longer one-time**.
+      Because the generate-outputs gate only fires while no preset is set (and
+      never for projects generated before presets existed), the **Design System artifact** carries a
       `DesignDirectionControl` (`src/components/DesignDirectionControl.tsx`,
       presentational) above its content in `ArtifactWorkspace`: a single-line
       row showing the current direction (or an "AI decides" fallback) with a
@@ -526,7 +528,7 @@
       regenerate-confirm (itself carrying the downstream-impact warning) that
       calls `artifactJobController.retrySlot('design_system')` — which re-reads
       the preset off the project, so the new direction actually reaches
-      generation. (`DesignSystemPresetChoice` now serves only the Mark-as-Final
+      generation. (`DesignSystemPresetChoice` now serves only the generate-outputs
       fallback gate in `ProjectWorkspace`, and shares the `DesignPresetGrid`
       preview cards with these other surfaces.)
     - **Design-system lock affordance.** The **Design System row only**
@@ -552,7 +554,8 @@
     - **Early design-system generation.** `artifactJobController.ensureDesignSystemForSpine(args)`
       generates the design_system artifact **in the background as soon as a
       preset is chosen AND the PRD settles cleanly**, so a real run rarely
-      leaves the user watching design_system "generating" after finalize.
+      leaves the user watching design_system "generating" after Generate
+      outputs.
       Triggered by one `ProjectWorkspace` effect covering both orderings
       (preset picked mid-generation → fires when `generationPhase` flips to
       `'complete'`; preset picked after generation → fires on the preset
@@ -562,21 +565,21 @@
       unacknowledged-incomplete PRD), a missing Gemini key (`hasGeminiKey` — an
       early run would just burn a guaranteed failure), the slot already done
       for this spine, and an already-active run (idempotent). Failures are
-      recorded silently on the slot; finalize self-heals by regenerating.
-      `startAll`'s own `isSlotDoneForSpine` check then skips the
-      already-generated slot on finalize. **Single-run chaining
+      recorded silently on the slot; the next Generate outputs self-heals by
+      regenerating. `startAll`'s own `isSlotDoneForSpine` check then skips the
+      already-generated slot. **Single-run chaining
       (`RunState.single`):** `ensureDesignSystemForSpine` and `retrySlot`
-      register their run as `single`; if `startAll` (finalize) is called while
+      register their run as `single`; if `startAll` (Generate outputs) is called while
       a `single` run is still in flight for the same spine, it **chains**
       (`existing.promise.finally(() => startAll(args))`) instead of silently
-      no-op'ing — this also fixed a latent retrySlot-then-finalize race. A full
+      no-op'ing — this also fixed a latent retrySlot-then-startAll race. A full
       run (`startAll`/`regenerateSlots`) still no-ops a concurrent `startAll` as
       before (idempotent). New generation entry points that can overlap a
       single-slot run must follow this chaining pattern.
   - **Canonical PRD Spine (`src/lib/canonicalPrdSpine.ts`) — the primary,
     authoritative context for artifact generation.** `buildCanonicalPrdSpine(prd,
     options)` is a **pure, deterministic** builder (NEVER an LLM call) that
-    distills the finalized `StructuredPRD` into a compact structured contract
+    distills the current `StructuredPRD` into a compact structured contract
     (`CanonicalPrdSpine` in `src/types`): product identity, users/JTBD, a
     canonical feature glossary (**PRD `Feature.id`s preserved verbatim**),
     conservative **screen seeds** (deterministic `scr-<slug>` ids) and **entity
@@ -622,7 +625,17 @@
     summary (they are dropped when a spine is present, used only in the legacy
     fallback). A spine with **no features** yields a null spine section → the
     legacy structured-summary fallback. Each artifact version stamps
-    `metadata.spineContextUsed` / `spineSchemaVersion`. Do **not** re-add the
+    `metadata.spineContextUsed` / `spineSchemaVersion`. **The job controller
+    builds every core prompt from the slot's input slice**
+    (`src/lib/artifactInputSlices.ts`: `selectCorePromptInput` →
+    `buildCorePromptCall` → `generateCoreArtifact`) and stamps
+    `provenance.inputHashes`, the fingerprint of exactly that input plus the
+    dependency content consumed — the freshness engine compares it instead of
+    version ids. Never feed `generateCoreArtifact` PRD-side input from outside
+    that projection; `artifactInputSlices.test.ts` pins that each core prompt
+    reads nothing outside its slice. Today every core prompt reads the whole
+    PRD (spine + full markdown appendix), so narrowing what a subtype reads is
+    a slice change its prompt and fingerprint make together. Do **not** re-add the
     duplicate glossary/summary blocks alongside the spine, do **not** feed long
     markdown into the spine (it must stay compact/structured), and do **not**
     re-order the prompt so the PRD markdown appendix precedes the structured
@@ -820,11 +833,12 @@
       them**. Whether a section is *required* is never stored: it is derived on
       read by **`src/lib/planning/crossCuttingObligations.ts`**
       (`deriveCrossCuttingObligations`) — the single contract shared by this
-      prompt and the build-packet readiness gate (plan §W6), which blocks on
-      `report.unresolved`. Its privacy vocabulary is the exported
+      prompt and the advisory build-packet checklist (plan §W6), which reports
+      `report.unresolved` (an open check for security & privacy, a recorded
+      warning for measurement). Its privacy vocabulary is the exported
       `PRIVACY_SIGNAL_RE` from `canonicalPrdSpine.ts`, the same test the spine
       uses to build `constraints.privacySecurityCompliance` — keep them
-      identical, or the gate will demand a section the prompt never asked for.
+      identical, or the checklist will demand a section the prompt never asked for.
       Any edit to the trigger wording in the fragment must move the predicate
       (and the promptSurfaces snapshot) in the same change. See
       `docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md`.

@@ -276,7 +276,9 @@ export function DownstreamUpdatePlanReview({
                             <div className="font-semibold text-indigo-900">What changed</div>
                             <div className="mt-0.5 break-words text-indigo-800">{plan.source.summary}</div>
                             <div className="mt-1 text-[11px] text-indigo-700">
-                                {sourceVersionLabel} · {plan.source.confirmed ? 'Confirmed source change' : 'Source change remains provisional'}
+                                {sourceVersionLabel} · {plan.source.confirmed
+                                    ? 'Confirmed source change'
+                                    : 'Source change remains provisional — no edit or decision has confirmed it yet'}
                             </div>
                         </div>
                         {artifactPlans.length > 1 && (

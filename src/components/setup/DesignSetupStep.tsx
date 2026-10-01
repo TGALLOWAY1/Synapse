@@ -23,7 +23,7 @@ interface DesignSetupStepProps {
  * running in the background — and until the user picks a visual direction or
  * skips. Choosing here stores the preset on the project so the design system,
  * mockups, and copied screen prompts all follow it from the start; skipping
- * falls back to the original Mark-as-Final preset gate.
+ * falls back to the preset gate in front of the first "Generate outputs".
  */
 export function DesignSetupStep({ projectId, recommendationText, prdGenerating }: DesignSetupStepProps) {
     const setProjectDesignSystemPreset = useProjectStore((s) => s.setProjectDesignSystemPreset);

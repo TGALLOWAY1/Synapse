@@ -6,8 +6,6 @@ import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
-import { commitmentRemainsCurrent, compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine, projectCommitmentCopy } from '../lib/planning';
-import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { ConfirmDialog } from './common/ConfirmDialog';
 
@@ -17,8 +15,7 @@ interface ProjectDrawerProps {
 }
 
 export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
-    const store = useProjectStore();
-    const { projects, deleteProject, getLatestSpine } = store;
+    const { projects, deleteProject } = useProjectStore();
     const user = useAuthStore((s) => s.user);
     const authError = useAuthStore((s) => s.authError);
     const authLoading = useAuthStore((s) => s.loading);
@@ -34,44 +31,16 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
     const projectList = Object.values(projects).sort((a, b) => b.createdAt - a.createdAt);
 
+    // The journey stage a project was last left on (Plan · Decide · Build).
+    // There is no committed/finalized badge: the Finalize layer was removed,
+    // and legacy commitment data is no longer surfaced here.
     const stageBadges: Record<string, { label: string; color: string }> = {
         history: { label: 'History', color: 'bg-purple-900/30 text-purple-400 border-purple-800' },
         review: { label: 'Challenge', color: 'bg-indigo-900/30 text-indigo-400 border-indigo-800' },
-        workspace: { label: 'Exploring outputs', color: 'bg-sky-900/30 text-sky-400 border-sky-800' },
+        workspace: { label: 'Build', color: 'bg-sky-900/30 text-sky-400 border-sky-800' },
     };
-
-    const getBadge = (projectId: string, stage: string) => {
-        const spine = getLatestSpine(projectId);
-        const input = buildReadinessReviewInputFromState(store, projectId);
-        const events = store.readinessCommitmentEvents[projectId] ?? [];
-        const reviewStates = (store.readinessReviews[projectId] ?? []).map(review => ({
-            review,
-            currentness: input ? compareReadinessReviewCurrentness(review, input) : undefined,
-            commitment: deriveReadinessCommitmentState(review, events),
-        }));
-        const currentReview = reviewStates.find(item => item.currentness && commitmentRemainsCurrent(item.currentness) && item.commitment.activeCommit)?.review;
-        if (currentReview?.conclusion === 'ready_to_build') {
-            return { label: projectCommitmentCopy('plan_committed').label, color: 'bg-green-900/30 text-green-400 border-green-800' };
-        }
-        if (currentReview) {
-            return { label: projectCommitmentCopy('proceeding_with_accepted_risk').label, color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
-        }
-        if (reviewStates.some(item => item.currentness && !item.currentness.integrityValid)) {
-            return { label: projectCommitmentCopy('needs_fresh_review').label, color: 'bg-red-900/30 text-red-300 border-red-800' };
-        }
-        if (reviewStates.some(item => item.commitment.latestCommit)) {
-            return { label: projectCommitmentCopy('changed_since_commitment').label, color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
-        }
-        if (spine?.isFinal && hasReadinessProvenanceForSpine(
-            store.readinessReviews[projectId] ?? [], events, spine.id,
-        )) {
-            return { label: projectCommitmentCopy('needs_fresh_review').label, color: 'bg-red-900/30 text-red-300 border-red-800' };
-        }
-        if (spine?.isFinal) {
-            return { label: projectCommitmentCopy('legacy_commitment').label, color: 'bg-neutral-700 text-neutral-300 border-neutral-600' };
-        }
-        return stageBadges[stage] || { label: 'Working plan', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' };
-    };
+    const getBadge = (stage: string) =>
+        stageBadges[stage] || { label: 'Plan', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' };
 
     return (
         <>
@@ -138,7 +107,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
                     {projectList.map((p) => {
                         const stage = p.currentStage || 'prd';
-                        const badge = getBadge(p.id, stage);
+                        const badge = getBadge(stage);
 
                         return (
                             <div

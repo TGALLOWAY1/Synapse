@@ -5,6 +5,7 @@ import type {
     ScreenItem,
     SpineVersion,
     StructuredPRD,
+    VersionChangeSource,
 } from '../../types';
 import { parseFlows } from '../../components/renderers/userFlows/parseFlow';
 import type { ParsedFlow, ParsedStep } from '../../components/renderers/userFlows/types';
@@ -14,6 +15,7 @@ import { extractStructuredPlan } from '../services/implementationPlanParser';
 import { hashReviewValue } from '../review/hash';
 import { isLikelyUnaffected, summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
 import { deriveProjectOutputAlignment } from './outputAlignment';
+import type { ArtifactProjectInputs } from '../artifactInputSlices';
 import {
     downstreamPlanningContextHash,
     sealDownstreamUpdatePlan,
@@ -33,6 +35,8 @@ export type DeriveDownstreamUpdatePlansInput = {
     spineVersions: SpineVersion[];
     planningRecords: PlanningRecord[];
     createdAt?: number;
+    /** Project options — lets the alignment read input fingerprints (see outputAlignment). */
+    project?: ArtifactProjectInputs;
 };
 
 const SUPPORTED_SLOTS = new Set<DownstreamUpdateArtifactSlot>(['screen_inventory', 'user_flows', 'data_model', 'implementation_plan']);
@@ -585,11 +589,53 @@ function findSourceAuthority(records: PlanningRecord[], targetSpineVersionId: st
     return {};
 }
 
+/**
+ * Spine change sources whose content a user authored or explicitly chose: an
+ * inline edit (also the decision-impact apply path, which appends through
+ * `compareAndAppendStructuredPRD` as `user_edit`), a Decisions confirm or
+ * correction, a branch consolidation or staged apply, a restore of an earlier
+ * version, and a section re-run the user triggered.
+ */
+const USER_AUTHORED_SPINE_CHANGES: ReadonlySet<VersionChangeSource> = new Set<VersionChangeSource>([
+    'user_edit',
+    'decision_edit',
+    'branch_merge',
+    'revert',
+    'ai_section_retry',
+]);
+
+/**
+ * Whether a downstream update plan's source change (the latest spine) is
+ * CONFIRMED. A confirmed change lets the bounded planners propose definite
+ * removals of obsolete downstream elements; a provisional one keeps every
+ * item a review. The authority is the surviving one — the Finalize commitment
+ * is gone:
+ *  - the change is user-authored (`USER_AUTHORED_SPINE_CHANGES`), or
+ *  - it applied a confirmed/resolved planning record, or
+ *  - (legacy) the spine was committed through the removed Finalize flow.
+ * Only a fresh model draft with no user decision behind its content
+ * (`ai_generation`, a "Regenerate Draft" `ai_regeneration`) or a legacy spine
+ * of unknown origin (no provenance) stays provisional — until the next
+ * user-authored change appends a new latest spine.
+ */
+export function isSourceChangeConfirmed(
+    spine: Pick<SpineVersion, 'isFinal' | 'provenance'>,
+    authorityRecord?: Pick<PlanningRecord, 'status'>,
+): boolean {
+    if (spine.isFinal) return true;
+    if (authorityRecord && ['confirmed', 'resolved'].includes(authorityRecord.status)) return true;
+    const changeSource = spine.provenance?.changeSource;
+    return changeSource !== undefined && USER_AUTHORED_SPINE_CHANGES.has(changeSource);
+}
+
 export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansInput): DownstreamUpdatePlan[] {
     const latest = input.spineVersions.find(spine => spine.isLatest);
     if (!latest) return [];
     const alignment = deriveProjectOutputAlignment({
-        artifacts: input.artifacts, artifactVersions: input.artifactVersions, spineVersions: input.spineVersions,
+        artifacts: input.artifacts,
+        artifactVersions: input.artifactVersions,
+        spineVersions: input.spineVersions,
+        project: input.project,
     });
     const planningContextHash = downstreamPlanningContextHash(input.planningRecords);
     const authority = findSourceAuthority(input.planningRecords, latest.id);
@@ -649,7 +695,7 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
                 targetSpineVersionId: latest.id,
                 targetSpineContentHash: hashReviewValue(latest.structuredPRD ?? latest.responseText), planningContextHash,
                 planningRecordId: authority.planningRecord?.id, planningEventId: authority.eventId,
-                confirmed: Boolean(latest.isFinal || (authority.planningRecord && ['confirmed', 'resolved'].includes(authority.planningRecord.status))),
+                confirmed: isSourceChangeConfirmed(latest, authority.planningRecord),
             },
             artifact: {
                 artifactId: artifact.id, artifactVersionId: version.id, artifactContentHash: hashReviewValue(version.content),

@@ -1,14 +1,15 @@
-// The build-packet APPROVAL and the plan surface's single-primary CTA state
-// machine — §W7 of docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md ("Final Review:
-// one blocker list, one CTA").
+// The OPTIONAL build-packet APPROVAL (a user sign-off) and the plan surface's
+// single-primary CTA — §W7 of docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md
+// ("Final Review").
 //
 // WHAT THIS ADDS AND WHAT IT DELIBERATELY DOES NOT.
 //
 // §W6 (`buildPacketReadiness.ts`) answers "is the implementation packet
 // complete and current?" — purely derived, recomputed every render, never
-// persisted. That is the right shape for a *report*, but an APPROVAL is a user
-// authority act: it has to survive a reload and say which artifact versions it
-// covered. So exactly one durable thing is recorded here, and nothing else:
+// persisted, and ADVISORY: nothing gates on it. That is the right shape for a
+// *report*, but an APPROVAL is a user authority act: it has to survive a
+// reload and say which artifact versions it covered. So exactly one durable
+// thing is recorded here, and nothing else:
 //
 //   `ArtifactVersion.metadata.buildPacketApproval` on the implementation_plan
 //   version — a USER OVERLAY (cross-cutting rule 12), written only through
@@ -22,16 +23,15 @@
 // `ALL_PROJECT_COLLECTIONS` + snapshot collectors/restorers + sync + demo
 // cleanup.
 //
-// NOT the readiness commitment. `readinessCommitment.ts` records the user's
-// commitment to the PRODUCT REASONING (`derivePlanningReadiness`). Reusing it
-// here would conflate the two evaluators §W6 exists to keep apart, and a
-// build-packet approval has to pin ARTIFACT versions, which a `ReadinessReview`
-// does not know about. The two stay separate and separately reportable; the
-// packet's `reasoning_committed` criterion is how one depends on the other.
+// OPTIONAL, NEVER A GATE. Approving is a sign-off the user may record at any
+// time — open packet checks are surfaced in the rationale but never disable
+// it — and nothing (prompt copying, export, task conversion) waits for it.
+// (The separate plan-level Finalize/readiness commitment was removed; this
+// approval was never that commitment and never depended on it.)
 //
 // Everything else in this module is DERIVED ON READ (rule 10): the manifest,
-// the drift reconciliation, and the CTA state machine are pure functions of the
-// evaluator's result plus the overlay. Nothing here blocks rendering.
+// the drift reconciliation, and the CTA are pure functions of the evaluator's
+// result plus the overlay. Nothing here blocks rendering.
 
 import type { ArtifactSlotKey } from '../../types';
 import type { BuildPacketReadiness } from './buildPacketReadiness';
@@ -89,6 +89,9 @@ export interface BuildPacketApprovalOverlay {
     manifest: BuildPacketManifestEntry[];
     /** Warnings the evaluator recorded at approval time (advisory, not blocking). */
     acknowledgedWarningIds?: string[];
+    /** Packet checks still open when the user signed off anyway — the
+     * approval is optional and never waits for them, so it records them. */
+    acknowledgedOpenCheckIds?: string[];
     /** Unknown keys from a future/older writer, preserved verbatim. */
     [key: string]: unknown;
 }
@@ -132,6 +135,9 @@ export function readBuildPacketApproval(
         ...(Array.isArray(raw.acknowledgedWarningIds)
             ? { acknowledgedWarningIds: raw.acknowledgedWarningIds.filter((id): id is string => typeof id === 'string') }
             : {}),
+        ...(Array.isArray(raw.acknowledgedOpenCheckIds)
+            ? { acknowledgedOpenCheckIds: raw.acknowledgedOpenCheckIds.filter((id): id is string => typeof id === 'string') }
+            : {}),
     };
 }
 
@@ -149,6 +155,7 @@ export function buildPacketApprovalPatch(
         spineVersionId?: string;
         prdVersionLabel?: string;
         acknowledgedWarningIds?: readonly string[];
+        acknowledgedOpenCheckIds?: readonly string[];
     },
 ): BuildPacketApprovalOverlay {
     const existingRaw = existingMetadata?.[BUILD_PACKET_APPROVAL_KEY];
@@ -161,6 +168,7 @@ export function buildPacketApprovalPatch(
         ...(next.spineVersionId ? { spineVersionId: next.spineVersionId } : {}),
         ...(next.prdVersionLabel ? { prdVersionLabel: next.prdVersionLabel } : {}),
         ...(next.acknowledgedWarningIds ? { acknowledgedWarningIds: [...next.acknowledgedWarningIds] } : {}),
+        ...(next.acknowledgedOpenCheckIds ? { acknowledgedOpenCheckIds: [...next.acknowledgedOpenCheckIds] } : {}),
     };
 }
 
@@ -271,20 +279,11 @@ export function reconcileBuildPacketManifest(
     };
 }
 
-// --- The single-primary CTA state machine -------------------------------------
-
-/**
- * The four states of the plan surface. `unavailable` exists only for renders
- * with no evaluator result (isolated previews / tests); in the product
- * `ArtifactWorkspace` always supplies one.
- */
-export type FinalReviewState = 'unavailable' | 'resolve_blockers' | 'approve' | 'start_build';
+// --- The single-primary CTA ------------------------------------------------------
 
 export type FinalReviewActionId =
-    | 'check_readiness'
-    | 'resolve_blockers'
-    | 'approve'
     | 'start_build'
+    | 'approve'
     | 'review_prompts'
     | 'convert_tasks'
     | 'copy_plan';
@@ -294,26 +293,28 @@ export interface FinalReviewAction {
     label: string;
     kind: 'primary' | 'secondary';
     disabled?: boolean;
-    /** Why the action cannot be taken (read-only project, nothing to do). */
+    /** Why the action cannot be taken (read-only project). */
     disabledReason?: string;
 }
 
+/** Whether a recorded sign-off covers the current artifact versions. */
+export type FinalReviewApprovalState = 'not_approved' | 'approved' | 'superseded';
+
 export interface FinalReviewCta {
-    state: FinalReviewState;
-    /** EXACTLY ONE primary, in every state. */
+    /** EXACTLY ONE primary: the next build step. Never gated on the packet report. */
     primary: FinalReviewAction;
-    /** Copy plan / Review prompts / Convert to tasks — secondary at ALL times. */
+    /** The optional sign-off (while it does not cover the current versions),
+     * then Review prompts / Convert to tasks / Copy plan. */
     secondary: FinalReviewAction[];
-    /** One sentence saying why this is the next step. */
+    /** One sentence saying where things stand. */
     rationale: string;
-    /** N in "Resolve N blockers", straight from the evaluator's blocker list. */
-    blockerCount: number;
-    /** An approval exists but no longer covers the current artifact versions. */
-    supersededApproval: boolean;
+    /** Open packet checks, straight from the evaluator's list — estimated and advisory. */
+    openCheckCount: number;
+    approvalState: FinalReviewApprovalState;
 }
 
 export interface FinalReviewCtaInput {
-    /** §W6's result. Absent → the `unavailable` state. */
+    /** §W6's advisory result. Absent → no check counts are reported. */
     packet?: BuildPacketReadiness | null;
     approval?: BuildPacketApprovalOverlay | null;
     /** The CURRENT manifest, for drift reconciliation against the approval. */
@@ -336,93 +337,58 @@ const READ_ONLY_REASON = 'This project is read-only, so the packet cannot be app
 const plural = (count: number, word: string): string =>
     `${count} ${word}${count === 1 ? '' : 's'}`;
 
-function secondaryActions(input: FinalReviewCtaInput): FinalReviewAction[] {
-    const savedTaskCount = input.savedTaskCount ?? 0;
-    const actions: FinalReviewAction[] = [
-        { id: 'review_prompts', label: 'Review prompts', kind: 'secondary' },
-    ];
+/**
+ * Resolve the plan surface's ONE primary action and its secondary menu.
+ *
+ * The primary is always the next build step — copying the next implementation
+ * prompt (or opening the roadmap when no prompt is left) — because the packet
+ * report is advisory: open checks are counted in the rationale and listed in
+ * the Final Review checklist, never turned into a gate. Approving the packet
+ * is an optional, demoted sign-off; prompt review and task conversion are
+ * never approvals.
+ */
+export function deriveFinalReviewCta(input: FinalReviewCtaInput): FinalReviewCta {
+    const packet = input.packet ?? null;
+    const reconciliation = reconcileBuildPacketManifest(input.approval, input.manifest ?? [], {
+        ...(input.hostNodeId ? { hostNodeId: input.hostNodeId } : {}),
+    });
+    const superseded = reconciliation.hasDrift;
+    const approvalState: FinalReviewApprovalState = !input.approval
+        ? 'not_approved'
+        : superseded ? 'superseded' : 'approved';
+    const openCheckCount = packet?.blockers.length ?? 0;
+
+    const secondary: FinalReviewAction[] = [];
+    if (approvalState !== 'approved') {
+        secondary.push({
+            id: 'approve',
+            label: approvalState === 'superseded' ? 'Re-approve build packet' : 'Approve build packet',
+            kind: 'secondary',
+            ...(input.canApprove ? {} : { disabled: true, disabledReason: READ_ONLY_REASON }),
+        });
+    }
+    secondary.push({ id: 'review_prompts', label: 'Review prompts', kind: 'secondary' });
     if (input.canConvertTasks) {
-        actions.push({
+        const savedTaskCount = input.savedTaskCount ?? 0;
+        secondary.push({
             id: 'convert_tasks',
             label: savedTaskCount > 0 ? `Manage tasks (${savedTaskCount})` : 'Convert to tasks',
             kind: 'secondary',
         });
     }
-    actions.push({ id: 'copy_plan', label: 'Copy plan as markdown', kind: 'secondary' });
-    return actions;
-}
+    secondary.push({ id: 'copy_plan', label: 'Copy plan as markdown', kind: 'secondary' });
 
-/**
- * Resolve the plan surface's ONE primary action.
- *
- * Blockers dominate: an approval recorded earlier never promotes a build action
- * while the packet is incomplete again, and prompt review / task conversion are
- * never treated as approvals — they stay secondary in every state, which is the
- * whole point of §W7.
- */
-export function deriveFinalReviewCta(input: FinalReviewCtaInput): FinalReviewCta {
-    const secondary = secondaryActions(input);
-    const packet = input.packet ?? null;
-
-    if (!packet) {
-        return {
-            state: 'unavailable',
-            primary: {
-                id: 'check_readiness',
-                label: 'Check build readiness',
-                kind: 'primary',
-                disabled: true,
-                disabledReason: 'Build-packet readiness has not been evaluated for this view.',
-            },
-            secondary,
-            rationale: 'Build-packet readiness is not available here, so no next step is promoted.',
-            blockerCount: 0,
-            supersededApproval: false,
-        };
-    }
-
-    const reconciliation = reconcileBuildPacketManifest(input.approval, input.manifest ?? [], {
-        ...(input.hostNodeId ? { hostNodeId: input.hostNodeId } : {}),
-    });
-    const supersededApproval = reconciliation.hasDrift;
-    const approvalCovers = Boolean(input.approval) && !supersededApproval;
-    const blockerCount = packet.blockers.length;
-
-    if (!packet.isPacketComplete) {
-        return {
-            state: 'resolve_blockers',
-            primary: {
-                id: 'resolve_blockers',
-                label: blockerCount > 0 ? `Resolve ${plural(blockerCount, 'blocker')}` : 'Review packet blockers',
-                kind: 'primary',
-            },
-            secondary,
-            rationale: packet.summary,
-            blockerCount,
-            supersededApproval,
-        };
-    }
-
-    if (!approvalCovers) {
-        return {
-            state: 'approve',
-            primary: {
-                id: 'approve',
-                label: supersededApproval ? 'Re-approve build packet' : 'Approve build packet',
-                kind: 'primary',
-                ...(input.canApprove ? {} : { disabled: true, disabledReason: READ_ONLY_REASON }),
-            },
-            secondary,
-            rationale: supersededApproval
-                ? 'A recorded approval no longer covers the current output versions. Re-approve to pin the versions below.'
-                : 'Every packet check passes. Approving pins the artifact versions below as the packet this build works from.',
-            blockerCount,
-            supersededApproval,
-        };
-    }
+    const rationale = approvalState === 'approved'
+        ? 'You approved this packet. Start with the first slice and work down the roadmap.'
+        : approvalState === 'superseded'
+            ? 'A recorded approval no longer covers the current output versions. Keep building, or re-approve to pin the new versions.'
+            : packet && openCheckCount > 0
+                ? `${plural(openCheckCount, 'packet check')} ${openCheckCount === 1 ? 'is' : 'are'} still open (estimated). Fix ${openCheckCount === 1 ? 'it' : 'them'} from the checklist below, or start building — nothing here is a gate.`
+                : packet
+                    ? 'Every packet check passes (estimated). Start with the first slice; approving the packet is an optional sign-off that pins the versions below.'
+                    : 'Start with the first slice and work down the roadmap.';
 
     return {
-        state: 'start_build',
         primary: {
             id: 'start_build',
             label: input.hasNextPrompt
@@ -433,8 +399,8 @@ export function deriveFinalReviewCta(input: FinalReviewCtaInput): FinalReviewCta
             kind: 'primary',
         },
         secondary,
-        rationale: 'This packet is approved. Start with the first slice and work down the roadmap.',
-        blockerCount,
-        supersededApproval,
+        rationale,
+        openCheckCount,
+        approvalState,
     };
 }

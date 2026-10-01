@@ -22,7 +22,19 @@
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
-  `isLatest`/`isFinal` flags. Spine ids are opaque — new versions
+  `isLatest` flags (`isFinal` is legacy: the removed Finalize flow set it,
+  nothing does now, and it survives only as a durable incomplete-PRD
+  acknowledgement for old projects). **Incomplete-PRD acknowledgement:**
+  `acknowledgeIncompleteSpine` records the user's explicit "Generate anyway"
+  as `SpineVersion.incompleteAcknowledgedAt` (inside the `set` updater, in
+  `PERSISTENT_STORE_ACTIONS`) — only on the latest, settled version with
+  failed sections, and only once. The generation gate honours it exactly like
+  legacy `isFinal`. It is bound to that version: the spread-based appends
+  (`editSpineStructuredPRD`, `compareAndAppendStructuredPRD` — decision
+  applies and section retries — and `revertSpineToVersion`) clear it on the
+  version they create, while `mergeBranch` / staged apply / `regenerateSpine`
+  build fresh spines without it; only an in-place decision amend of the same
+  version keeps it. Spine ids are opaque — new versions
   (`regenerateSpine`, `mergeBranch`) get UUIDs, while the first spine and
   legacy localStorage data keep `v1`-style ids. Never parse a version
   number out of the id; display labels ("Version N") derive from array
@@ -34,9 +46,10 @@
   `mergeBranch(..., { structuredPRD })`; doc-wide rewrite (a full
   markdown replacement with no structured mapping) is offered only for
   legacy markdown-only spines. Never append a markdown-only merge spine
-  on top of a structured one — `canReview`/`canExploreOutputs` gate on
-  the *latest* spine having a `structuredPRD`, so that silently disables
-  the Challenge and Explore/Build stages for the whole project.
+  on top of a structured one — the journey rail's Decide and Build steps
+  (`deriveJourneyPresentation`) and the outputs CTA require the spine to have
+  a `structuredPRD`, so that silently disables Decide, Build, and output
+  generation for the whole project.
   **Staged edits (batch consolidation):** a branch can hold a concrete
   replacement without committing — `stageBranch` sets its status to
   `'resolved'` (the previously-dormant status) and stores
@@ -116,7 +129,10 @@
   re-pointed branch whose anchor text no longer exists in the latest PRD
   surfaces ConsolidationModal's existing not-found error.
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
-  tracking; source-ref staleness detection against the current spine.
+  tracking; the provenance the freshness engine compares (spine/dependency
+  `sourceRefs` and the `provenance.inputHashes` input fingerprint, which
+  restore and overlay clones carry and mark-current rebases — see
+  VERSIONING_AND_EXPORT.md).
   `revertArtifactToVersion` restores an older version by appending a **cloned**
   `ArtifactVersion` (increments `versionNumber`, becomes preferred, carries
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
@@ -140,9 +156,11 @@
 - `reviewSlice` — Persisted adversarial-review state (reviewRuns,
   specialistRuns, reviewFindings, reviewIssues, planningRecords). Append-only
   authority events; see docs/architecture/PLANNING_AND_DECISIONS.md.
-- `readinessSlice` — Persisted readiness reviews + commitment events
-  (version-pinned; commitment display goes through
-  `commitmentRemainsCurrent`).
+- `readinessSlice` — **LEGACY, read-only.** Declares the two persisted
+  collections the removed Finalize checkpoint wrote (`readinessReviews`,
+  `readinessCommitmentEvents`) so old projects keep round-tripping through
+  bundles, snapshots, sync, and retention. It has no actions; nothing writes
+  either collection any more.
 - `downstreamUpdatePlanSlice` — Persisted downstream update plans, artifact
   update proposals/applications/verifications, plus the derived
   output-alignment getters (`getProjectOutputAlignment` /
@@ -322,8 +340,9 @@ it. Regression: `src/store/__tests__/stripPersistedCanonicalSpines.test.ts`,
 review/readiness/downstream history collections are growth-bounded by one
 shared, pure, unit-tested engine, invoked in exactly two places: at **write
 time** inside the slice action that appends a new *root* record
-(`createReviewRun`, `createReadinessReview`, and the three downstream
-plan-append sites), inside the same `set((state) => …)` updater (concurrency
+(`createReviewRun` and the three downstream plan-append sites — legacy
+readiness reviews are no longer appended, so only the rehydrate sweep caps
+them), inside the same `set((state) => …)` updater (concurrency
 rule holds; unchanged maps keep their reference for selector stability and
 sync's reference-diffing), and once per **rehydrate** (next paragraph).
 Because pruning only ever coincides with an append that already changed the
@@ -373,13 +392,15 @@ The caps (deliberately generous):
   Never pruned: in-flight runs (queued/running/synthesizing), runs that still
   have an **open or deferred** issue, and the most recent completed
   project-scope challenge of the latest spine (the substantive-challenge
-  candidate readiness relies on). `ReviewRun.sequenceNumber` is now assigned
+  candidate challenge coverage relies on). `ReviewRun.sequenceNumber` is now assigned
   max-based (not `length + 1`) so "Review N" labels stay unique after pruning.
-- **Readiness** — `readinessReviews` capped at
-  `READINESS_REVIEW_RETENTION_LIMIT` (20) per project, but a review referenced
-  by **any** commitment event is kept forever (commit/reopen dereference and
-  integrity-check their review by id). `readinessCommitmentEvents` are **never
-  pruned** — user authority, append-only, user-rate-bounded.
+- **Readiness (legacy)** — `readinessReviews` capped at
+  `READINESS_REVIEW_RETENTION_LIMIT` (20) per project by the rehydrate sweep
+  only (nothing appends them since the Finalize checkpoint was removed), but a
+  review referenced by **any** legacy commitment event is kept forever so an
+  old project's commitment history stays internally consistent.
+  `readinessCommitmentEvents` are **never pruned** — legacy user authority,
+  append-only.
 - **Downstream updates** — `downstreamUpdatePlans` capped at
   `DOWNSTREAM_PLAN_RETENTION_LIMIT_PER_ARTIFACT` (10) per **artifact lineage**
   (each selective application rebases into a new plan for the same artifact, so

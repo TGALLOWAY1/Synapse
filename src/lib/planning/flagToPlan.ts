@@ -219,12 +219,11 @@ export const buildCrossCuttingObligationConcernInput = (input: {
         .map(part => part.trim())
         .filter(Boolean)
         .join(' '),
-    // NOT `'blocking'`. The obligation already blocks the build packet through
-    // §W6, which is the single authoritative expression of its severity. A
-    // `'blocking'` record would additionally arm the Finalize materiality
-    // hard stop (`deriveMaterialityGateSnapshot`) off a one-click UI action —
-    // a second gate for one fact, which is exactly the duplication this flow
-    // removes.
+    // NOT `'blocking'`. The obligation is already an open packet check
+    // through §W6, which is the single authoritative expression of its
+    // severity. A one-click UI action must not mint a second, independent
+    // `'blocking'` severity for the same fact — exactly the duplication this
+    // flow removes.
     materiality: 'normal',
     locator: {
         entityType: 'artifact',

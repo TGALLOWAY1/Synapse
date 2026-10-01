@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     buildArtifactDependencyGraph,
+    computeRecommendedUpdates,
+    evaluateDependencyGraph,
+    type DependencyEvaluationInput,
     type DependencyNodeEvaluation,
     type DependencyNodeId,
 } from '../artifactDependencyGraph';
+import {
+    ARTIFACT_INPUT_SLICES,
+    computeArtifactInputHashes,
+    currentPrdInputHashesForSpine,
+    dependencyContentHash,
+    selectArtifactPrdInput,
+    type ArtifactProjectInputs,
+} from '../artifactInputSlices';
+import { renderPremiumMarkdown } from '../services/prdMarkdownRenderer';
+
 import {
     buildOutputSyncSessionFingerprint,
     buildOutputSyncRows,
@@ -12,7 +25,7 @@ import {
     runOutputSyncSession,
     type OutputSyncChoice,
 } from '../outputSyncPlan';
-import type { ArtifactSlotKey } from '../../types';
+import type { ArtifactSlotKey, CoreArtifactSubtype, StructuredPRD } from '../../types';
 
 const graph = buildArtifactDependencyGraph();
 
@@ -432,5 +445,115 @@ describe('output sync planning', () => {
             'mark:design_system',
             'regenerate:user_flows,mockup',
         ]);
+    });
+});
+
+// --- the Sync plan follows the fingerprint engine -------------------------------
+//
+// Every output generated from PRD v1 with its input fingerprint; the latest
+// spine (v2) is then edited in different ways. The rows come straight from the
+// canonical engine, so the Sync modal's default choices follow it.
+
+describe('output sync planning — driven by input fingerprints', () => {
+    const project: ArtifactProjectInputs = { name: 'P', platform: 'web', designSystemPreset: 'saas_minimal' };
+    const prdV1: StructuredPRD = {
+        productName: 'Synced',
+        vision: 'Plan trips with friends.',
+        coreProblem: 'Group travel planning is chaotic.',
+        targetUsers: ['Friend groups'],
+        features: [{ id: 'f1', name: 'Shared Itinerary', description: 'Plan together.', userValue: 'Fewer chats', complexity: 'medium' }],
+        architecture: 'SPA + realtime sync.',
+        risks: ['Low adoption'],
+    };
+    const slots = graph.nodes.map(node => node.id).filter((id): id is ArtifactSlotKey => id !== 'prd');
+    const contentOf = (slot: ArtifactSlotKey) => `${slot} content v1`;
+
+    function engineInput(latest: StructuredPRD, latestProject: ArtifactProjectInputs = project): DependencyEvaluationInput {
+        const sourcesV1 = { structuredPRD: prdV1, prdMarkdown: renderPremiumMarkdown(prdV1), project };
+        const snapshots: DependencyEvaluationInput['snapshots'] = {};
+        const currentInputHashes: DependencyEvaluationInput['currentInputHashes'] = {};
+        for (const slot of slots) {
+            const deps = Object.fromEntries(ARTIFACT_INPUT_SLICES[slot].dependencies.map(dep => [dep, contentOf(dep)])) as
+                Partial<Record<CoreArtifactSubtype, string>>;
+            snapshots[slot] = {
+                artifactId: `artifact-${slot}`,
+                version: {
+                    id: `${slot}-v1`,
+                    versionNumber: 1,
+                    createdAt: 1,
+                    sourceRefs: [
+                        { id: `${slot}-spine`, sourceArtifactId: 'p', sourceArtifactVersionId: 'spine-v1', sourceType: 'spine' },
+                        ...(slot === 'mockup'
+                            ? [{ id: 'mockup-ds', sourceArtifactId: 'artifact-design_system', sourceArtifactVersionId: 'design_system-v1', sourceType: 'core_artifact' as const, anchorInfo: 'tokens-a' }]
+                            : []),
+                    ],
+                    provenance: {
+                        changeSource: 'ai_generation',
+                        inputHashes: computeArtifactInputHashes(slot, selectArtifactPrdInput(slot, sourcesV1), deps),
+                    },
+                    contentHash: dependencyContentHash(contentOf(slot)),
+                },
+            };
+            const current = currentPrdInputHashesForSpine(
+                slot,
+                { structuredPRD: latest, responseText: renderPremiumMarkdown(latest) },
+                latestProject,
+            );
+            if (current) currentInputHashes[slot] = current;
+        }
+        return {
+            spineVersionIds: ['spine-v1', 'spine-v2'],
+            latestSpineId: 'spine-v2',
+            currentDesignTokensHash: 'tokens-a',
+            currentInputHashes,
+            snapshots,
+        };
+    }
+
+    const rowsFor = (input: DependencyEvaluationInput) => {
+        const evals = evaluateDependencyGraph(graph, input);
+        const rows = buildOutputSyncRows({
+            graph,
+            evaluations: evals,
+            artifactIdBySlot,
+            recommendedUpdates: computeRecommendedUpdates(graph, evals),
+        });
+        return { evals, rows };
+    };
+
+    it('a restore to the source content flags nothing and offers nothing to sync', () => {
+        const { evals, rows } = rowsFor(engineInput({ ...prdV1 }));
+        expect(slots.every(slot => evals.get(slot)?.status === 'up_to_date')).toBe(true);
+        expect(rows.every(row => row.defaultChoice === 'skip' && !row.isDrifted)).toBe(true);
+        expect(hasOutputSyncDrift(rows)).toBe(false);
+    });
+
+    it('a Vision-only edit flags exactly the outputs whose slice reads the vision — today, every one', () => {
+        // Core prompts read the vision (canonical spine identity + PRD appendix);
+        // the mockup spec reads it too (its summary). No slice skips it.
+        const { evals, rows } = rowsFor(engineInput({ ...prdV1, vision: 'Plan trips with friends — together.' }));
+        for (const slot of slots) {
+            expect(evals.get(slot)?.status, slot).toBe('needs_update');
+            expect(evals.get(slot)?.reasons.map(r => r.kind), slot).toEqual(['prd_changed']);
+        }
+        expect(rows.every(row => row.defaultChoice === 'update')).toBe(true);
+    });
+
+    it('a risks-only edit flags the core outputs; the mockup is only impacted through its inputs', () => {
+        const { evals, rows } = rowsFor(engineInput({ ...prdV1, risks: ['Low adoption', 'Payment disputes'] }));
+        for (const slot of slots.filter(s => s !== 'mockup')) {
+            expect(evals.get(slot)?.status, slot).toBe('needs_update');
+        }
+        expect(evals.get('mockup')?.status).toBe('up_to_date');
+        expect(evals.get('mockup')?.reasons).toEqual([]);
+        expect(rows.find(row => row.id === 'mockup')).toMatchObject({ statusLabel: 'Impacted', defaultChoice: 'update' });
+    });
+
+    it('a design-preset change flags only the design system (and impacts the mockup through it)', () => {
+        const { evals, rows } = rowsFor(engineInput({ ...prdV1 }, { ...project, designSystemPreset: 'enterprise_professional' }));
+        expect(evals.get('design_system')?.reasons.map(r => r.kind)).toEqual(['design_direction_changed']);
+        const updates = rows.filter(row => row.defaultChoice === 'update').map(row => row.id).sort();
+        expect(updates).toEqual(['design_system', 'mockup']);
+        expect(rows.find(row => row.id === 'mockup')?.statusLabel).toBe('Impacted');
     });
 });

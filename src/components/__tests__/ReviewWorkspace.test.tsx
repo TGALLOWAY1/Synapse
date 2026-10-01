@@ -142,7 +142,7 @@ describe('ReviewWorkspace', () => {
         render(<ReviewWorkspace {...baseProps({ onStartReview })} />);
 
         fireEvent.click(screen.getByRole('checkbox', { name: /Security & Privacy/i }));
-        expect(screen.getByText(/will not satisfy build-readiness coverage/i)).toBeInTheDocument();
+        expect(screen.getByText(/will not count as full challenge coverage/i)).toBeInTheDocument();
         expect(screen.getByText(/Restore Security & Privacy/i)).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));

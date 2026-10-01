@@ -24,7 +24,7 @@ const pickFidelity = (prd: string, structured?: StructuredPRD): MockupFidelity =
     return words >= 1500 ? 'high' : 'mid';
 };
 
-// Settings used for the auto-kicked mockup job after PRD finalization. The
+// Settings used for the auto-kicked mockup job of an output run. The
 // user can still regenerate with custom settings later via the workspace
 // "Regenerate with options" affordance.
 export function buildAutoMockupSettings(

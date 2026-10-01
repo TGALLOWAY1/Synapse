@@ -142,14 +142,13 @@ describe('useBuildPacketInputs', () => {
         expect(mockupEntry.title).toBe('Mockups');
     });
 
-    it('feeds the evaluator, which then reports the un-generated outputs as blockers', () => {
+    it('feeds the evaluator, which then reports the un-generated outputs as open checks', () => {
         const { projectId } = seedProject();
         const { result } = renderHook(() => useBuildPacketInputs(projectId));
 
         const packet = deriveBuildPacketReadiness({
             ...result.current,
             prd: prd(),
-            committedReadiness: null,
         });
 
         expect(packet.isPacketComplete).toBe(false);

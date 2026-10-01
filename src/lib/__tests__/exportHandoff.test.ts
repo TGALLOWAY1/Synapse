@@ -52,20 +52,14 @@ describe('buildAgentHandoff', () => {
         expect(out).toContain('This product — Build Handoff');
     });
 
-    it('labels an uncommitted plan as exploratory', () => {
-        const out = buildAgentHandoff({ projectName: 'Acme', artifacts: [], exploratory: true });
-        expect(out).toContain('Exploratory handoff');
-        expect(out).toContain('has not been committed as implementation-ready');
-    });
-
-    it('uses an exact checkpoint instead of stacking the blanket exploratory warning', () => {
+    it('carries the current checkpoint and never a commitment verdict', () => {
         const out = buildAgentHandoff({
             projectName: 'Acme',
             artifacts: [],
-            exploratory: true,
-            checkpointMarkdown: '## Workflow Checkpoint\n\n**Plan status:** Working plan',
+            checkpointMarkdown: '## Workflow Checkpoint\n\nNo current critique, validation, or alignment notes need your attention.',
         });
-        expect(out).toContain('**Plan status:** Working plan');
+        expect(out).toContain('## Workflow Checkpoint');
         expect(out).not.toContain('Exploratory handoff');
+        expect(out).not.toContain('Plan status');
     });
 });

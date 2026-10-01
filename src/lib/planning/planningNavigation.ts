@@ -1,9 +1,8 @@
 import type { ArtifactSlotKey, PipelineStage } from '../../types';
 import type { ImplementationPlanNavigationTarget } from './implementationPlanNavigation';
-import type { PlanningAttentionItem } from './planningAttention';
 
 /** Presentation-only navigation. These values must never participate in
- * planning authority, provenance, readiness hashes, or persisted project data. */
+ * planning authority, provenance, content hashes, or persisted project data. */
 export type PlanningScreenTab = 'overview' | 'flow' | 'mockups';
 
 export type PlanningScreenDestination = {
@@ -48,7 +47,6 @@ export type PlanningDestination =
     | { kind: 'decision_center' }
     | { kind: 'planning_record'; recordId: string }
     | { kind: 'challenge'; reviewId?: string; issueId?: string; findingId?: string }
-    | { kind: 'readiness'; reviewId: string; concernId?: string }
     | PlanningScreenDestination
     | PlanningSurfaceDestination
     | {
@@ -97,23 +95,6 @@ const optionalString = (value: unknown): value is string | undefined =>
 
 export function isPlanningScreenTab(value: unknown): value is PlanningScreenTab {
     return typeof value === 'string' && ['overview', 'flow', 'mockups'].includes(value);
-}
-
-export function dispatchPlanningAttentionItem(
-    item: PlanningAttentionItem,
-    {
-        onCommit,
-        onNavigate,
-    }: {
-        onCommit: () => void;
-        onNavigate: (destination: PlanningDestination) => void;
-    },
-): void {
-    if (item.condition === 'ready_to_commit') {
-        onCommit();
-        return;
-    }
-    onNavigate(item.destination);
 }
 
 export function resolveActivePlanningScreen({
@@ -227,9 +208,6 @@ function isPlanningDestination(value: unknown): value is PlanningDestination {
             && optionalString(candidate.issueId)
             && optionalString(candidate.findingId);
     }
-    if (candidate.kind === 'readiness') {
-        return nonEmpty(candidate.reviewId) && optionalString(candidate.concernId);
-    }
     if (candidate.kind === 'screen') return isPlanningScreenDestination(candidate);
     if (candidate.kind === 'workspace' || candidate.kind === 'history') {
         return candidate.artifactId === undefined
@@ -292,7 +270,6 @@ export type PlanningNavigationValidationContext = {
     reviewIds?: ReadonlySet<string>;
     reviewIssueIds?: ReadonlySet<string>;
     reviewFindingIds?: ReadonlySet<string>;
-    readinessReviewIds?: ReadonlySet<string>;
     artifactIds?: ReadonlySet<string>;
     updatePlanIds?: ReadonlySet<string>;
     screenIdsByArtifactId?: ReadonlyMap<string, ReadonlySet<string>>;
@@ -333,10 +310,6 @@ export function validatePlanningDestination(
         if (destination.issueId && context.reviewIssueIds && !context.reviewIssueIds.has(destination.issueId)) return { kind: 'challenge', reviewId: destination.reviewId };
         if (destination.findingId && context.reviewFindingIds && !context.reviewFindingIds.has(destination.findingId)) return { kind: 'challenge', reviewId: destination.reviewId };
     }
-    if (destination.kind === 'readiness'
-        && context.readinessReviewIds && !context.readinessReviewIds.has(destination.reviewId)) {
-        return { kind: 'prd' };
-    }
     if (destination.kind === 'artifact'
         && destination.artifactId && context.artifactIds && !context.artifactIds.has(destination.artifactId)) {
         return { kind: 'prd' };
@@ -351,7 +324,7 @@ export function validatePlanningDestination(
 }
 
 export function planningStageForDestination(destination: PlanningDestination): ActivePlanningStage {
-    if (destination.kind === 'prd' || destination.kind === 'readiness') return 'prd';
+    if (destination.kind === 'prd') return 'prd';
     if (destination.kind === 'decision_center'
         || destination.kind === 'planning_record'
         || destination.kind === 'challenge') return 'review';

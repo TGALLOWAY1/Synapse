@@ -77,40 +77,6 @@ export type EditSpineStructuredPRDResult = {
     unchanged?: boolean;
 };
 
-export type ReadinessMutationFailureReason =
-    | 'project_not_found'
-    | 'review_not_found'
-    | 'authorization_not_found'
-    | 'authorization_consumed'
-    | 'commitment_not_found'
-    | 'stale'
-    | 'tampered'
-    | 'hash_mismatch'
-    | 'accepted_concerns_mismatch'
-    | 'accepted_blockers_mismatch'
-    | 'blocking_snapshot_mismatch'
-    | 'rationale_required'
-    | 'containment_required'
-    | 'safety_blocked'
-    | 'already_committed'
-    | 'not_committed';
-
-export type CreateReadinessReviewResult =
-    | { status: 'created'; reviewId: string; review: ReadinessReview }
-    | { status: 'rejected'; reason: 'project_not_found' | 'safety_blocked' | 'stale' };
-
-export type AuthorizeReadinessCommitmentResult =
-    | { status: 'authorized'; authorizationEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
-export type CommitReadinessReviewResult =
-    | { status: 'committed'; commitmentEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
-export type ReopenReadinessCommitmentResult =
-    | { status: 'reopened'; reopenEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
 export type AssumptionEvidenceMutationGuard = {
     evidenceId: string;
     expectedEvidenceContentHash: string;
@@ -165,6 +131,9 @@ export interface ProjectState {
     reviewFindings: Record<string, SpecialistFinding[]>;
     reviewIssues: Record<string, ReviewIssue[]>;
     planningRecords: Record<string, PlanningRecord[]>;
+    // LEGACY, read-only: written only by the removed Finalize/readiness
+    // checkpoint. Kept so older projects round-trip through persistence,
+    // snapshots, sync, and the recovery bundle; nothing writes them now.
     readinessReviews: Record<string, ReadinessReview[]>;
     readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
     downstreamUpdatePlans: Record<string, DownstreamUpdatePlan[]>;
@@ -182,7 +151,6 @@ export interface ProjectState {
     createProject: (name: string, promptText: string, platform?: ProjectPlatform) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
-    markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     // An 'assistant' message also clears the branch's pendingReply marker.
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
@@ -335,6 +303,14 @@ export interface ProjectState {
     // interrupted-generation error (see markInterruptedGenerations).
     markSpineGenerationStarted: (projectId: string, spineId: string) => void;
 
+    // Durable incomplete-PRD acknowledgement: records the user's explicit
+    // "Generate anyway" on the LATEST spine when it has failed sections, so
+    // the generation gate keeps allowing resume / Sync outputs / dependency-
+    // graph regeneration for that exact version. No-op for a complete,
+    // historical, unknown, or already-acknowledged spine. A later spine
+    // version never inherits it.
+    acknowledgeIncompleteSpine: (projectId: string, spineId: string) => void;
+
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;
 
@@ -373,8 +349,9 @@ export interface ProjectState {
         sourceRefs: SourceRef[],
         generationPrompt: string,
         parentVersionId?: string | null,
-        // Optional attribution override; defaults to ai_generation /
-        // ai_regeneration by version number.
+        // Optional attribution; changeSource defaults to ai_generation /
+        // ai_regeneration by version number when the caller passes none
+        // (e.g. the job controller passes only the input fingerprint).
         provenance?: VersionProvenance,
     ) => { versionId: string };
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => void;
@@ -538,35 +515,6 @@ export interface ProjectState {
         planningRecordId: string,
         proposal: AssumptionInterpretationProposal,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
-
-    // Durable readiness checkpoints. Reviews are immutable snapshots; user
-    // authority is recorded separately as append-only commitment events.
-    createReadinessReview: (projectId: string) => CreateReadinessReviewResult;
-    authorizeReadinessCommitment: (
-        projectId: string,
-        reviewId: string,
-        input: {
-            expectedIntegrityHash: string;
-            expectedAggregateHash: string;
-            acceptedConcernIds: string[];
-            rationale?: string;
-            containmentPlan?: string;
-            /** Required when the current checkpoint has explicit materiality
-             * blockers; omitted for legacy/no-blocker callers. */
-            acceptedBlockingRecordIds?: string[];
-            blockingSnapshotHash?: string;
-        },
-    ) => AuthorizeReadinessCommitmentResult;
-    commitReadinessReview: (
-        projectId: string,
-        reviewId: string,
-        authorizationEventId: string,
-    ) => CommitReadinessReviewResult;
-    reopenReadinessCommitment: (
-        projectId: string,
-        commitmentEventId: string,
-        reason?: string,
-    ) => ReopenReadinessCommitmentResult;
 
     // Immutable, version-bound downstream update plans. Generated snapshots
     // carry no user authority; review choices are separate append-only events.

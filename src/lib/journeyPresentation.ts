@@ -1,14 +1,18 @@
 import type { PipelineStage } from '../types';
 
-export type JourneyStepId =
-    | 'define'
-    | 'refine'
-    | 'finalize'
-    | 'generate'
-    | 'review'
-    | 'build';
-
-export type JourneyStepStatus = 'complete' | 'current' | 'available' | 'unavailable';
+/**
+ * The workspace journey, as presented: **Plan · Decide · Build**. A pure
+ * projection over the persisted stage keys (`prd`, `review`, `workspace`,
+ * legacy `history`) plus the Decision Center slide-over — the stage keys and
+ * routes are unchanged, only the presented steps collapsed. There is no
+ * Finalize, Generate, or Review step and no "unavailable" label: output
+ * generation is reached from the Plan page and the Build stage directly.
+ *
+ * History Mode (a historical, non-latest PRD version selected for viewing)
+ * is a read-only Plan view: Build stays inert there, because the Build stage
+ * would regenerate outputs from that old PRD and make them current.
+ */
+export type JourneyStepId = 'plan' | 'decide' | 'build';
 
 export type JourneyStepDefinition = {
     id: JourneyStepId;
@@ -17,8 +21,11 @@ export type JourneyStepDefinition = {
 };
 
 export type JourneyStepPresentation = JourneyStepDefinition & {
-    status: JourneyStepStatus;
+    current: boolean;
     enabled: boolean;
+    /** Decide only: records awaiting an answer (the Decision Center's
+     * Needs-attention count). Absent when there is nothing open. */
+    badge?: number;
 };
 
 export type JourneyPresentation = {
@@ -30,108 +37,70 @@ export type JourneyPresentationInput = {
     currentStage: PipelineStage;
     hasStructuredPlan: boolean;
     safetyBlocked?: boolean;
-    readinessOpen?: boolean;
-    exportOpen?: boolean;
-    generationActive?: boolean;
-    outputsAvailable?: boolean;
-    planFinalized?: boolean;
-    reviewComplete?: boolean;
-    explicitStep?: JourneyStepId;
-    canFinalize?: boolean;
-    canGenerate?: boolean;
-    canReview?: boolean;
-    canBuild?: boolean;
+    /** A historical (non-latest) PRD version is selected — History Mode. */
+    viewingHistoricalVersion?: boolean;
+    /** The Decision Center slide-over is open over the current surface. */
+    decisionCenterOpen?: boolean;
+    /** Open decisions + assumptions to confirm. */
+    openItemCount?: number;
 };
 
 const JOURNEY_STEPS: readonly JourneyStepDefinition[] = [
     {
-        id: 'define',
-        label: 'Define',
-        description: 'Describe the product and create a structured working plan.',
+        id: 'plan',
+        label: 'Plan',
+        description: 'Shape the working plan: edit the PRD, confirm features, and challenge its reasoning.',
     },
     {
-        id: 'refine',
-        label: 'Refine',
-        description: 'Edit the plan, answer key questions, and challenge its reasoning.',
-    },
-    {
-        id: 'finalize',
-        label: 'Finalize',
-        description: 'Review readiness and record the plan checkpoint.',
-    },
-    {
-        id: 'generate',
-        label: 'Generate',
-        description: 'Create downstream product and implementation outputs.',
-    },
-    {
-        id: 'review',
-        label: 'Review',
-        description: 'Inspect generated outputs and synchronize any changes.',
+        id: 'decide',
+        label: 'Decide',
+        description: 'Answer open decisions and confirm assumptions in the Decision Center.',
     },
     {
         id: 'build',
         label: 'Build',
-        description: 'Export the reviewed handoff and continue into implementation.',
+        description: 'Generate, review, and export the design and implementation outputs.',
     },
 ] as const;
 
-const isLegacyOutputStage = (stage: PipelineStage) =>
-    stage === 'mockups' || stage === 'artifacts';
-
-function deriveDefaultActiveStep(input: JourneyPresentationInput): JourneyStepId {
-    if (input.readinessOpen) return 'finalize';
-    if (input.exportOpen) return 'build';
-    if (!input.hasStructuredPlan || input.safetyBlocked) return 'define';
-
-    if (input.currentStage === 'workspace' || isLegacyOutputStage(input.currentStage)) {
-        if (input.generationActive || !input.outputsAvailable) return 'generate';
-        return 'review';
-    }
-
-    // Both persisted planning surfaces (`prd` and `review`) belong to the
-    // Refine presentation. A legacy persisted History stage also falls back
-    // here while the project-history panel is presented above the workspace.
-    return 'refine';
-}
+/** The persisted stage keys the Build step presents (`workspace`, plus the
+ * legacy `mockups` / `artifacts` keys). */
+export const isOutputPipelineStage = (stage: PipelineStage): boolean =>
+    stage === 'workspace' || stage === 'mockups' || stage === 'artifacts';
 
 export function deriveJourneyPresentation(
     input: JourneyPresentationInput,
 ): JourneyPresentation {
     const safePlan = input.hasStructuredPlan && !input.safetyBlocked;
     const enabled: Record<JourneyStepId, boolean> = {
-        define: true,
-        refine: safePlan,
-        finalize: safePlan && (input.canFinalize ?? true),
-        generate: safePlan && (input.canGenerate ?? true),
-        review: safePlan && Boolean(input.outputsAvailable) && (input.canReview ?? true),
-        build: input.hasStructuredPlan && (input.canBuild ?? true),
+        plan: true,
+        decide: safePlan,
+        // The Build stage renders only over a safe structured plan; without one
+        // the workspace falls back to the plan view, so the step stays inert.
+        // A historical spine never drives the Build stage (History Mode is a
+        // read-only Plan view), so Build is inert until the user returns to
+        // the latest version.
+        build: safePlan && !input.viewingHistoricalVersion,
     };
-    const defaultActive = deriveDefaultActiveStep(input);
-    const activeStep = input.explicitStep && enabled[input.explicitStep]
-        ? input.explicitStep
-        : defaultActive;
-    const completed = new Set<JourneyStepId>();
-    if (input.hasStructuredPlan) completed.add('define');
-    if (input.planFinalized) {
-        completed.add('refine');
-        completed.add('finalize');
-    }
-    if (input.outputsAvailable) completed.add('generate');
-    if (input.reviewComplete) completed.add('review');
+    // The Decision Center is a layer over the current surface, so it wins
+    // while open. Both planning surfaces (`prd` and the `review` Challenge
+    // stage) and a legacy persisted History stage present as Plan.
+    const activeStep: JourneyStepId = input.decisionCenterOpen && enabled.decide
+        ? 'decide'
+        : enabled.build && isOutputPipelineStage(input.currentStage)
+            ? 'build'
+            : 'plan';
+    const openItemCount = Math.max(0, input.openItemCount ?? 0);
 
     return {
         activeStep,
         steps: JOURNEY_STEPS.map(step => ({
             ...step,
+            current: step.id === activeStep,
             enabled: enabled[step.id],
-            status: step.id === activeStep
-                ? 'current'
-                : completed.has(step.id)
-                    ? 'complete'
-                    : enabled[step.id]
-                        ? 'available'
-                        : 'unavailable',
+            ...(step.id === 'decide' && enabled.decide && openItemCount > 0
+                ? { badge: openItemCount }
+                : {}),
         })),
     };
 }

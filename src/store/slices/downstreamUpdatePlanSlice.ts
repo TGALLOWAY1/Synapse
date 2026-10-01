@@ -151,6 +151,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             artifactVersions: state.artifactVersions[projectId] ?? [],
             spineVersions: state.spineVersions[projectId] ?? [],
             planningRecords: state.planningRecords[projectId] ?? [],
+            project: state.projects[projectId],
         });
         const existing = state.downstreamUpdatePlans[projectId] ?? [];
         const additions = plans.filter(plan => !existing.some(candidate => (
@@ -238,6 +239,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             artifactVersions: state.artifactVersions[projectId] || [],
             spineVersions: state.spineVersions[projectId] || [],
             job: state.jobs[projectId],
+            project: state.projects[projectId],
         });
         const context = currentContext(state, projectId);
         return reconcileProjectOutputAlignment(raw, projectDownstreamArtifactUpdateVerifications({

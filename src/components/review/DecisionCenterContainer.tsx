@@ -21,9 +21,9 @@ import { useDecisionOptionSuggestions } from './useDecisionOptionSuggestions';
 interface DecisionCenterContainerProps {
     projectId: string;
     initialRecordId?: string;
-    /** Jumps to the existing Explore/Build surface. Open decisions remain
+    /** Jumps to the existing Build surface. Open decisions remain
      * advisory and never disable this action. */
-    onContinueToExplore?: () => void;
+    onContinueToBuild?: () => void;
     /** Navigates to the asset region an advisory open item was scanned from. */
     onNavigateToAsset?: (destination: PlanningDestination) => void;
 }
@@ -45,7 +45,7 @@ const planningSlotForArtifact = (artifact: Artifact): ArtifactSlotKey | undefine
 export function DecisionCenterContainer({
     projectId,
     initialRecordId,
-    onContinueToExplore,
+    onContinueToBuild,
     onNavigateToAsset,
 }: DecisionCenterContainerProps) {
     const project = useProjectStore(state => state.projects[projectId]);
@@ -210,7 +210,7 @@ export function DecisionCenterContainer({
             onRecordAssumptionOutcome={handleRecordAssumptionOutcome}
             onRecordAssumptionTreatment={handleRecordAssumptionTreatment}
             onReopenAssumptionOutcome={handleReopenAssumptionOutcome}
-            onContinueToExplore={onContinueToExplore}
+            onContinueToBuild={onContinueToBuild}
             assetOpenItems={assetOpenItems}
             assetOpenItemsPromotedIds={promotedAssetItemIds}
             onOpenAssetItem={onNavigateToAsset ? handleOpenAssetItem : undefined}
