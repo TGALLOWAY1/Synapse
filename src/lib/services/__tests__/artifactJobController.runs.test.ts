@@ -23,6 +23,8 @@ import { artifactJobController, MAX_AUTO_RESUME_ATTEMPTS } from '../artifactJobC
 import { generateCoreArtifact } from '../coreArtifactService';
 import { useProjectStore } from '../../../store/projectStore';
 import { setActiveProjectUser } from '../../../store/userScope';
+import { getTabId, OUTPUT_RUN_HEARTBEAT_MS, OUTPUT_RUN_LEASE_MS } from '../../outputRunLease';
+import type { OutputRunMarker } from '../../../types';
 
 const genMock = vi.mocked(generateCoreArtifact);
 
@@ -249,5 +251,122 @@ describe('a superseded run cannot clobber the run that replaced it (N8)', () => 
         artifactJobController.cancelAll(projectId);
         await flush();
         expect(useProjectStore.getState().jobs[projectId]?.slots.data_model?.status).toBe('interrupted');
+    });
+});
+
+describe('output-run lease across tabs (a second tab must not duplicate a live run)', () => {
+    const STORAGE_KEY = 'synapse-projects-storage';
+    const runMarker = (spineVersionId: string, ownerTabId: string, heartbeatAt: number): OutputRunMarker => ({
+        spineVersionId,
+        runId: 'first-tab-run',
+        startedAt: heartbeatAt - 30_000,
+        phase: 'running',
+        ownerTabId,
+        heartbeatAt,
+    });
+
+    /** Persist the project as the owning tab last wrote it (marker included). */
+    function persistOwnerState(projectId: string, outputRun: OutputRunMarker): void {
+        const s = useProjectStore.getState();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            state: {
+                projects: { ...s.projects, [projectId]: { ...s.projects[projectId], outputRun } },
+                spineVersions: s.spineVersions,
+                historyEvents: s.historyEvents,
+                artifacts: s.artifacts,
+                artifactVersions: s.artifactVersions,
+            },
+            version: 0,
+        }));
+    }
+
+    /** This store plays a second tab that loads now: rehydrate from storage. */
+    async function loadAsThisTab(): Promise<void> {
+        await useProjectStore.persist.rehydrate();
+    }
+
+    const markerOf = (projectId: string) => useProjectStore.getState().projects[projectId]?.outputRun;
+
+    it('a second tab loading during a live run (fresh heartbeat) neither interrupts nor resumes it', async () => {
+        const { projectId, spineId } = seedCompleteProject();
+        persistOwnerState(projectId, runMarker(spineId, 'first-tab', Date.now()));
+
+        await loadAsThisTab();
+        expect(markerOf(projectId)?.phase).toBe('running');
+
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        artifactJobController.startAll(args(projectId, spineId)); // even an explicit start
+        artifactJobController.retrySlot('data_model', args(projectId, spineId));
+        await flush();
+
+        expect(genMock).not.toHaveBeenCalled();
+        expect(artifactJobController.isActive(projectId)).toBe(false);
+        expect(artifactJobController.isRunLiveElsewhere(projectId)).toBe(true);
+    });
+
+    it('a stale heartbeat (the owning tab died) is interrupted on load and resumed', async () => {
+        const { projectId, spineId } = seedCompleteProject();
+        persistOwnerState(projectId, runMarker(spineId, 'first-tab', Date.now() - OUTPUT_RUN_LEASE_MS - 1_000));
+
+        await loadAsThisTab();
+        expect(markerOf(projectId)?.phase).toBe('interrupted');
+
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(1);
+    });
+
+    it('the same tab\'s own reload is interrupted on load and resumed, however fresh the heartbeat', async () => {
+        const { projectId, spineId } = seedCompleteProject();
+        persistOwnerState(projectId, runMarker(spineId, getTabId(), Date.now()));
+
+        await loadAsThisTab();
+        expect(markerOf(projectId)?.phase).toBe('interrupted');
+
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        await settle(projectId);
+        expect(callsFor('data_model')).toBe(1);
+    });
+
+    it('a long-open tab checks what the owner last persisted before resuming', async () => {
+        const { projectId, spineId } = seedCompleteProject();
+        // This tab's memory holds the other tab's marker from an earlier merge
+        // — its heartbeat looks lapsed here, because heartbeats only reach this
+        // tab's memory when it adopts a merge…
+        useProjectStore.setState((s) => ({
+            projects: {
+                ...s.projects,
+                [projectId]: { ...s.projects[projectId], outputRun: runMarker(spineId, 'first-tab', Date.now() - 60_000) },
+            },
+        }));
+        // …while the owner keeps heartbeating into storage.
+        persistOwnerState(projectId, runMarker(spineId, 'first-tab', Date.now()));
+
+        artifactJobController.resumeIfNeeded(args(projectId, spineId));
+        await flush();
+
+        expect(genMock).not.toHaveBeenCalled();
+    });
+
+    it('the owning tab refreshes its heartbeat while the run is live and drops the lease when it settles', async () => {
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+            const { projectId, spineId } = seedCompleteProject();
+            genMock.mockImplementation(hangUntilAborted);
+
+            artifactJobController.startAll(args(projectId, spineId));
+            const stamped = markerOf(projectId);
+            expect(stamped).toMatchObject({ phase: 'running', ownerTabId: getTabId() });
+
+            vi.advanceTimersByTime(OUTPUT_RUN_HEARTBEAT_MS);
+            expect(markerOf(projectId)?.heartbeatAt).toBe((stamped?.heartbeatAt ?? 0) + OUTPUT_RUN_HEARTBEAT_MS);
+
+            artifactJobController.cancelAll(projectId);
+            await flush(6);
+            expect(markerOf(projectId)).toBeUndefined();
+            expect(vi.getTimerCount()).toBe(0); // the heartbeat interval is gone
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

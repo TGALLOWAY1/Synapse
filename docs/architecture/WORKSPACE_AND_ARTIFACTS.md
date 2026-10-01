@@ -149,20 +149,53 @@ Three rules keep runs from fighting each other or looping:
   that was started, never an entry side effect of opening Build. Evidence is
   (1) an output already completed for the spine, (2) this session's job for the
   spine still holding queued/generating/interrupted slots, or (3) the durable
-  `Project.outputRun` marker for the spine reading `'interrupted'`. `startAll`
-  stamps the marker `'running'` (`markOutputRunStarted`) when a run launches and
-  removes it when **that** run settles — completed, failed, or cancelled
-  (`settleOutputRun`, a no-op for any other run id). A page load converts a
-  leftover `'running'` marker to `'interrupted'` (`markInterruptedOutputRuns` in
-  `onRehydrateStorage`, mirroring `markInterruptedGenerations`), which is how a
+  `Project.outputRun` marker for the spine showing a run that died —
+  `'interrupted'`, or `'running'` but no longer alive anywhere (see the lease
+  below). `startAll` stamps the marker `'running'` (`markOutputRunStarted`) when
+  a run launches and removes it when **that** run settles — completed, failed,
+  or cancelled (`settleOutputRun`, a no-op for any other run id). This is how a
   reload **before the first output lands** resumes instead of leaving an idle
-  workspace. A `'running'` marker is not evidence: it may belong to a run that is
-  live in another tab or on another device (cross-tab adoption and sync pulls
-  never convert it). Known limit, shared with PRD `generationPhase` recovery: a
-  page load converts EVERY persisted `'running'` marker, including one written
-  by another tab or pulled from another device whose run is still live, so
-  that run can be resumed twice. Only `startAll` stamps the marker —
-  `regenerateSlots` batches and single-slot runs do not.
+  workspace. Only `startAll` stamps the marker — `regenerateSlots` batches and
+  single-slot runs do not.
+- **The marker is a lease (`src/lib/outputRunLease.ts`).** Every tab of the
+  same user shares one persisted store, and run ids are tab-local, so a second
+  tab cannot otherwise tell "the run died with its page" from "the run is alive
+  in the first tab" — and treating a live run as crashed generates (and pays
+  for) the same outputs twice. The marker records `ownerTabId` (a per-tab id in
+  sessionStorage, kept across that tab's own reload; a "Duplicate tab" copy
+  mints a new one) and `heartbeatAt`, which the owner refreshes every
+  `OUTPUT_RUN_HEARTBEAT_MS` (10 s) while the run is live (`heartbeatOutputRun`;
+  the interval stops when the run settles). A `'running'` marker owned by
+  another tab whose heartbeat is younger than `OUTPUT_RUN_LEASE_MS` (45 s) is
+  **live elsewhere**:
+  - on page load `markInterruptedOutputRuns` (in `onRehydrateStorage`) leaves it
+    `'running'` — it converts a marker to `'interrupted'` only when this same
+    tab owned it (its own reload killed the run) or the lease lapsed (the
+    owner closed or crashed);
+  - every generation entry point refuses while it holds — `resumeIfNeeded`,
+    `startAll`, `retrySlot`, `regenerateSlots`, `ensureDesignSystemForSpine`
+    (`isRunLiveElsewhere`). The check reads this tab's memory **and** what
+    other tabs last persisted (`readPersistedProjectSnapshot`), because this
+    tab never sees another tab's heartbeats until it adopts a cross-tab merge;
+    a refused call nudges that merge (`requestCrossTabCatchUp`);
+  - before resuming, `resumeIfNeeded` also refuses to act on a stale view: if
+    another tab advanced the project past this tab's memory (e.g. finished the
+    outputs this tab still thinks are missing), it catches up and decides on
+    the next evaluation;
+  - the Build view shows the run's in-progress state **read-only**
+    (`useOutputRunLiveElsewhere` → `readOnlyWhileRunElsewhere` capabilities and
+    a notice), re-checking every heartbeat interval until the run settles or
+    the lease lapses, then catching up with the other tab's writes.
+
+  The heartbeat is coordination, not content: it does **not** stamp
+  `Project.updatedAt` (that would make the owner's copy win every cross-tab
+  merge over real edits — the merge keeps the newest heartbeat explicitly) and
+  a heartbeat-only change is never pushed to the cloud. Known limits: Chrome's
+  intensive throttling (a tab hidden 5+ minutes wakes about once a minute) can
+  let a still-running owner's lease lapse, so another tab may resume that run;
+  without sessionStorage a tab's own reload counts as another tab (it resumes
+  once the lease lapses); across devices the lease is only as fresh as the
+  last synced heartbeat.
 - **Automatic-resume cap.** `resumeIfNeeded` runs on every Build mount, so a
   deterministically failing slot used to be re-run (and paid for) on every
   visit. Each automatic run counts toward its slots'

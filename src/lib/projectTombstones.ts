@@ -10,7 +10,9 @@
 //   project's latest activity (activity AFTER the delete wins — new work is
 //   never thrown away), and unions both tabs' tombstones;
 // - server sync never pulls or pushes a tombstoned id, and retries the remote
-//   delete on reconcile when the server still has the project live;
+//   delete on reconcile when the server still has the copy this device
+//   deleted — but a cloud copy changed AFTER the deletion wins and is pulled
+//   back (the store's reviveDeletedProject supersedes the tombstone);
 // - the legacy-import / merged-account namespace merges never re-add one.
 //
 // Tombstones are PER USER, not per project: they live in the persisted store

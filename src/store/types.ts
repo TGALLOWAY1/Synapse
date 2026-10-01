@@ -225,8 +225,16 @@ export interface ProjectState {
     // Durable output-run lifecycle marker (`Project.outputRun`): stamped when
     // a full artifact run launches, settled (removed) when that same run ends.
     // Only the run that stamped the marker can settle it.
-    markOutputRunStarted: (projectId: string, spineVersionId: string, runId: string) => void;
+    // `ownerTabId` + a first heartbeat make the marker a lease (outputRunLease.ts);
+    // the owner refreshes it with heartbeatOutputRun while the run is live.
+    markOutputRunStarted: (projectId: string, spineVersionId: string, runId: string, ownerTabId?: string) => void;
+    heartbeatOutputRun: (projectId: string, runId: string) => void;
     settleOutputRun: (projectId: string, runId: string) => void;
+    // Un-delete a project server sync pulled back because its cloud copy
+    // changed after this device's deletion (`deletedAt`): clears the tombstone
+    // and lifts the project's activity past the deletion if its content
+    // predates it, so the cross-tab merge keeps it in every tab.
+    reviveDeletedProject: (projectId: string, deletedAt: number) => void;
 
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home

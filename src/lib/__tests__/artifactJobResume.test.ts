@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { artifactJobController, MAX_AUTO_RESUME_ATTEMPTS } from '../services/artifactJobController';
+import { getTabId, OUTPUT_RUN_LEASE_MS } from '../outputRunLease';
 import { useProjectStore } from '../../store/projectStore';
 import { visibleCoreSubtypes } from '../coreArtifactPipeline';
 import type {
@@ -168,11 +169,16 @@ function seedNothingGenerated(outputRun?: OutputRunMarker): void {
     }));
 }
 
-const marker = (phase: OutputRunMarker['phase'], spineVersionId = spineId): OutputRunMarker => ({
+const marker = (
+    phase: OutputRunMarker['phase'],
+    spineVersionId = spineId,
+    lease: Pick<OutputRunMarker, 'ownerTabId' | 'heartbeatAt'> = {},
+): OutputRunMarker => ({
     spineVersionId,
     runId: 'run-before-reload',
     startedAt: 1,
     phase,
+    ...lease,
 });
 
 function seedJob(slots: Partial<Record<ArtifactSlotKey, SlotState>>, spineVersionId = spineId): void {
@@ -190,8 +196,45 @@ describe('artifactJobController.resumeIfNeeded — a run interrupted before its 
         expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
     });
 
-    it('does not resume on a still-running marker — that run may be live in another tab or device', () => {
-        seedNothingGenerated(marker('running'));
+    it('does not resume a run another tab is still heartbeating (its lease is fresh)', () => {
+        seedNothingGenerated(marker('running', spineId, { ownerTabId: 'other-tab', heartbeatAt: Date.now() }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).not.toHaveBeenCalled();
+    });
+
+    it('resumes a running marker whose lease lapsed — its owner stopped heartbeating', () => {
+        seedNothingGenerated(marker('running', spineId, {
+            ownerTabId: 'other-tab',
+            heartbeatAt: Date.now() - OUTPUT_RUN_LEASE_MS - 1,
+        }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('resumes this tab\'s own running marker when no run is active here', () => {
+        seedNothingGenerated(marker('running', spineId, { ownerTabId: getTabId(), heartbeatAt: Date.now() }));
+
+        artifactJobController.resumeIfNeeded(args);
+
+        expect(startAll).toHaveBeenCalledWith(args, { autoResume: true });
+    });
+
+    it('does not resume while another tab holds a live lease, even with other evidence', () => {
+        // Completed outputs for the spine are evidence on their own — but the
+        // run that produced them is still alive in another tab.
+        seedStore(['data_model']);
+        useProjectStore.setState((s) => ({
+            projects: {
+                [projectId]: {
+                    ...s.projects[projectId],
+                    outputRun: marker('running', spineId, { ownerTabId: 'other-tab', heartbeatAt: Date.now() }),
+                },
+            },
+        }));
 
         artifactJobController.resumeIfNeeded(args);
 

@@ -261,3 +261,36 @@ describe('mergePersistedProjectBlobs — delete tombstones', () => {
         expect(merged['projectTombstones']).toEqual({ a: now - 1000, b: now - 500 });
     });
 });
+
+describe('mergePersistedProjectBlobs — output-run lease', () => {
+    const lease = (heartbeatAt: number, runId = 'r1') => ({
+        spineVersionId: 's1', runId, startedAt: 1_000, phase: 'running', ownerTabId: 'owner-tab', heartbeatAt,
+    });
+
+    // Heartbeats don't count as activity, so the side that wins a project can
+    // hold an OLDER heartbeat than the other — the newest must survive, or a
+    // run that is alive in the owner tab would look lapsed and get resumed.
+    it('keeps the newest heartbeat for the same run, whichever side wins the project', () => {
+        const stored = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(90_000) } },
+        });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(60_000) } },
+            historyEvents: { p1: [{ id: 'h-newer', createdAt: 5_000 }] }, // ours wins the project
+        });
+
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        expect(merged['historyEvents']['p1']).toEqual([{ id: 'h-newer', createdAt: 5_000 }]);
+        expect((merged['projects']['p1'] as { outputRun: { heartbeatAt: number } }).outputRun.heartbeatAt).toBe(90_000);
+    });
+
+    it('never transplants a marker from a different run', () => {
+        const stored = blob({ projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(90_000, 'other-run') } } });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100, outputRun: lease(60_000) } },
+            historyEvents: { p1: [{ id: 'h', createdAt: 5_000 }] },
+        });
+
+        expect(mergePersistedProjectBlobs(stored, ours)).toBe(ours);
+    });
+});

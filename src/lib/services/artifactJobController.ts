@@ -8,7 +8,9 @@ import type {
     StructuredPRD,
 } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
-import { useProjectStore } from '../../store/projectStore';
+import { useProjectStore, readPersistedProjectSnapshot, requestCrossTabCatchUp } from '../../store/projectStore';
+import { latestProjectActivity } from '../crossTabMerge';
+import { getTabId, isOutputRunLiveElsewhere, OUTPUT_RUN_HEARTBEAT_MS } from '../outputRunLease';
 import { generateCoreArtifact, selectArtifactModel, ARTIFACT_TRUNCATED_BLOCKER } from './coreArtifactService';
 import type { GeminiTokenUsage } from '../geminiClient';
 import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
@@ -195,10 +197,12 @@ export function hasAnyCompletedSlotForSpine(projectId: string, spineVersionId: s
  * - an output already completed for the spine (the original signal);
  * - this session's job for the spine still holds queued / generating /
  *   interrupted slots (`resumeIfNeeded` only runs when no run is live);
- * - the project's durable `outputRun` marker for the spine reads
- *   'interrupted' — a page load killed a run before its FIRST output landed
- *   (see markInterruptedOutputRuns). A 'running' marker is NOT evidence: that
- *   run may still be live in another tab or on another device.
+ * - the project's durable `outputRun` marker for the spine shows a run that
+ *   died: 'interrupted' (a page load killed it before its FIRST output
+ *   landed — see markInterruptedOutputRuns), or 'running' but no longer
+ *   alive anywhere — owned by this tab (whose own run isn't active) or with a
+ *   lapsed lease. A 'running' marker another tab is still heartbeating is NOT
+ *   evidence: that run is alive there (src/lib/outputRunLease.ts).
  */
 export function hasResumeEvidence(projectId: string, spineVersionId: string): boolean {
     if (hasAnyCompletedSlotForSpine(projectId, spineVersionId)) return true;
@@ -211,7 +215,35 @@ export function hasResumeEvidence(projectId: string, spineVersionId: string): bo
         if (inProgress) return true;
     }
     const marker = store.getProject(projectId)?.outputRun;
-    return marker?.spineVersionId === spineVersionId && marker.phase === 'interrupted';
+    if (marker?.spineVersionId !== spineVersionId) return false;
+    return marker.phase === 'interrupted' || !isOutputRunLiveElsewhere(marker, Date.now(), getTabId());
+}
+
+/**
+ * Whether another tab holds a live lease on an output run for this project:
+ * then this tab must not resume, start, retry, or regenerate outputs over it
+ * — run ids are tab-local, so nothing else stops a duplicate (and doubly
+ * paid) generation. Consults this tab's memory AND what other tabs last
+ * persisted: this tab's store never sees another tab's heartbeats until it
+ * adopts a cross-tab merge. Reads the persisted blob — decision points only.
+ */
+function outputRunLiveElsewhere(projectId: string): boolean {
+    const now = Date.now();
+    const tabId = getTabId();
+    if (isOutputRunLiveElsewhere(useProjectStore.getState().projects[projectId]?.outputRun, now, tabId)) return true;
+    return isOutputRunLiveElsewhere(readPersistedProjectSnapshot(projectId)?.outputRun, now, tabId);
+}
+
+/**
+ * Gate for a generation entry point: refuse while another tab's run is live,
+ * and pull that tab's latest writes into this one so its Build view shows
+ * the run (read-only) instead of a stale idle state.
+ */
+function blockedByRunElsewhere(projectId: string): boolean {
+    if (!outputRunLiveElsewhere(projectId)) return false;
+    console.info('[artifactJobController] an output run for this project is live in another tab — not generating here');
+    requestCrossTabCatchUp();
+    return true;
 }
 
 // Cap automatic resumes per slot. `resumeIfNeeded` runs on every Build mount,
@@ -233,9 +265,17 @@ function autoResumeAttemptsFor(projectId: string, spineVersionId: string, slot: 
 // (or throw out of) a run's launch or settle path.
 function stampOutputRunStarted(projectId: string, spineVersionId: string, runId: string): void {
     try {
-        useProjectStore.getState().markOutputRunStarted(projectId, spineVersionId, runId);
+        useProjectStore.getState().markOutputRunStarted(projectId, spineVersionId, runId, getTabId());
     } catch (e) {
         console.warn('[artifactJobController] could not record the output-run marker', e);
+    }
+}
+
+function beatOutputRun(projectId: string, runId: string): void {
+    try {
+        useProjectStore.getState().heartbeatOutputRun(projectId, runId);
+    } catch (e) {
+        console.warn('[artifactJobController] could not refresh the output-run lease', e);
     }
 }
 
@@ -848,6 +888,16 @@ export const artifactJobController = {
     },
 
     /**
+     * Whether another tab holds a live lease on an output run for this
+     * project (src/lib/outputRunLease.ts) — every generation entry point below
+     * refuses while it does. Reads what other tabs persisted, so keep it off
+     * hot render paths.
+     */
+    isRunLiveElsewhere(projectId: string): boolean {
+        return outputRunLiveElsewhere(projectId);
+    },
+
+    /**
      * Background early-generation of the design_system artifact. Fired from a
      * React effect as soon as a design-system preset is chosen AND the PRD has
      * settled successfully, so the later finalize `startAll` finds it already
@@ -886,6 +936,11 @@ export const artifactJobController = {
         // Silent gate: never interleave with an active run (idempotent).
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted) return;
+
+        // Silent gate: another tab's output run is live (its lease is fresh) —
+        // that run generates the design system too. Checked last: it reads the
+        // persisted blob.
+        if (outputRunLiveElsewhere(args.projectId)) return;
         if (existing) runs.delete(args.projectId);
 
         // design_system has no dependencies (dependsOn: []) — no closure to plan.
@@ -940,6 +995,10 @@ export const artifactJobController = {
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
+        // Another tab's run is live: starting here would duplicate (and pay
+        // for) the same outputs. resumeIfNeeded already made this check
+        // against fresh state before calling with autoResume.
+        if (!opts.autoResume && blockedByRunElsewhere(args.projectId)) return;
 
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted && existing.spineVersionId === args.spineVersionId) {
@@ -990,9 +1049,13 @@ export const artifactJobController = {
             }
         }
         stampOutputRunStarted(args.projectId, args.spineVersionId, runId);
+        // Hold the lease while the run is live: other tabs see a fresh
+        // heartbeat and leave this run alone (outputRunLease.ts).
+        const heartbeat = setInterval(() => beatOutputRun(args.projectId, runId), OUTPUT_RUN_HEARTBEAT_MS);
 
         const controller = new AbortController();
         const promise = executeJob(args, controller, runSlots, runId).finally(() => {
+            clearInterval(heartbeat);
             // Settled (completed, failed, or cancelled) — not interrupted by a
             // page load, so drop the marker. A no-op if a newer run re-stamped it.
             settleOutputRunMarker(args.projectId, runId);
@@ -1018,6 +1081,7 @@ export const artifactJobController = {
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
+        if (blockedByRunElsewhere(args.projectId)) return;
 
         const visible = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
         if (visible.length === 0) return;
@@ -1064,6 +1128,7 @@ export const artifactJobController = {
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
         assertArtifactGenerationAllowed(args.projectId);
+        if (blockedByRunElsewhere(args.projectId)) return;
         const failureKey = retryFailureKey(args.projectId, slot);
         if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {
             useProjectStore.getState().setSlotStatus(args.projectId, slot, {
@@ -1166,7 +1231,10 @@ export const artifactJobController = {
      * (hasResumeEvidence — including a run interrupted by a reload before its
      * first output landed), and when every pending slot has used up its
      * automatic budget (MAX_AUTO_RESUME_ATTEMPTS) — those stay failed for the
-     * manual Retry.
+     * manual Retry. Before spending, it decides against what other tabs
+     * persisted: never while another tab's run holds a live lease, and never
+     * from a stale view (another tab advanced the project past this tab's
+     * memory) — it catches up first and decides on the next mount.
      */
     resumeIfNeeded(args: StartArgs): void {
         assertArtifactGenerationAllowed(args.projectId);
@@ -1183,6 +1251,28 @@ export const artifactJobController = {
             k => autoResumeAttemptsFor(args.projectId, args.spineVersionId, k) < MAX_AUTO_RESUME_ATTEMPTS,
         );
         if (eligible.length === 0) return;
+
+        const now = Date.now();
+        const tabId = getTabId();
+        const memoryMarker = useProjectStore.getState().projects[args.projectId]?.outputRun;
+        const persisted = readPersistedProjectSnapshot(args.projectId);
+        // The run is alive in another tab (fresh lease): never resume it here.
+        if (isOutputRunLiveElsewhere(memoryMarker, now, tabId)
+            || isOutputRunLiveElsewhere(persisted?.outputRun, now, tabId)) {
+            requestCrossTabCatchUp();
+            return;
+        }
+        // Another tab moved this project past what this tab has in memory (e.g.
+        // it finished outputs this tab still thinks are missing): resuming now
+        // would regenerate them. Catch up; the next evaluation sees fresh state.
+        const memoryActivity = latestProjectActivity(
+            useProjectStore.getState() as unknown as Record<string, unknown>,
+            args.projectId,
+        );
+        if (persisted && persisted.activity > memoryActivity) {
+            requestCrossTabCatchUp();
+            return;
+        }
         this.startAll(args, { autoResume: true });
     },
 };

@@ -378,6 +378,12 @@ the real reload, which those tests simulate.
 - [ ] With a second tab open, delete a project in one tab, then make any change
       in the other: the deleted project does not come back in either tab (or,
       signed in, on another device).
+- [ ] Start output generation in Build, then open the same project's Build view
+      in a second tab: it shows the run in progress **read-only** (with the
+      "being generated in another tab" notice) and starts no second run.
+      Reloading the first tab resumes its own run; closing it mid-run hands the
+      unfinished outputs to the second tab once the lease lapses (under a
+      minute).
 - [ ] Signed in with sync available, confirm the project appears on another
       device.
 
