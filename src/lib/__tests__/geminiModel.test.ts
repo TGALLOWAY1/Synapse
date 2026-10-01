@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DEFAULT_GEMINI_MODEL } from '../geminiClient';
 import { migrateGeminiFlashModel } from '../modelMigration';
+import { CURRENT_MODELS, LEGACY_MODELS } from '../modelCatalog';
 import { normalizeError, userMessage } from '../errors';
 
-const LATEST_FLASH = 'gemini-3.7-flash';
-const FLASH_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_08';
+const LATEST_FLASH = 'gemini-3.8-flash';
+const LATEST_FLASH_LITE = 'gemini-3.1-flash-lite';
+const FLASH_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_10';
 
 describe('Gemini Flash model default', () => {
     it('defaults to the latest GA Flash model', () => {
@@ -13,6 +15,7 @@ describe('Gemini Flash model default', () => {
 
     it('is a GA model id (no preview suffix) and not an older Flash id', () => {
         expect(DEFAULT_GEMINI_MODEL).not.toMatch(/preview/i);
+        expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3.7-flash');
         expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3.6-flash');
         expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3.5-flash');
         expect(DEFAULT_GEMINI_MODEL).not.toBe('gemini-3-flash-preview');
@@ -25,49 +28,63 @@ describe('migrateGeminiFlashModel', () => {
         localStorage.clear();
     });
 
-    it('moves a 3.6 Flash primary selection to 3.7 Flash', () => {
+    it('moves a 3.7 Flash primary selection to 3.8 Flash', () => {
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.7-flash');
+        migrateGeminiFlashModel();
+        expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
+    });
+
+    it('moves a 3.6 Flash primary selection to 3.8 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3.6-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('moves a 3.5 Flash primary selection to 3.7 Flash', () => {
+    it('moves a 3.5 Flash primary selection to 3.8 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3.5-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('moves an older preview Flash primary selection to 3.7 Flash', () => {
+    it('moves an older preview Flash primary selection to 3.8 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3-flash-preview');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('moves a legacy 2.5 Flash selection to 3.7 Flash', () => {
+    it('moves a legacy 2.5 Flash selection to 3.8 Flash', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-2.5-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
 
     it('migrates the fast-tier selection too', () => {
-        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3-flash-preview');
+        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3.7-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('leaves Pro and Flash-Lite selections untouched', () => {
+    it('leaves Pro and GA Flash-Lite selections untouched', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3.1-pro-preview');
-        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite-preview');
+        localStorage.setItem('GEMINI_FAST_MODEL', LATEST_FLASH_LITE);
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe('gemini-3.1-pro-preview');
-        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe('gemini-3.1-flash-lite-preview');
+        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH_LITE);
+    });
+
+    it('moves a Flash-Lite preview selection to GA Flash-Lite, never up to Flash', () => {
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview');
+        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite-preview');
+        migrateGeminiFlashModel();
+        expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH_LITE);
+        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH_LITE);
     });
 
     it('runs even when the previous migration wave already ran', () => {
-        // A user who was migrated to 3.6 Flash in the 2026_07 wave still gets
-        // moved forward by the 2026_08 wave — the sentinel key is per-wave.
-        localStorage.setItem('GEMINI_MODEL_MIGRATED_2026_07', '1');
-        localStorage.setItem('GEMINI_MODEL', 'gemini-3.6-flash');
+        // A user who was migrated to 3.7 Flash in the 2026_08 wave still gets
+        // moved forward by the 2026_10 wave — the sentinel key is per-wave.
+        localStorage.setItem('GEMINI_MODEL_MIGRATED_2026_08', '1');
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.7-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH);
     });
@@ -78,15 +95,25 @@ describe('migrateGeminiFlashModel', () => {
         expect(localStorage.getItem(FLASH_MIGRATION_KEY)).toBe('1');
 
         // User deliberately re-picks an older model afterward.
-        localStorage.setItem('GEMINI_MODEL', 'gemini-3.6-flash');
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.7-flash');
         migrateGeminiFlashModel();
-        expect(localStorage.getItem('GEMINI_MODEL')).toBe('gemini-3.6-flash');
+        expect(localStorage.getItem('GEMINI_MODEL')).toBe('gemini-3.7-flash');
+    });
+});
+
+describe('model catalog', () => {
+    it('lists the default and GA Flash-Lite as current, the Flash-Lite preview as legacy', () => {
+        const current = CURRENT_MODELS.map((m) => m.id);
+        expect(current).toContain(DEFAULT_GEMINI_MODEL);
+        expect(current).toContain(LATEST_FLASH_LITE);
+        expect(current).not.toContain('gemini-3.1-flash-lite-preview');
+        expect(LEGACY_MODELS.map((m) => m.id)).toContain('gemini-3.1-flash-lite-preview');
     });
 });
 
 describe('model access guard message', () => {
     it('surfaces a clear access-guard message for model-not-found errors', () => {
-        const err = normalizeError(new Error('Gemini API Error: 404 - Publisher model `gemini-3.7-flash` not found'));
+        const err = normalizeError(new Error('Gemini API Error: 404 - Publisher model `gemini-3.8-flash` not found'));
         expect(err.category).toBe('model_not_found');
         const msg = userMessage(err);
         expect(msg).toMatch(/could not access the selected model/i);

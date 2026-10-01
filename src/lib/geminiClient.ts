@@ -103,13 +103,13 @@ const getApiKey = () => {
 };
 
 /**
- * Default model. Gemini 3.7 Flash (GA, released August 2026) is the recommended
- * everyday Flash model — it replaced Gemini 3.6 Flash, shipping as GA with
- * full (non-preview) quotas and stronger coding/agentic performance. See
- * SettingsModal for the full catalog and `modelMigration.ts` for the one-shot
- * upgrade of older Flash selections.
+ * Default model. Gemini 3.8 Flash (GA, released September 2026) is the
+ * recommended everyday Flash model — it replaced Gemini 3.7 Flash, shipping as
+ * GA with full (non-preview) quotas and stronger long-horizon coding/agentic
+ * performance. See SettingsModal for the full catalog and `modelMigration.ts`
+ * for the one-shot upgrade of older Flash selections.
  */
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
 /**
  * Per-tier defaults. These MUST match the tier defaults advertised in the
@@ -272,8 +272,8 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
             'Gemini quota error — your request hit the FREE-TIER quota even though you expect paid tier. ' +
             'Likely causes: (1) your API key is tied to a Google Cloud project without billing enabled — ' +
             'recreate the key in AI Studio on the project that has billing; (2) set your billing project ID ' +
-            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Flash-Lite Preview) ' +
-            'have reduced quotas even on paid tier — switch to a GA model like gemini-3.7-flash. ' +
+            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Pro Preview) ' +
+            'have reduced quotas even on paid tier — switch to a GA model like gemini-3.8-flash. ' +
             `Raw: ${message}`
         );
     }
