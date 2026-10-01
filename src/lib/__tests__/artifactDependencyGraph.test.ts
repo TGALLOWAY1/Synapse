@@ -19,7 +19,7 @@ import {
     RETIRED_ARTIFACT_SUBTYPES,
 } from '../coreArtifactPipeline';
 import { summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
-import { ARTIFACT_INPUT_SLICES, inputHashSchemeFor } from '../artifactInputSlices';
+import { ARTIFACT_INPUT_SLICES, dependencyContentHash, inputHashSchemeFor } from '../artifactInputSlices';
 import type { ArtifactInputHashes, ArtifactSlotKey, CoreArtifactSubtype, SourceRef, StructuredPRD } from '../../types';
 
 const graph = buildArtifactDependencyGraph();
@@ -704,6 +704,73 @@ describe('evaluateDependencyGraph — fingerprinted versions', () => {
         for (const dependent of ['user_flows', 'component_inventory', 'implementation_plan', 'mockup'] as const) {
             expect(statusOf(evals, dependent), dependent).toBe('up_to_date');
         }
+    });
+
+    it('a dependency consumed as ABSENT flags its consumer once it is usable context', () => {
+        // The plan was saved without its optional user flows (they had failed):
+        // its fingerprint records no user_flows entry. The flows exist now,
+        // current for the PRD and trusted.
+        const input = fingerprintedInput();
+        delete input.snapshots.implementation_plan!.version.provenance!.inputHashes!.dependencies!.user_flows;
+        const plan = evaluateDependencyGraph(graph, input).get('implementation_plan')!;
+        expect(plan.status).toBe('needs_update');
+        expect(plan.reasons).toEqual([expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'user_flows' })]);
+        expect(plan.reasons[0].detail).toBe('User Flows was not available when this was generated — it is now (Version 1).');
+
+        // Same for a mockup degraded without its component inventory.
+        const degradedMockup = fingerprintedInput();
+        delete degradedMockup.snapshots.mockup!.version.provenance!.inputHashes!.dependencies!.component_inventory;
+        const mockup = evaluateDependencyGraph(graph, degradedMockup).get('mockup')!;
+        expect(mockup.status).toBe('needs_update');
+        expect(mockup.reasons).toEqual([
+            expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'component_inventory' }),
+        ]);
+    });
+
+    it('a dependency consumed as absent that generation still could not read is not drift', () => {
+        const withoutFlows = (input: DependencyEvaluationInput): DependencyEvaluationInput => {
+            delete input.snapshots.implementation_plan!.version.provenance!.inputHashes!.dependencies!.user_flows;
+            return input;
+        };
+
+        // Still missing: nothing concrete to compare — the gap shows only
+        // through impactedBy (as for a legacy plan).
+        const missing = withoutFlows(fingerprintedInput());
+        delete missing.snapshots.user_flows;
+        expect(evaluateDependencyGraph(graph, missing).get('implementation_plan'))
+            .toMatchObject({ status: 'up_to_date', reasons: [], impactedBy: ['user_flows'] });
+
+        // Held by an unresolved blocking validation: never generation context.
+        const blocked = withoutFlows(fingerprintedInput());
+        blocked.snapshots.user_flows!.version.metadata = {
+            validationBlockers: [{ code: 'output_structure_incomplete', message: 'No flows were produced.' }],
+        };
+        expect(evaluateDependencyGraph(graph, blocked).get('implementation_plan'))
+            .toMatchObject({ status: 'up_to_date', reasons: [], impactedBy: ['user_flows'] });
+
+        // Generated from PRD inputs that no longer match: not context for the
+        // current PRD either (the flows themselves are flagged).
+        const staleFlows = withoutFlows(fingerprintedInput({ prd: { user_flows: 'prd-2' } }));
+        const staleEvals = evaluateDependencyGraph(graph, staleFlows);
+        expect(staleEvals.get('user_flows')?.status).toBe('needs_update');
+        expect(staleEvals.get('implementation_plan'))
+            .toMatchObject({ status: 'up_to_date', reasons: [], impactedBy: ['user_flows'] });
+
+        // Blank content is never an input (generation treats it as missing).
+        const blankFlows = withoutFlows(fingerprintedInput());
+        blankFlows.snapshots.user_flows!.version.contentHash = dependencyContentHash(' \n');
+        expect(evaluateDependencyGraph(graph, blankFlows).get('implementation_plan')?.reasons).toEqual([]);
+
+        // A legacy (unfingerprinted) dependency counts as context only for the
+        // exact spine it references.
+        const legacyFlows = withoutFlows(fingerprintedInput());
+        legacyFlows.snapshots.user_flows!.version.provenance = undefined;
+        expect(evaluateDependencyGraph(graph, legacyFlows).get('implementation_plan')?.reasons).toEqual([]);
+        legacyFlows.snapshots.user_flows!.version.sourceRefs = [
+            spineRef(SPINE_V2), artifactRef('art-screen_inventory', 'ver-screen_inventory-1'),
+        ];
+        expect(evaluateDependencyGraph(graph, legacyFlows).get('implementation_plan')?.reasons)
+            .toEqual([expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'user_flows' })]);
     });
 
     it('legacy versions without a fingerprint keep the version-id comparison', () => {

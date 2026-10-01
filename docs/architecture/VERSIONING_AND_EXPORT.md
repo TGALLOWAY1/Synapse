@@ -209,8 +209,10 @@ every `core_artifact` ref → that dependency's current preferred version
 (refreshing a recorded design tokensHash `anchorInfo`) — and whose input
 fingerprint is **rebased with them** (`rebasedInputHashes`: the confirmed
 spine's PRD-side fingerprint + the current content fingerprint of every
-rebased dependency), so later edits are judged against what the user
-confirmed. When the confirmed spine cannot be fingerprinted faithfully the
+declared dependency that exists now — including one the source was generated
+without, which clears its "was not available" flag), so later edits are
+judged against what the user confirmed. When the confirmed spine cannot be
+fingerprinted faithfully the
 clone carries none and its rebased refs decide. Rebasing only the spine ref
 would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph

@@ -169,9 +169,15 @@ Three rules keep runs from fighting each other or looping:
   apply the engine's PRD-side comparison: an output with a comparable input
   fingerprint is current for a spine whose inputs still match, whichever spine
   version it was generated against; a legacy output only for the exact spine it
-  references. So `startAll` skips fingerprint-current outputs (one whose input
-  regenerates in the same run rides along — never more than the spine-ref rule
-  scheduled), and `executeJob` / `retrySlot` seed fingerprint-current upstreams
+  references. So `startAll` skips outputs current for the spine — except that
+  every output consuming a slot the run regenerates follows it
+  (`expandWithInputConsumers`, dependency order), including one generated for
+  this very spine without an optional input that was unavailable then (a plan
+  without its user flows, a mockup without an inventory, rebuilt on resume
+  once the input regenerates). A follower runs only once one of its inputs
+  produced new, trusted content in that run; otherwise it is left as it is
+  (done), and auto-resume-capped slots never follow. `executeJob` /
+  `retrySlot` seed fingerprint-current upstreams
   as dependency context (`seedGenerationContext`) — without that, regenerating
   one dependent alone would miss its required inputs. The verdict is PRD-side
   only: a changed design preset is the engine's `design_direction_changed`
@@ -242,7 +248,9 @@ Three rules keep runs from fighting each other or looping:
 
 Covered by `src/lib/services/__tests__/artifactJobController.runs.test.ts`,
 `src/lib/services/__tests__/artifactJobController.inputHashes.test.ts`
-(fingerprint stamping, fingerprint-current context, the pending set),
+(fingerprint stamping, fingerprint-current context, the pending set, and the
+consumers re-queued behind a regenerated input — `expandWithInputConsumers`,
+unit-tested in `src/lib/__tests__/coreArtifactPipeline.test.ts`),
 `src/store/__tests__/generationJobsSlice.test.ts`,
 `src/lib/__tests__/artifactJobResume.test.ts`, and
 `src/store/__tests__/interruptedGeneration.test.ts`.
@@ -544,7 +552,8 @@ stale and why, and the safe update order. See
   stamps `provenance.inputHashes` — fingerprints of exactly what the generator
   read: its slot's slice of the PRD (`spine`), the design direction
   (`designBrief`), and the content of each upstream it consumed
-  (`dependencies`), under a versioned `scheme`. `ARTIFACT_INPUT_SLICES` is the
+  (`dependencies` — a declared upstream absent from it was unavailable then),
+  under a versioned `scheme`. `ARTIFACT_INPUT_SLICES` is the
   per-slot declaration of what each generator reads; the job controller builds
   every core prompt from the same projection it fingerprints
   (`selectCorePromptInput` → `buildCorePromptCall`), and drift tests pin that a
@@ -574,7 +583,10 @@ stale and why, and the safe update order. See
   fingerprint → `prd_changed`; a moved design brief (design system only) →
   `design_direction_changed`; a consumed upstream whose content fingerprint
   moved → `dependency_changed` (a content-identical clone — overlay edit,
-  mark-current, restore — is not drift). So a PRD restore to identical
+  mark-current, restore — is not drift); a declared upstream the version was
+  generated WITHOUT that is now usable generation context (current for the
+  spine, not `needs_review`) → `dependency_changed` ("was not available when
+  this was generated"). So a PRD restore to identical
   content, a no-op save, or an edit outside what an output reads leaves it
   current. Versions without a comparable fingerprint (legacy, another scheme,
   or current inputs the seam cannot fingerprint — no structured PRD, unknown

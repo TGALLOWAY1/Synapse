@@ -38,6 +38,7 @@ import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
     expandWithHiddenDependencyClosure,
+    expandWithInputConsumers,
     isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
@@ -780,6 +781,12 @@ async function executeJob(
     controller: AbortController,
     slotKeys: ArtifactSlotKey[],
     runId: string,
+    // Slots in the run only because one of their inputs regenerates in it
+    // (expandWithInputConsumers). Each runs only once an input has produced
+    // new, trusted content in THIS run; otherwise it is still current and is
+    // left as it is — so a failing optional input never costs a paid rebuild
+    // of its consumers that would reproduce the same degraded output.
+    followers: ReadonlySet<ArtifactSlotKey> = new Set(),
 ): Promise<void> {
     const signal = controller.signal;
     const { projectId } = args;
@@ -792,6 +799,22 @@ async function executeJob(
     // may consume them as dependency context. (Needs-review versions are never
     // usable: an untrustworthy artifact must not seed a later layer.)
     const generatedArtifacts = seedGenerationContext(projectId, args.spineVersionId, coreSubtypes);
+
+    // Core slots that produced new, trusted content in this run (their entry
+    // in the dependency context is set only then — a needs_review result never
+    // enters it). A follower runs only if one of its inputs is in here.
+    const fresh = new Set<ArtifactSlotKey>();
+    const followerHasFreshInput = (slot: ArtifactSlotKey): boolean =>
+        (slot === 'mockup' ? MOCKUP_DEPENDENCIES : getArtifactMeta(slot).dependsOn).some(dep => fresh.has(dep));
+    const skipFollower = (slot: ArtifactSlotKey): void => {
+        // Still current: report it done, and keep its existing content
+        // available to later layers (it was excluded from the seed above).
+        if (slot !== 'mockup') {
+            const content = readPreferredArtifactForSpine(projectId, slot, args.spineVersionId);
+            if (content !== null) generatedArtifacts[slot] = content;
+        }
+        useProjectStore.getState().setSlotStatus(projectId, slot, { status: 'done', finishedAt: Date.now() }, runId);
+    };
 
     // Per-slot observations for the orchestration WorkflowRun (artifact bundle).
     // Captures wall-clock start/end + dependency edges so the Metrics dashboard
@@ -810,10 +833,15 @@ async function executeJob(
             const tasks = layer
                 .filter(meta => coreSubtypes.has(meta.subtype))
                 .map(meta => async () => {
+                    if (followers.has(meta.subtype) && !followerHasFreshInput(meta.subtype)) {
+                        skipFollower(meta.subtype);
+                        return;
+                    }
                     const startedAt = Date.now();
                     let usage: GeminiTokenUsage | undefined;
                     try {
                         await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId, (u) => { usage = u; }, runId);
+                        if (generatedArtifacts[meta.subtype] !== undefined) fresh.add(meta.subtype);
                         nodeObs.push({
                             nodeId: meta.subtype,
                             nodeName: meta.title,
@@ -863,6 +891,10 @@ async function executeJob(
             try {
                 await corePromise;
                 if (signal.aborted) return;
+                if (followers.has('mockup') && !followerHasFreshInput('mockup')) {
+                    skipFollower('mockup');
+                    return;
+                }
                 const startedAt = Date.now();
                 await runMockupSlot(args, signal, runId);
                 nodeObs.push({
@@ -922,41 +954,19 @@ async function executeJob(
     }
 }
 
+// The slots whose preferred output is NOT current for the spine: missing, or
+// generated from inputs that no longer match it (artifactInputSlices.ts; a
+// legacy output, any other spine). A slot still current for the spine stays
+// out — the point of input fingerprints — unless one of its inputs is
+// regenerated in the same run (startAll re-queues those consumers; see
+// expandWithInputConsumers).
 function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
     // Retired subtypes (e.g. prompt_pack, folded into the consolidated
     // implementation_plan) never generate in new runs — they're excluded
     // here so startAll/resume/regenerate can't schedule them.
-    const schedulable = ALL_SLOT_KEYS.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
-    const pending = new Set<ArtifactSlotKey>();
-    // Outputs generated against an OLDER spine that are still current for
-    // this one by input fingerprint (artifactInputSlices.ts). They stay out of
-    // the run — the point of fingerprints — unless one of their inputs is
-    // being regenerated in it: then they follow, as they always did, instead
-    // of being left built on superseded content. Outputs generated for this
-    // very spine never ride along (unchanged), so the pending set is never
-    // larger than the spine-ref rule's.
-    const currentByFingerprint = new Set<ArtifactSlotKey>();
-    for (const slot of schedulable) {
-        const preferred = preferredVersionForSlot(args.projectId, slot);
-        if (!preferred || !isVersionCurrentForSpine(args.projectId, slot, preferred, args.spineVersionId)) {
-            pending.add(slot);
-        } else if (!hasSpineRef(preferred, args.spineVersionId)) {
-            currentByFingerprint.add(slot);
-        }
-    }
-    let grew = true;
-    while (grew) {
-        grew = false;
-        for (const slot of currentByFingerprint) {
-            if (pending.has(slot)) continue;
-            const inputs = slot === 'mockup' ? MOCKUP_DEPENDENCIES : getArtifactMeta(slot).dependsOn;
-            if (inputs.some(dep => pending.has(dep))) {
-                pending.add(slot);
-                grew = true;
-            }
-        }
-    }
-    return schedulable.filter(k => pending.has(k));
+    return ALL_SLOT_KEYS.filter(k =>
+        (k === 'mockup' || !isRetiredArtifactSubtype(k))
+        && !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
 }
 
 // A slot is "hidden" when its subtype is hidden from every user-facing surface
@@ -1086,8 +1096,10 @@ export const artifactJobController = {
 
     /**
      * Kick off generation of every downstream slot not yet done for this
-     * spine. Idempotent: a re-call while active is a no-op; a re-call after
-     * completion only queues slots still missing.
+     * spine, followed by every output that consumes one of them (rebuilt only
+     * once an input it reads actually regenerates). Idempotent: a re-call
+     * while active is a no-op; a re-call after completion only queues slots
+     * still missing.
      *
      * `autoResume` marks a run started by `resumeIfNeeded` rather than by the
      * user: each slot it runs counts toward that slot's automatic budget, and a
@@ -1137,11 +1149,21 @@ export const artifactJobController = {
         const capped = opts.autoResume
             ? pending.filter(k => autoResumeAttemptsFor(args.projectId, args.spineVersionId, k) >= MAX_AUTO_RESUME_ATTEMPTS)
             : [];
-        const runSlots = pending.filter(k => !capped.includes(k));
-        if (runSlots.length === 0) return;
+        const regenerated = pending.filter(k => !capped.includes(k));
+        if (regenerated.length === 0) return;
         // Same wake rule as resumeIfNeeded: hidden slots ride along, but are
         // never the sole reason an automatic run starts.
-        if (opts.autoResume && runSlots.every(isHiddenSlot)) return;
+        if (opts.autoResume && regenerated.every(isHiddenSlot)) return;
+        // Every output that consumes a slot regenerated in this run follows it
+        // (dependency order comes from executeJob): an output still current for
+        // the spine — including one generated for this very spine without an
+        // optional input that was unavailable then (a plan without its user
+        // flows, a mockup without an inventory) — would otherwise stay built on
+        // superseded or absent content. executeJob runs such a follower only
+        // once one of its inputs actually produced new content. Capped slots
+        // never ride along.
+        const runSlots = expandWithInputConsumers(regenerated, new Set(capped));
+        const followers = new Set(runSlots.filter(k => !regenerated.includes(k)));
 
         const runId = uuidv4();
         const store = useProjectStore.getState();
@@ -1150,9 +1172,10 @@ export const artifactJobController = {
             autoResume: opts.autoResume,
             carryOverSlots: capped,
         });
-        // Mark already-completed slots as 'done' so the UI shows them green.
+        // Mark already-completed slots as 'done' so the UI shows them green
+        // (capped slots keep their carried-over failed state).
         for (const key of ALL_SLOT_KEYS) {
-            if (!pending.includes(key)) {
+            if (!runSlots.includes(key) && !capped.includes(key)) {
                 store.setSlotStatus(args.projectId, key, { status: 'done', finishedAt: Date.now() }, runId);
             }
         }
@@ -1162,7 +1185,7 @@ export const artifactJobController = {
         const heartbeat = setInterval(() => beatOutputRun(args.projectId, runId), OUTPUT_RUN_HEARTBEAT_MS);
 
         const controller = new AbortController();
-        const promise = executeJob(args, controller, runSlots, runId).finally(() => {
+        const promise = executeJob(args, controller, runSlots, runId, followers).finally(() => {
             clearInterval(heartbeat);
             // Settled (completed, failed, or cancelled) — not interrupted by a
             // page load, so drop the marker. A no-op if a newer run re-stamped it.

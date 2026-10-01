@@ -5,6 +5,7 @@ import {
     RETIRED_ARTIFACT_SUBTYPES,
     buildDependencyLayers,
     expandWithHiddenDependencyClosure,
+    expandWithInputConsumers,
     getArtifactMeta,
     getRequiredDependencies,
     isHiddenArtifactSubtype,
@@ -239,5 +240,37 @@ describe('expandWithHiddenDependencyClosure', () => {
         );
         expect(expanded.slice(0, 2)).toEqual(['screen_inventory', 'mockup']);
         expect(expanded[2]).toBe('component_inventory');
+    });
+});
+
+describe('expandWithInputConsumers', () => {
+    it('adds every transitive consumer of a regenerated slot, after the caller\'s slots', () => {
+        expect(expandWithInputConsumers(['user_flows'])).toEqual(['user_flows', 'implementation_plan']);
+        expect(expandWithInputConsumers(['component_inventory'])).toEqual(['component_inventory', 'mockup']);
+        expect(expandWithInputConsumers(['design_system'])).toEqual(['design_system', 'mockup']);
+        // screen_inventory feeds the flows, the components, the plan (directly
+        // and through the flows) and the mockup.
+        expect([...expandWithInputConsumers(['screen_inventory'])].sort()).toEqual(
+            ['component_inventory', 'implementation_plan', 'mockup', 'screen_inventory', 'user_flows'],
+        );
+    });
+
+    it('adds nothing for a slot nobody consumes, and never a retired subtype', () => {
+        expect(expandWithInputConsumers(['implementation_plan'])).toEqual(['implementation_plan']);
+        expect(expandWithInputConsumers(['mockup'])).toEqual(['mockup']);
+        expect(expandWithInputConsumers([])).toEqual([]);
+        // prompt_pack (retired) consumes the plan, design system and data model.
+        expect(expandWithInputConsumers(['data_model'])).toEqual(['data_model', 'implementation_plan']);
+        const expanded = expandWithInputConsumers(['implementation_plan', 'design_system', 'data_model']);
+        for (const retired of RETIRED_ARTIFACT_SUBTYPES) expect(expanded).not.toContain(retired);
+    });
+
+    it('never pulls in an excluded slot, nor expands through it', () => {
+        // The flows are excluded (e.g. capped for automatic resume): they stay
+        // out, so the plan rides along only as the screen inventory's consumer.
+        const expanded = expandWithInputConsumers(['screen_inventory'], new Set(['user_flows']));
+        expect(expanded).not.toContain('user_flows');
+        expect(expanded).toContain('implementation_plan');
+        expect(expandWithInputConsumers(['user_flows'], new Set(['implementation_plan']))).toEqual(['user_flows']);
     });
 });

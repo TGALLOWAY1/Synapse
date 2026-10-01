@@ -289,3 +289,139 @@ describe('artifactJobController — fingerprint-current outputs', () => {
         expect(genMock).not.toHaveBeenCalled();
     });
 });
+
+describe('artifactJobController — an input regenerated in a run re-queues its consumers', () => {
+    /** Generation that fails for the named subtypes and succeeds for the rest. */
+    const failingFor = (...failed: string[]) => async (subtype: string) => {
+        if (failed.includes(subtype)) throw new Error(`${subtype} failed`);
+        return { content: `${subtype} content`, metadata: {} };
+    };
+
+    it('optional flows fail → the plan is saved without them → a resume regenerates the flows and rebuilds the plan after them', async () => {
+        const { projectId } = seedProject();
+        genMock.mockImplementation(failingFor('user_flows'));
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+
+        // The plan proceeded without its optional flows, for THIS spine: its
+        // fingerprint records exactly the inputs it read — no user_flows.
+        const degraded = preferredFor(projectId, 'implementation_plan')!;
+        expect(degraded.provenance?.inputHashes?.dependencies).toEqual({
+            screen_inventory: dependencyContentHash('screen_inventory content'),
+            data_model: dependencyContentHash('data_model content'),
+        });
+        expect(preferredFor(projectId, 'user_flows')).toBeUndefined();
+
+        // The next Build mount resumes: the flows are pending; the plan is not
+        // (it is current for the spine) but follows them, in dependency order.
+        genMock.mockImplementation(failingFor());
+        genMock.mockClear();
+        mockupMock.mockClear();
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+
+        expect(generatedSlots()).toEqual(['user_flows', 'implementation_plan']);
+        const planCall = genMock.mock.calls.find(call => call[0] === 'implementation_plan')!;
+        expect(planCall[3]?.generatedArtifacts?.user_flows).toBe('user_flows content');
+        const rebuilt = preferredFor(projectId, 'implementation_plan')!;
+        expect(rebuilt.id).not.toBe(degraded.id);
+        expect(rebuilt.provenance?.inputHashes?.dependencies?.user_flows)
+            .toBe(dependencyContentHash('user_flows content'));
+        const slots = useProjectStore.getState().jobs[projectId]!.slots;
+        expect(slots.user_flows?.status).toBe('done');
+        expect(slots.implementation_plan?.status).toBe('done');
+        expect(Object.values(statusBySlot(projectId)).every(status => status === 'up_to_date')).toBe(true);
+    });
+
+    it('a mockup degraded without its component inventory is rebuilt once a resume regenerates the inventory', async () => {
+        const { projectId } = seedProject();
+        genMock.mockImplementation(failingFor('component_inventory'));
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+        const degraded = preferredFor(projectId, 'mockup')!;
+        expect(degraded.provenance?.inputHashes?.dependencies).toEqual({
+            screen_inventory: dependencyContentHash('screen_inventory content'),
+        });
+
+        genMock.mockImplementation(failingFor());
+        genMock.mockClear();
+        mockupMock.mockClear();
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+
+        expect(generatedSlots()).toEqual(['component_inventory', 'mockup']);
+        const rebuilt = preferredFor(projectId, 'mockup')!;
+        expect(rebuilt.id).not.toBe(degraded.id);
+        expect(rebuilt.provenance?.inputHashes?.dependencies).toEqual({
+            screen_inventory: dependencyContentHash('screen_inventory content'),
+            component_inventory: dependencyContentHash('component_inventory content'),
+        });
+        expect(Object.values(statusBySlot(projectId)).every(status => status === 'up_to_date')).toBe(true);
+    });
+
+    it('nothing regenerated → nothing rebuilt: when the flows fail again the queued plan is left as it is', async () => {
+        const { projectId } = seedProject();
+        genMock.mockImplementation(failingFor('user_flows'));
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+        const degraded = preferredFor(projectId, 'implementation_plan')!;
+
+        // The plan is queued behind the flows, but with no new input to read a
+        // paid rebuild would reproduce the same output: it is skipped.
+        genMock.mockClear();
+        mockupMock.mockClear();
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+        expect(generatedSlots()).toEqual(['user_flows']);
+        expect(preferredFor(projectId, 'implementation_plan')!.id).toBe(degraded.id);
+        const slots = useProjectStore.getState().jobs[projectId]!.slots;
+        expect(slots.user_flows?.status).toBe('error');
+        expect(slots.implementation_plan?.status).toBe('done');
+
+        // Once the flows' automatic budget is spent, a resume starts nothing.
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+        genMock.mockClear();
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+        expect(generatedSlots()).toEqual([]);
+    });
+
+    it('nothing pending → nothing re-queued', async () => {
+        const { projectId } = seedProject();
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+
+        genMock.mockClear();
+        mockupMock.mockClear();
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+        artifactJobController.resumeIfNeeded(argsFor(projectId));
+        await settle(projectId);
+        expect(generatedSlots()).toEqual([]);
+    });
+
+    it('a single-slot retry of the missing flows flags the plan saved without them', async () => {
+        const { projectId } = seedProject();
+        genMock.mockImplementation(failingFor('user_flows'));
+        artifactJobController.startAll(argsFor(projectId));
+        await settle(projectId);
+        // Flows missing: the plan has nothing concrete to compare (the gap
+        // shows through impactedBy only).
+        const before = evaluateProjectFreshness(useProjectStore.getState(), projectId).evaluations.get('implementation_plan')!;
+        expect(before.status).toBe('up_to_date');
+        expect(before.impactedBy).toEqual(['user_flows']);
+
+        // A manual Retry regenerates only the flows; the engine then reports
+        // the plan was built without an input that exists now.
+        genMock.mockImplementation(failingFor());
+        artifactJobController.retrySlot('user_flows', argsFor(projectId));
+        await settle(projectId);
+        const after = evaluateProjectFreshness(useProjectStore.getState(), projectId).evaluations.get('implementation_plan')!;
+        expect(after.status).toBe('needs_update');
+        expect(after.reasons).toEqual([
+            expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'user_flows' }),
+        ]);
+        expect(after.reasons[0].detail).toContain('was not available when this was generated');
+    });
+});

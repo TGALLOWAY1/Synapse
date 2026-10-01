@@ -256,6 +256,44 @@ export function expandWithHiddenDependencyClosure(
     return [...slots, ...[...requested].filter(s => !slots.includes(s))];
 }
 
+/**
+ * Expand a run's slot set with every slot that consumes one of them —
+ * transitively: core dependents through `dependsOn`, the mockup through
+ * `MOCKUP_DEPENDENCIES`. A slot whose input is (re)generated in a run must be
+ * rebuilt after it, or it stays built on superseded — or, for an optional
+ * input that was unavailable, absent — content. That holds whether the
+ * consumer was generated for this very spine (e.g. a plan saved without its
+ * optional user flows, or a mockup degraded without an inventory) or is
+ * current for it only by input fingerprint. Retired subtypes and `exclude`
+ * (slots that must not run, e.g. auto-resume-capped ones) never ride along.
+ * Execution order comes from buildDependencyLayers (mockup last), so the
+ * result is the caller's order plus the additions. Pure.
+ */
+export function expandWithInputConsumers(
+    slots: ArtifactSlotKey[],
+    exclude: ReadonlySet<ArtifactSlotKey> = new Set(),
+): ArtifactSlotKey[] {
+    const run = new Set<ArtifactSlotKey>(slots);
+    const candidates: ArtifactSlotKey[] = [
+        ...CORE_ARTIFACT_PIPELINE
+            .filter(meta => !isRetiredArtifactSubtype(meta.subtype))
+            .map(meta => meta.subtype),
+        'mockup',
+    ];
+    let grew = true;
+    while (grew) {
+        grew = false;
+        for (const slot of candidates) {
+            if (run.has(slot) || exclude.has(slot)) continue;
+            if (slotDependencies(slot).some(dep => run.has(dep))) {
+                run.add(slot);
+                grew = true;
+            }
+        }
+    }
+    return [...slots, ...candidates.filter(slot => run.has(slot) && !slots.includes(slot))];
+}
+
 /** The direct dependencies a slot consumes (core deps, or MOCKUP_DEPENDENCIES for the mockup). */
 function slotDependencies(slot: ArtifactSlotKey): CoreArtifactSubtype[] {
     if (slot === 'mockup') return [...MOCKUP_DEPENDENCIES];

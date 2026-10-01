@@ -85,7 +85,12 @@ model calls). So generation records what each output was built from:
   generator reads: the PRD-side slice kind, the design-direction policy, and
   the upstream artifacts whose content it consumes (the pipeline's own
   `dependsOn`; the mockup's `screen_inventory` + `component_inventory` — its
-  design-system input stays tracked by tokensHash, rule 4 below).
+  design-system input stays tracked by tokensHash, rule 4 below). A version's
+  recorded `dependencies` map holds exactly the declared inputs generation
+  read, so a declared input **absent** from it was unavailable then (missing,
+  errored, or not usable as context — e.g. a plan saved without its optional
+  user flows, a mockup degraded without a component inventory). No separate
+  "missing optional inputs" field is needed: rule 3 reads the absence.
 - **The projection is shared.** `selectArtifactPrdInput` projects a spine +
   project onto a slot's slice. The job controller builds every core prompt
   from that projection (`selectCorePromptInput` → `buildCorePromptCall` →
@@ -114,14 +119,26 @@ model calls). So generation records what each output was built from:
   review's directive fields, the preset, and upstream content — never derived
   renderings such as the canonical spine, so a deploy that changes how a
   prompt or the spine is rendered never moves a fingerprint the user did not
-  touch. Hashing is canonical (sorted keys, collapsed whitespace, empty values
-  dropped) and 64-bit (`inputContentHash`).
+  touch. Hashing is canonical (sorted keys, empty values dropped) and 64-bit
+  (`inputContentHash`). Text keeps its **line structure** (`canonicalText`):
+  line endings normalize to LF, each line loses its trailing whitespace and
+  has any other run of spaces/tabs collapsed to one space but keeps its
+  indentation (list nesting and indented code are Markdown structure), runs
+  of blank lines collapse to one and blank lines at either end are dropped —
+  and lines are never joined. So cosmetic spacing never moves a fingerprint,
+  but a multiline list, table, or code block reflowed onto one line (or a
+  re-nested list item) does: a changed upstream can never read as current
+  just because its tokens are the same.
 - **Recorded as provenance** (`provenance.inputHashes = { scheme, spine,
   designBrief?, dependencies? }`, stamped by `runCoreArtifactSlot` /
   `runMockupSlot`); every comparison is derived on read (rule 10). The
   `scheme` carries the hashing version and the slot's slice version: a record
-  from another scheme is never compared (id fallback), so changing a slice can
-  never mass-flag existing outputs.
+  from another scheme is never compared (id fallback), so changing a slice — or
+  the hashing itself — can never mass-flag existing outputs, nor compare a
+  record against a fingerprint computed another way. Hashing version 2 (`ih2.…`)
+  introduced line-structure-preserving text; version-1 records (`ih1.…`, every
+  whitespace run collapsed, line breaks included) fall back to ids until their
+  output regenerates.
 - **The current side** is computed by the freshness seam
   (`buildDependencyEvaluationInput` → `currentPrdInputHashesForSpine`, memoized
   per spine object and shared by every core slot; each preferred version's
@@ -147,18 +164,30 @@ model calls). So generation records what each output was built from:
 3. **Dependency drift** — fingerprinted: the recorded content fingerprint of
    a consumed dependency ≠ that dependency's current `contentHash` →
    `needs_update` (`dependency_changed`); a content-identical clone (overlay
-   edit, mark-current, restore) is **not** drift. Legacy: a recorded
-   `core_artifact` ref ≠ that dependency's current preferred version id →
-   `needs_update` (`dependency_changed`). `runCoreArtifactSlot` records these
-   refs for each `dependsOn` input (mirroring what `runMockupSlot` always did).
+   edit, mark-current, restore) is **not** drift. A declared dependency the
+   version consumed as **absent** (no entry in its recorded `dependencies`)
+   that is now usable generation context → `needs_update`
+   (`dependency_changed`, "… was not available when this was generated — it
+   is now"). "Usable" is the job controller's own rule
+   (`usableContextVersion`): current for the latest spine — by fingerprint,
+   else by spine ref — and not held by an unresolved blocking validation; an
+   input that is still missing, errored, `needs_review`, stale for the PRD, or
+   blank (never an input) is not drift (it shows through `impactedBy`).
+   Legacy: a recorded `core_artifact` ref ≠ that dependency's current
+   preferred version id → `needs_update` (`dependency_changed`).
+   `runCoreArtifactSlot` records these refs for each `dependsOn` input
+   (mirroring what `runMockupSlot` always did).
 4. **Design token drift** (mockup only) — recorded tokensHash
    (`SourceRef.anchorInfo`) ≠ current preferred design system's hash →
    `needs_update` (`design_tokens_changed`). Hash comparison beats
    version-id comparison so a token-identical regen keeps mockups current.
-5. **Legacy fallback** — no recorded dependency ref or fingerprint
-   (pre-feature versions, or a dependency missing at generation time) but the
-   dependency's preferred version is newer than this artifact → advisory
-   `update_recommended` (`dependency_newer`).
+5. **Legacy fallback** — a version without a comparable fingerprint and no
+   recorded dependency ref (pre-feature versions, or a legacy version whose
+   dependency was missing at generation time) but the dependency's preferred
+   version is newer than this artifact → advisory `update_recommended`
+   (`dependency_newer`). Fingerprinted versions never take this timestamp
+   heuristic for a dependency their slice declares: the fingerprint says what
+   they read (rule 3).
 6. **Validation review** — a live or persisted blocking validation
    disposition → `needs_review`. This is deliberately distinct from
    planning alignment: the evaluator still records any PRD or dependency
@@ -194,7 +223,9 @@ plan `up_to_date` with `user_flows` in its `impactedBy`. Consumers must
 therefore read `impactedBy` alongside status (`isStaleStatus` alone misses
 this case — W6's build-packet gate reads both). This is deliberate engine
 semantics (cross-cutting rule 9) — do not "fix" it by changing the status
-vocabulary.
+vocabulary. Once the input exists and is usable, a fingerprinted dependent
+that was generated without it **is** flagged (`dependency_changed`, rule 3):
+the gap is then concrete — regenerating would read new content.
 
 ## Update ordering & actions
 
@@ -207,12 +238,20 @@ vocabulary.
   applies the engine's PRD-side comparison, so a run seeds fingerprint-current
   upstreams generated against an older spine version as dependency context
   (`seedGenerationContext`) and records refs to them — regenerating one
-  dependent alone still reads its required inputs. `startAll` skips
-  fingerprint-current outputs, except that an output whose input regenerates
-  in the same run rides along (never more than the spine-ref rule scheduled).
-  Resume
-  evidence stays spine-ref based: an output merely current for a newer spine
-  is not evidence that a run for it began. The controller's verdict is
+  dependent alone still reads its required inputs. `startAll` regenerates
+  only the slots not current for the spine, plus every output that consumes
+  one of them (`expandWithInputConsumers`, transitive, in dependency order —
+  the mockup last): an output still current for the spine — whether by
+  fingerprint from an older spine, or generated for this very spine without
+  an optional input that was unavailable then (a plan without its user flows,
+  a mockup without an inventory) — follows the input it reads. Such a
+  follower runs only once one of its inputs produced new, trusted content in
+  that run; if every regenerated input failed again it is left as it is
+  (reported done), so a deterministically failing optional input never buys a
+  paid rebuild that would reproduce the same degraded output. Slots held back
+  by the automatic-resume cap never follow. Nothing pending → nothing runs.
+  Resume evidence stays spine-ref based: an output merely current for a newer
+  spine is not evidence that a run for it began. The controller's verdict is
   PRD-side only — a changed design preset is reported by the engine
   (`design_direction_changed`) but never makes the design system "not done",
   or the early design-system run (which the workspace fires on any project
@@ -234,7 +273,9 @@ vocabulary.
 - **Open artifact** → the hosting workspace view (`screen_inventory` and
   `mockup` route into the Screens experience view).
 - **Mark current** rebases the refs and the input fingerprint onto the
-  confirmed inputs (VERSIONING_AND_EXPORT.md). It is unavailable for
+  confirmed inputs — the confirmed spine and the content of every declared
+  dependency that exists now, so it also clears a "was not available" flag
+  (VERSIONING_AND_EXPORT.md). It is unavailable for
   `needs_review`; synchronization cannot convert a failed validation gate into
   a trusted output.
 

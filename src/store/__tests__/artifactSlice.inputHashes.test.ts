@@ -169,4 +169,32 @@ describe('input fingerprints across version-creating paths', () => {
         store.revertSpineToVersion(projectId, spineId);
         expect(statusOf(projectId, 'user_flows')).toBe('needs_update');
     });
+
+    it('an output saved without an input that exists now is flagged — mark-as-up-to-date records that input', () => {
+        const { projectId, spineId } = seed();
+        const store = useProjectStore.getState();
+        const { artifactId: dataModelId } = store.createArtifact(projectId, 'core_artifact', 'Data Model', 'data_model');
+        store.createArtifactVersion(projectId, dataModelId, 'dm', {}, [spineRef(spineId)], 'p', null,
+            { inputHashes: fingerprintFor(projectId, 'data_model') });
+        // The plan was generated while its optional user flows were
+        // unavailable: its fingerprint records only what it read.
+        const { artifactId: planId } = store.createArtifact(projectId, 'core_artifact', 'Implementation Plan', 'implementation_plan');
+        store.createArtifactVersion(projectId, planId, 'plan', {}, [spineRef(spineId)], 'p', null, {
+            inputHashes: fingerprintFor(projectId, 'implementation_plan', { screen_inventory: 'screens', data_model: 'dm' }),
+        });
+        const planReasons = () => evaluateProjectFreshness(useProjectStore.getState(), projectId)
+            .evaluations.get('implementation_plan')!.reasons;
+        expect(statusOf(projectId, 'implementation_plan')).toBe('needs_update');
+        expect(planReasons()).toEqual([expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'user_flows' })]);
+
+        // Confirming it current asserts it holds against TODAY's inputs —
+        // including the flows it never read.
+        store.markArtifactCurrentForSpine(projectId, planId, spineId);
+        expect(preferred(projectId, planId).provenance?.inputHashes?.dependencies).toEqual({
+            screen_inventory: dependencyContentHash('screens'),
+            data_model: dependencyContentHash('dm'),
+            user_flows: dependencyContentHash('flows'),
+        });
+        expect(statusOf(projectId, 'implementation_plan')).toBe('up_to_date');
+    });
 });

@@ -25,9 +25,10 @@
 // options, upstream content) — never derived representations such as the
 // canonical spine — so a deploy that changes how the spine or a prompt is
 // rendered never flips a fingerprint for content the user did not touch.
-// Hashing is canonical: object keys are sorted, whitespace runs collapse, and
-// empty values are dropped, so key order and cosmetic whitespace never move a
-// fingerprint.
+// Hashing is canonical: object keys are sorted, empty values are dropped, and
+// text keeps its line structure while cosmetic spacing is normalized (see
+// `canonicalText`), so key order and cosmetic whitespace never move a
+// fingerprint — but a list, table, or code block reflowed onto one line does.
 //
 // Pure: no store/React/LLM imports (mirrors artifactDependencyGraph.ts). The
 // recorded fingerprint is provenance (persisted on the version); every
@@ -53,16 +54,41 @@ import { buildAutoMockupSettings } from './mockupDefaults';
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical form for fingerprinting: object keys sorted, string whitespace
- * collapsed, and empty values (undefined / null / '' / [] / {}) dropped — so
- * `{ a: 1, b: [] }` and `{ a: 1 }` fingerprint alike, as do two strings that
- * differ only in spacing or line breaks. Booleans and numbers are kept as-is.
+ * Canonical text: line structure kept, cosmetic spacing normalized. Line
+ * endings become LF; every line keeps its indentation (list nesting and
+ * indented code are Markdown structure) but loses its trailing whitespace,
+ * and any other run of spaces/tabs inside it collapses to one space; runs of
+ * blank lines collapse to a single blank line (a paragraph break stays one
+ * paragraph break) and blank lines at either end are dropped. Lines are never
+ * joined, so a multiline list, table, or code block and the same tokens on
+ * one line fingerprint differently.
+ */
+function canonicalText(text: string): string {
+    return text
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map((line) => {
+            const indent = line.length - line.trimStart().length;
+            const body = line.slice(indent).replace(/\s+/g, ' ').trimEnd();
+            return body === '' ? '' : line.slice(0, indent) + body;
+        })
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/^\n+|\n+$/g, '');
+}
+
+/**
+ * Canonical form for fingerprinting: object keys sorted, strings in
+ * `canonicalText` form, and empty values (undefined / null / blank strings /
+ * [] / {}) dropped — so `{ a: 1, b: [] }` and `{ a: 1 }` fingerprint alike, as
+ * do two strings that differ only in cosmetic spacing. Booleans and numbers
+ * are kept as-is.
  */
 function canonicalize(value: unknown): unknown {
     if (value === null || value === undefined) return undefined;
     if (typeof value === 'string') {
-        const collapsed = value.replace(/\s+/g, ' ').trim();
-        return collapsed === '' ? undefined : collapsed;
+        const text = canonicalText(value);
+        return text === '' ? undefined : text;
     }
     if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
     if (typeof value !== 'object') return value;
@@ -100,7 +126,7 @@ function hash64(text: string): string {
     return `${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-/** Deterministic fingerprint of any JSON-like value (key order and whitespace insensitive). */
+/** Deterministic fingerprint of any JSON-like value (insensitive to key order and cosmetic whitespace). */
 export function inputContentHash(value: unknown): string {
     return hash64(JSON.stringify(canonicalize(value) ?? null));
 }
@@ -124,6 +150,18 @@ export function versionContentHash(version: { content: string }): string {
     return hash;
 }
 
+const BLANK_CONTENT_HASH = dependencyContentHash('');
+
+/**
+ * Would generation consume content with this fingerprint? Not blank content:
+ * generation treats it as unavailable (artifactDependencyGate) and records
+ * nothing for it (computeArtifactInputHashes) — so a dependency whose content
+ * is blank never counts as "now available" to an output built without it.
+ */
+export function isConsumableContentHash(hash: string): boolean {
+    return hash !== BLANK_CONTENT_HASH;
+}
+
 // ---------------------------------------------------------------------------
 // The slice map
 // ---------------------------------------------------------------------------
@@ -135,8 +173,11 @@ export function versionContentHash(version: { content: string }): string {
  * values. Together with each slot's slice `version` it forms the recorded
  * `scheme`; a record from another scheme is never compared (the engine falls
  * back to version ids), so such a change can never mass-flag existing outputs.
+ *
+ * 2: text keeps its line structure (`canonicalText`); scheme 1 collapsed every
+ *    whitespace run, line breaks included.
  */
-const INPUT_HASH_SCHEME_VERSION = 1;
+const INPUT_HASH_SCHEME_VERSION = 2;
 
 /**
  * What a slot's generator reads from the PRD side:
@@ -379,7 +420,9 @@ function hashPrdInput(slot: ArtifactSlotKey, input: ArtifactPrdInput): CurrentPr
  * plus the exact content of every declared dependency that was consumed.
  * `consumed` is the generation's dependency map at call time; dependencies the
  * slot does not declare are ignored (their content never reaches the prompt),
- * and a missing or blank dependency records nothing.
+ * and a missing or blank dependency records nothing — that absence IS the
+ * record that the input was unavailable (a plan saved without its optional
+ * user flows), which the engine flags once the input becomes usable.
  */
 export function computeArtifactInputHashes(
     slot: ArtifactSlotKey,
@@ -481,23 +524,26 @@ export function comparePrdInputs(
 
 /**
  * The fingerprint a "Mark as up to date" clone records. Marking current is the
- * user asserting the content holds for the confirmed spine and today's
+ * user asserting the content holds for the confirmed spine and TODAY's
  * upstream content, so the clone records exactly those inputs — the PRD-side
- * fingerprint of the confirmed spine and the content fingerprint of each
- * dependency its rebased refs point at — and later edits are judged against
- * what the user confirmed. Undefined when the PRD side cannot be fingerprinted
+ * fingerprint of the confirmed spine and the content fingerprint of every
+ * declared dependency that exists now (`currentDependency` returns its
+ * preferred version). Recording every present dependency, not only the ones
+ * the source consumed, is what lets it clear a "was not available when this
+ * was generated" flag. Undefined when the PRD side cannot be fingerprinted
  * faithfully: the clone then relies on its rebased refs (id comparison).
  */
 export function rebasedInputHashes(
     slot: ArtifactSlotKey,
     prd: CurrentPrdInputHashes | undefined,
-    dependencyVersions: Partial<Record<CoreArtifactSubtype, { content: string }>>,
+    currentDependency: (dep: CoreArtifactSubtype) => { content: string } | undefined,
 ): ArtifactInputHashes | undefined {
     if (!prd) return undefined;
     const dependencies: Partial<Record<CoreArtifactSubtype, string>> = {};
     for (const dep of ARTIFACT_INPUT_SLICES[slot].dependencies) {
-        const version = dependencyVersions[dep];
-        if (version) dependencies[dep] = versionContentHash(version);
+        const version = currentDependency(dep);
+        // Recorded as generation would have: blank content is no input.
+        if (version && version.content.trim()) dependencies[dep] = versionContentHash(version);
     }
     return { ...prd, ...(Object.keys(dependencies).length > 0 ? { dependencies } : {}) };
 }

@@ -379,18 +379,19 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             const spineLabel = spineIdx >= 0 ? `PRD Version ${spineIdx + 1}` : 'the current PRD';
 
             // Rebase the input fingerprint with the refs: record the confirmed
-            // spine's inputs and the current content of every rebased
-            // dependency (artifactInputSlices.rebasedInputHashes) — never a
-            // partial rebase. Without a faithful PRD-side fingerprint the
-            // clone carries none and the rebased refs decide (id comparison).
+            // spine's inputs and the current content of every declared
+            // dependency that exists now (artifactInputSlices.
+            // rebasedInputHashes) — never a partial rebase. Without a faithful
+            // PRD-side fingerprint the clone carries none and the rebased refs
+            // decide (id comparison).
             const slot: ArtifactSlotKey | undefined = artifact?.type === 'mockup' ? 'mockup' : artifact?.subtype;
-            const dependencyVersions: Partial<Record<CoreArtifactSubtype, ArtifactVersion>> = {};
-            for (const ref of rebasedRefs) {
-                if (ref.sourceType !== 'core_artifact' || ref.anchorInfo !== undefined) continue;
-                const depSubtype = projectArtifacts.find(a => a.id === ref.sourceArtifactId)?.subtype;
-                const depVersion = versions.find(v => v.id === ref.sourceArtifactVersionId);
-                if (depSubtype && depVersion) dependencyVersions[depSubtype] = depVersion;
-            }
+            const currentDependency = (dep: CoreArtifactSubtype): ArtifactVersion | undefined => {
+                const depArtifact = projectArtifacts.find(a =>
+                    a.type === 'core_artifact' && a.subtype === dep && a.status !== 'archived');
+                return depArtifact
+                    ? versions.find(v => v.artifactId === depArtifact.id && v.isPreferred)
+                    : undefined;
+            };
             const inputHashes = slot
                 ? rebasedInputHashes(
                     slot,
@@ -399,7 +400,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                         (state.spineVersions[projectId] || []).find(s => s.id === spineVersionId),
                         state.projects[projectId],
                     ),
-                    dependencyVersions,
+                    currentDependency,
                 )
                 : undefined;
 

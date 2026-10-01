@@ -147,10 +147,40 @@ describe('input fingerprints — canonical hashing', () => {
             .toBe(inputContentHash({ b: { d: [1, 2], c: 2 }, a: 1 }));
     });
 
-    it('ignores cosmetic whitespace in strings', () => {
-        expect(inputContentHash({ vision: 'Match  music\nto mood. ' }))
+    it('ignores cosmetic whitespace: intra-line runs, trailing spaces, line endings, extra blank lines', () => {
+        // Runs of spaces/tabs inside a line, and trailing whitespace.
+        expect(inputContentHash({ vision: 'Match  music\tto mood. ' }))
             .toBe(inputContentHash({ vision: 'Match music to mood.' }));
-        expect(dependencyContentHash('# Title\n\n  body  \n')).toBe(dependencyContentHash('# Title body'));
+        const doc = '# Title\n\nIntro paragraph.\n\n- one\n  - nested\n- two\n';
+        expect(dependencyContentHash('# Title  \n\nIntro   paragraph.\t\n\n- one\n  - nested  \n- two')).toBe(dependencyContentHash(doc));
+        // CRLF / CR line endings.
+        expect(dependencyContentHash(doc.replace(/\n/g, '\r\n'))).toBe(dependencyContentHash(doc));
+        expect(dependencyContentHash(doc.replace(/\n/g, '\r'))).toBe(dependencyContentHash(doc));
+        // Extra blank lines (whitespace-only lines included) collapse to one;
+        // blank lines at either end are dropped.
+        expect(dependencyContentHash('\n\n# Title\n\n\n  \t\n\nIntro paragraph.\n\n- one\n  - nested\n- two\n\n\n'))
+            .toBe(dependencyContentHash(doc));
+    });
+
+    it('keeps line structure: a list, table, or code block never matches the same tokens reflowed', () => {
+        // Lines are never joined.
+        expect(dependencyContentHash('- a\n- b\n- c')).not.toBe(dependencyContentHash('- a - b - c'));
+        expect(dependencyContentHash('| a | b |\n|---|---|\n| 1 | 2 |'))
+            .not.toBe(dependencyContentHash('| a | b | |---|---| | 1 | 2 |'));
+        expect(dependencyContentHash('```\nconst a = 1;\nconst b = 2;\n```'))
+            .not.toBe(dependencyContentHash('``` const a = 1; const b = 2; ```'));
+        expect(inputContentHash({ vision: 'Match music\nto mood.' }))
+            .not.toBe(inputContentHash({ vision: 'Match music to mood.' }));
+        // A paragraph break is not a line break.
+        expect(dependencyContentHash('Intro.\n\nMore.')).not.toBe(dependencyContentHash('Intro.\nMore.'));
+        // Indentation is structure (list nesting, indented code).
+        expect(dependencyContentHash('- one\n  - nested')).not.toBe(dependencyContentHash('- one\n- nested'));
+        expect(dependencyContentHash('- one\n  - nested')).not.toBe(dependencyContentHash('- one\n    - nested'));
+        expect(dependencyContentHash('Text:\n\n    code')).not.toBe(dependencyContentHash('Text:\n\ncode'));
+    });
+
+    it('treats whitespace-only strings as empty', () => {
+        expect(inputContentHash({ a: 1, b: ' \n\t\r\n ' })).toBe(inputContentHash({ a: 1 }));
     });
 
     it('treats empty values as absent (optional fields stay optional)', () => {
@@ -198,6 +228,10 @@ describe('input fingerprints — the per-slot slice map', () => {
     it('versions the scheme per slice kind', () => {
         expect(inputHashSchemeFor('data_model')).toBe(inputHashSchemeFor('design_system'));
         expect(inputHashSchemeFor('mockup')).not.toBe(inputHashSchemeFor('data_model'));
+        // Hashing scheme 2: line-structure-preserving text. Scheme-1 records
+        // (whitespace fully collapsed) are never compared — id fallback.
+        expect(inputHashSchemeFor('data_model')).toMatch(/^ih2\.core_prompt\./);
+        expect(inputHashSchemeFor('mockup')).toMatch(/^ih2\.mockup_spec\./);
     });
 });
 
@@ -416,6 +450,12 @@ describe('input fingerprints — comparison and rebase', () => {
         expect(comparePrdInputs('data_model', undefined, recorded)).toEqual({ comparable: false });
         expect(comparePrdInputs('data_model', { ...recorded, scheme: 'ih0.core_prompt.1' }, recorded))
             .toEqual({ comparable: false });
+        // A record from hashing scheme 1 (written before line structure was
+        // kept), same slice version, is never compared against scheme 2.
+        const schemeOne = recorded.scheme.replace(/^ih2\./, 'ih1.');
+        expect(schemeOne).not.toBe(recorded.scheme);
+        expect(comparePrdInputs('data_model', { ...recorded, scheme: schemeOne }, recorded))
+            .toEqual({ comparable: false });
     });
 
     it('reports PRD-side and design-direction changes per the slot policy', () => {
@@ -431,20 +471,23 @@ describe('input fingerprints — comparison and rebase', () => {
         })))).toEqual({ comparable: true, prdChanged: false, designDirectionChanged: false });
     });
 
-    it('a mark-current rebase records the confirmed inputs and the rebased dependency content', () => {
+    it('a mark-current rebase records the confirmed inputs and every declared dependency present now', () => {
         const prd = currentPrdInputHashesForSpine(
             'user_flows',
             { structuredPRD: basePrd(), responseText: renderPremiumMarkdown(basePrd()) },
             project,
         );
-        const rebased = rebasedInputHashes('user_flows', prd, {
+        const present: Partial<Record<CoreArtifactSubtype, { content: string }>> = {
             screen_inventory: { content: DEP_CONTENT.screen_inventory },
             data_model: { content: DEP_CONTENT.data_model }, // not a user_flows input — ignored
-        });
+        };
+        const rebased = rebasedInputHashes('user_flows', prd, dep => present[dep]);
         expect(rebased).toEqual({
             ...prd,
             dependencies: { screen_inventory: dependencyContentHash(DEP_CONTENT.screen_inventory) },
         });
-        expect(rebasedInputHashes('user_flows', undefined, {})).toBeUndefined();
+        expect(rebasedInputHashes('user_flows', undefined, () => undefined)).toBeUndefined();
+        // Blank content is recorded as generation would: not an input.
+        expect(rebasedInputHashes('user_flows', prd, () => ({ content: ' \n ' }))).toEqual(prd);
     });
 });

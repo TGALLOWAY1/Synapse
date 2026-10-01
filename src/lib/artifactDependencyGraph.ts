@@ -21,16 +21,21 @@
 //                                         changed                (needs_update)
 //   1b. design brief ≠ current (design
 //      system only)                    → visual direction moved (needs_update)
-//   2. recorded dep content hash ≠ the dep's current content
+//   2. recorded dep content hash ≠ the dep's current content, or a dep
+//      consumed as ABSENT (unavailable then) that is now usable context
 //                                       → a dependency changed   (needs_update)
+//      (the fingerprint is the full record for the deps its slice declares:
+//      no timestamp heuristic for them)
 // Legacy versions (no fingerprint, or one from another scheme) keep the id
 // comparison:
 //   1. spine ref ≠ latest spine        → the PRD changed        (needs_update)
 //   2. recorded dep ref ≠ current dep  → a dependency changed   (needs_update)
 // Both paths share:
 //   3. design tokensHash drift (mockup)→ visual direction moved (needs_update)
-//   4. no recorded dep ref (legacy) but the dep's preferred version is newer
-//      than this artifact              → advisory       (update_recommended)
+//   4. no record of the dep at all — legacy (no ref), or a dep outside the
+//      fingerprint (the mockup's design system without a tokensHash) — but
+//      its preferred version is newer than this artifact
+//                                       → advisory       (update_recommended)
 // So a restore to identical content, a no-op save, an edit outside what an
 // output reads, or an upstream clone with unchanged content (overlay edit,
 // mark-current, restore) leaves a fingerprinted output up to date.
@@ -55,7 +60,12 @@ import {
 } from './coreArtifactPipeline';
 import { isLikelyUnaffected, type SpineChangeSummary } from './spineChangeAnalysis';
 import { readArtifactValidationDisposition } from './artifactValidationPolicy';
-import { comparePrdInputs, type CurrentPrdInputHashes } from './artifactInputSlices';
+import {
+    ARTIFACT_INPUT_SLICES,
+    comparePrdInputs,
+    isConsumableContentHash,
+    type CurrentPrdInputHashes,
+} from './artifactInputSlices';
 
 // ---------------------------------------------------------------------------
 // Graph shape
@@ -356,9 +366,10 @@ export interface DependencyVersionSnapshot {
     metadata?: Record<string, unknown>;
     /**
      * Fingerprint of this version's content as a dependency
-     * (artifactInputSlices.dependencyContentHash). Dependents whose recorded
-     * fingerprint names this dependency compare against it; absent → they
-     * fall back to the version-id comparison.
+     * (artifactInputSlices.dependencyContentHash). Fingerprinted dependents
+     * whose slice declares this dependency compare against it (or, having
+     * consumed it as absent, check whether it is usable context now); absent
+     * → they fall back to the version-id comparison.
      */
     contentHash?: string;
 }
@@ -453,6 +464,28 @@ export function evaluateDependencyGraph(
     input: DependencyEvaluationInput,
 ): Map<DependencyNodeId, DependencyNodeEvaluation> {
     const evaluations = new Map<DependencyNodeId, DependencyNodeEvaluation>();
+
+    // Would generation read this dependency's preferred version as context
+    // right now? The job controller's rule (usableContextVersion): current for
+    // the latest spine — by input fingerprint, else by spine ref — not held by
+    // an unresolved blocking validation, and not blank (blank content is
+    // never an input).
+    const isUsableGenerationContext = (dep: ArtifactSlotKey, depSnapshot: DependencyNodeSnapshot): boolean => {
+        const { contentHash } = depSnapshot.version;
+        if (contentHash === undefined || !isConsumableContentHash(contentHash)) return false;
+        if (readArtifactValidationDisposition(depSnapshot.version.metadata).effectiveStatus === 'needs_review') {
+            return false;
+        }
+        const depInputs = comparePrdInputs(
+            dep,
+            depSnapshot.version.provenance?.inputHashes,
+            input.currentInputHashes?.[dep],
+        );
+        if (depInputs.comparable) return !depInputs.prdChanged;
+        return !!input.latestSpineId && depSnapshot.version.sourceRefs.some(
+            r => r.sourceType === 'spine' && r.sourceArtifactVersionId === input.latestSpineId,
+        );
+    };
 
     evaluations.set('prd', {
         nodeId: 'prd',
@@ -565,19 +598,34 @@ export function evaluateDependencyGraph(
                 }
             }
 
-            // Fingerprinted dependency: compare the content this version
-            // consumed with the dependency's current content, so a clone with
-            // unchanged content (overlay edit, mark-current, restore) is not
-            // drift while a real regeneration is.
-            const recordedDepHash = inputs.comparable
-                ? recordedInputs?.dependencies?.[dep as CoreArtifactSubtype]
-                : undefined;
-            if (recordedDepHash !== undefined && depSnapshot.version.contentHash !== undefined) {
-                if (recordedDepHash !== depSnapshot.version.contentHash) {
+            // Fingerprinted dependency (one the slot's slice declares): the
+            // record says exactly what generation consumed — the dependency's
+            // content, or NOTHING when it was unavailable then (missing,
+            // errored, or not yet usable as context; e.g. a plan saved without
+            // its optional user flows, a mockup degraded without an
+            // inventory). Content consumed: a regeneration is drift, a clone
+            // with unchanged content (overlay edit, mark-current, restore) is
+            // not. Nothing consumed: the dependency becoming usable context is
+            // drift. No timestamp heuristic on this path.
+            if (
+                inputs.comparable
+                && depSnapshot.version.contentHash !== undefined
+                && ARTIFACT_INPUT_SLICES[slotKey].dependencies.includes(dep as CoreArtifactSubtype)
+            ) {
+                const consumedHash = recordedInputs?.dependencies?.[dep as CoreArtifactSubtype];
+                if (consumedHash !== undefined) {
+                    if (consumedHash !== depSnapshot.version.contentHash) {
+                        reasons.push({
+                            kind: 'dependency_changed',
+                            dependencyId: dep,
+                            detail: `${nodeTitle(graph, dep)} changed (now Version ${depSnapshot.version.versionNumber}) after this was created.`,
+                        });
+                    }
+                } else if (isUsableGenerationContext(dep, depSnapshot)) {
                     reasons.push({
                         kind: 'dependency_changed',
                         dependencyId: dep,
-                        detail: `${nodeTitle(graph, dep)} changed (now Version ${depSnapshot.version.versionNumber}) after this was created.`,
+                        detail: `${nodeTitle(graph, dep)} was not available when this was generated — it is now (Version ${depSnapshot.version.versionNumber}).`,
                     });
                 }
                 continue;
