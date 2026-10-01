@@ -1,7 +1,10 @@
 # Synapse UX Audit — Idea → PRD → Mockups → Execution Artifacts
 
 **Date:** 2026-09-12
-**Revision audited:** `f2bb3d8` (`main` after PR #351)
+**Revision audited:** `f2bb3d8` (`main` after PR #351). PR #352 (the Gemini
+3.8 Flash model upgrade, `76635eb`) landed on `main` while this audit was in
+progress; it touches only the model catalog, migration, client and Settings
+model list, and every `file:line` cited below was re-checked against it.
 **Method:** static trace of the implemented behavior. Six parallel code traces
 (entry & PRD creation · reading & refining · decisions & critique · mockups &
 screens · build artifacts & export · cross-cutting) fed a single synthesis;
@@ -53,9 +56,9 @@ approval gate, the Exploration Canvas), and the instrument the pilot most needs
 | ID | Severity | Promise | Finding | Evidence |
 |---|---|---|---|---|
 | UX-17 | **Blocker** | 3 | "Dive Into Canvas" is a **mock** that fakes a 1.5 s "exploration" and then writes literal placeholder copy (`[Locally Restructured]: …`) into the real plan on "Apply to Spine". | `BranchCanvas.tsx:58-67,69-93,119`; entry `BranchList.tsx:136-142` |
-| UX-25 | **Blocker** | 4 | The mockup **flow-approval gate and the whole Mockups view are unreachable**: they render only for a selection the sidebar stopped producing three days before the gate was added. README §6 and the architecture doc describe a step no user sees. | `ArtifactWorkspace.tsx:220,241-245,409-411,1810-1953,1927`; commits `2b0c094` → `bf4c7dc` |
+| UX-25 | **Blocker** | 4 | The mockup **flow-approval gate and the whole Mockups view are unreachable**: they render only for a selection the sidebar no longer offers, and the sidebar already lacked that row when the gate landed. README §6 and the architecture doc describe a step no user sees. | `ArtifactWorkspace.tsx:220,241-245,409-411,1810-1953,1927`; gate commit `bf4c7dc` |
 | UX-18 | **Blocker** | 2, 3 | Answering an assumption (Sharpen, Decision Center, Accept defaults) **never changes the PRD prose**. The only applicable patch stamps a `decision` field on the assumption entry, which the structured view does not render; every other proposal is "review this section yourself". | `decisionImpact.ts:944-1002`; `StructuredPRDView.tsx:394-397` |
-| UX-03 | Major | 1 | A **network blip or a missing key on the first call renders as a safety block**: "Request Cannot Be Fulfilled · Blocked · Disallowed Request … falls into a restricted category", with a list of *security-research* alternatives. The missing-key message does not match the regex that would exempt it. | `classifyProjectSafety.ts:35-41,60-68,140-146`; `errors.ts:37` vs `geminiClient.ts:100`; `SafetyReviewView.tsx:31-56` |
+| UX-03 | Major | 1 | A **network blip on the first call renders as a safety block**: "Request Cannot Be Fulfilled · Blocked · Disallowed Request … falls into a restricted category", with a list of *security-research* alternatives. A missing key reaches the same screen from the workspace's Regenerate / Try Again / Run again actions, which have no key gate, because the missing-key message does not match the regex that would exempt it. | `classifyProjectSafety.ts:35-41,60-68,140-146`; `errors.ts:37` vs `geminiClient.ts:100`; `SafetyReviewView.tsx:31-56` |
 | UX-11 | Major | 2 | **The PRD never shows what it is unsure about.** Assumptions, risks and open questions live only in the Decision Center; the components that would render them are unmounted. | `StructuredPRDView.tsx:394-397`; `prd/DecisionLogSection.tsx`, `ReviewConfirmSection.tsx`, `DeferredRisksSection.tsx` (test-only consumers) |
 | UX-27 | Major | 4 | **A mockup cannot be turned into a requirement.** "Flag to plan" exists only on system-generated review notes; the free-text control is never rendered in the Screens view; no annotation feature exists anywhere in `src/`. | `ScreenReviewNotes.tsx:220-244`; `ArtifactWorkspace.tsx:1424-1431` vs `1574-1585`; no `annotat*` match in `src/` |
 | UX-42 | Major | all | **The journey rail doubles as a command bar.** Clicking *Finalize* persists a readiness review, *Generate* launches a paid multi-artifact run, *Build* opens Export — while the header keeps a parallel set of buttons with different names for the same acts. | `ProjectWorkspace.tsx:1878-1910,1957-1997` |
@@ -190,14 +193,19 @@ refusal (`classifyProjectSafety.ts:140-146`). The fail-closed result reuses the
 (`:60-68`), so the user sees **"Request Cannot Be Fulfilled · Blocked ·
 Disallowed Request — Synapse identified that this request falls into a
 restricted category"** and "If your goal is legitimate security research…"
-(`SafetyReviewView.tsx:31-56`) for a dropped connection. Worse, a missing key
-is *meant* to be exempt (`CONFIG_ERROR_CATEGORIES`, `:35-41`) but the thrown
+(`SafetyReviewView.tsx:31-56`) for a dropped connection. A missing key is
+*meant* to be exempt (`CONFIG_ERROR_CATEGORIES`, `:35-41`) but the thrown
 message "Add a Gemini API key in Settings to generate PRDs." (`geminiClient.ts:100`)
 does not match the `/missing gemini api key/i` pattern (`errors.ts:37`), so it
-is categorised `unknown` and fails closed too. *Why:* the first call a new user
-makes is the one most likely to hit a cold network or an unprimed vault; an
-accusation-shaped screen at that moment costs trust that a plain "we couldn't
-reach the model, try again" would not. *Fix:* a distinct `unverified` outcome
+is categorised `unknown` and fails closed too. That variant is **not** reachable
+from the Home submit, which primes the vault and bounces to Settings first
+(`HomePage.tsx:211-214`); it is reachable from the workspace's *Regenerate
+Draft*, *Try Again* and per-section *Run again* actions, none of which checks
+`hasGeminiKey()` (no reference in `ProjectWorkspace.tsx`, `runPrdGeneration.ts`
+or `prdService.ts`) — for example on a device that never had a key configured.
+*Why:* the first call a new user makes is the one most likely to hit a cold
+network; an accusation-shaped screen at that moment costs trust that a plain
+"we couldn't reach the model, try again" would not. *Fix:* a distinct `unverified` outcome
 with calm copy and a Retry; widen the pattern to `/gemini api key/i`; add the
 missing-key test string to `classifyProjectSafety.test.ts`.
 
@@ -447,9 +455,15 @@ and checkpoint destination naming the mockup is rerouted to Screens
 (`SCREENS_HOSTED_SLOTS`, `:241-245,409-411`), and the only `setSelected` that
 could yield `'mockup'` is an update-plan hop for a plan kind that is never
 generated for mockups (`:1341`; update plans cover four other artifacts). The
-Screens experience has no approval control of its own. The row was removed on
-2026-07-20 (`2b0c094`) and the gate was added into that branch on 2026-07-23
-(`bf4c7dc`) — the gate has never been reachable in production. README §6
+Screens experience has no approval control of its own. When the gate landed
+(`bf4c7dc`, 2026-07-23) the sidebar already listed only `user_flows` and
+`screens` (that commit's own `ArtifactWorkspace.tsx:186`), the commit added no
+route to the mockup selection (its only new selection call is
+`setSelected('user_flows')`), and no commit in the repository's history adds
+or removes a `setSelected('mockup')` route — so the gate has never been
+reachable in production. (Which commit retired the Mockups row cannot be
+dated: the file's history begins at the flattened import commit `2b0c094`.)
+README §6
 ("approve the flows and pick which screens to render before Synapse generates
 the images") and `WORKSPACE_AND_ARTIFACTS.md:129-162` describe a step no user
 sees; `mockupApproval` is never written. *Fix:* mount the gate at the top of the
@@ -937,7 +951,8 @@ to check UX-11, UX-18, UX-21 and UX-25 at zero LLM cost.
 **Re-verified by the auditor at the cited lines:** UX-01–06, UX-11 (the
 structured-view comment and unmounted components), UX-12 (readiness predicate
 and Decision Center count), UX-17, UX-18 (patch shape), UX-19–25, UX-27,
-UX-35, UX-36, UX-42–UX-46, UX-51, the mockup gate commit timeline, the absence
+UX-35, UX-36, UX-42–UX-46, UX-51, the sidebar state at the mockup gate's own
+commit, the absence
 of annotation / `Markup*` code, the absence of reduced-motion and dark-mode
 handling in the product, and the rail/header wiring.
 
