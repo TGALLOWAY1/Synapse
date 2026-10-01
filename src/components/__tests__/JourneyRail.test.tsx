@@ -71,4 +71,26 @@ describe('JourneyRail', () => {
         fireEvent.click(screen.getByRole('button', { name: /Build/ }));
         expect(onStepChange).toHaveBeenCalledWith('build');
     });
+
+    it('disables Build while a historical PRD version is selected, even from the Build stage', () => {
+        const onStepChange = vi.fn();
+        render(
+            <JourneyRail
+                presentation={deriveJourneyPresentation({
+                    currentStage: 'workspace',
+                    hasStructuredPlan: true,
+                    viewingHistoricalVersion: true,
+                })}
+                onStepChange={onStepChange}
+            />,
+        );
+
+        const build = screen.getByRole('button', { name: /Build/ });
+        expect(build).toBeDisabled();
+        expect(build).not.toHaveAttribute('aria-current');
+        expect(screen.getByRole('button', { name: /Plan/ })).toHaveAttribute('aria-current', 'step');
+        fireEvent.click(build);
+        expect(onStepChange).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: /Decide/ })).toBeEnabled();
+    });
 });

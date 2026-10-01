@@ -206,7 +206,12 @@ tests** — problems here will only be caught by this section.
       finalize or commit first, and open decisions do not block it. If no
       visual direction was chosen yet, the picker appears → choose a preset →
       **Continue with …**. A plan with a failed section first asks
-      *Generate assets from an incomplete PRD?*.
+      *Generate assets from an incomplete PRD?*. Confirming it is remembered
+      for that version: a reload mid-run resumes, and **Sync outputs** can
+      regenerate without asking again. An unconfirmed incomplete version shows
+      the same confirmation inside **Sync outputs** instead of a dead end, and
+      editing, restoring, or re-running a section asks again while sections
+      are still failed.
 - [ ] All five workspace destinations populate: **Design System**, **User
       Flows**, **Screens**, **Data Model**, **Implementation Plan**. Under the
       hood this means all six active core outputs — including **Component
@@ -301,6 +306,12 @@ engine), `src/components/downstream/`.
 - [ ] Restoring an earlier version **appends** a new version — the history is
       not rewound and nothing is deleted.
 - [ ] Work done after the restored point is still reachable in history.
+- [ ] Viewing an older version (Plan → **Timeline** → a past version) is
+      read-only: the journey's **Build** step is inert, and anything that opens
+      the outputs (e.g. **Continue to Build**) returns to the latest version
+      first — no output can be regenerated from the old PRD.
+- [ ] After restoring, an update plan for an affected output reads
+      *Confirmed source change*, not *provisional*.
 - [ ] Overflow menu → **Project History** shows the event timeline.
 
 Interrupt a generation (reload the page mid-run):

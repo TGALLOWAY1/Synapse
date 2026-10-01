@@ -46,6 +46,29 @@ describe('journey presentation (Plan · Decide · Build)', () => {
         }
     });
 
+    // History Mode (an old PRD version selected) is a read-only Plan view:
+    // the Build stage would regenerate outputs from that old PRD.
+    it('keeps Build inert while a historical PRD version is selected, and presents Plan', () => {
+        for (const currentStage of ['prd', 'workspace'] as const) {
+            const presentation = deriveJourneyPresentation({
+                currentStage,
+                hasStructuredPlan: true,
+                viewingHistoricalVersion: true,
+                openItemCount: 2,
+            });
+            expect(presentation.activeStep).toBe('plan');
+            expect(presentation.steps.find(step => step.id === 'build')).toMatchObject({ enabled: false, current: false });
+            // Decisions apply to the latest plan, so Decide stays available.
+            expect(presentation.steps.find(step => step.id === 'decide')).toMatchObject({ enabled: true, badge: 2 });
+            expect(JSON.stringify(presentation)).not.toMatch(/unavailable/i);
+        }
+        expect(deriveJourneyPresentation({
+            currentStage: 'workspace',
+            hasStructuredPlan: true,
+            viewingHistoricalVersion: false,
+        }).activeStep).toBe('build');
+    });
+
     it('badges Decide with the open-item count only when something is open', () => {
         const withItems = deriveJourneyPresentation({ currentStage: 'prd', hasStructuredPlan: true, openItemCount: 4 });
         expect(withItems.steps.find(step => step.id === 'decide')?.badge).toBe(4);

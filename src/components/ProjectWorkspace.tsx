@@ -32,6 +32,7 @@ import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
 import { deriveHeaderPlanStatus, isPreflightClarifying, isPrdRunInFlight } from '../lib/prdRunState';
+import { isIncompleteAcknowledged } from '../lib/artifactGenerationGate';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
     getArtifactMeta,
@@ -101,6 +102,7 @@ import {
 } from './review/OutputSyncReviewQueue';
 import {
     deriveJourneyPresentation,
+    isOutputPipelineStage,
     type JourneyStepId,
 } from '../lib/journeyPresentation';
 
@@ -134,7 +136,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, getHistoryEvents, getBranchesForSpine, getSpineVersions, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, compareAndAppendStructuredPRD, revertSpineToVersion, acknowledgeIncompleteSpine, updateProjectProductMetadata, getHistoryEvents, getBranchesForSpine, getSpineVersions, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the outputs status pill.
@@ -395,6 +397,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
 
     const applyPresentationStage = useCallback((stage: PipelineStage) => {
         if (!projectId) return;
+        // History Mode is a read-only view of an old PRD on the Plan surface;
+        // the Build stage always works on the latest plan, so going there
+        // leaves History Mode first (see `pipelineStage` below).
+        if (isOutputPipelineStage(stage)) setViewedSpineId(null);
         if (capabilities.canPersistWorkflowState) setProjectStage(projectId, stage);
         else setReadOnlyStage(stage);
     }, [capabilities.canPersistWorkflowState, projectId, setProjectStage]);
@@ -659,13 +665,21 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         latestSpine?.structuredPRD && latestSpine.safetyReview?.status !== 'blocked'
             ? 'workspace'
             : 'prd';
-    const pipelineStage = capabilities.canPersistWorkflowState
+    const requestedStage: PipelineStage = capabilities.canPersistWorkflowState
         ? project?.currentStage || 'prd'
         : readOnlyStage ?? readOnlyDefaultStage;
     const setPipelineStage = applyPresentationStage;
 
     const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
     const isOldVersion = activeSpine?.id !== latestSpine?.id;
+    // The Build stage never renders against a historical spine: its retry and
+    // regenerate actions would generate outputs from that old PRD and make them
+    // the project's current ones. While History Mode is on, an output stage
+    // presents the (read-only) Plan view instead — the persisted stage is left
+    // alone, so "Return to Latest" lands back on Build.
+    const pipelineStage: PipelineStage = isOldVersion && isOutputPipelineStage(requestedStage)
+        ? 'prd'
+        : requestedStage;
 
 
     const branches = activeSpine ? getBranchesForSpine(projectId, activeSpine.id) : [];
@@ -1300,8 +1314,10 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         // Incomplete-PRD gate: the explicit "generate from a partial PRD?"
         // confirmation is interposed here — startAssetGeneration's
         // acknowledgeIncomplete flag may only ever carry a real user
-        // acknowledgement (a legacy `isFinal` spine already recorded one).
-        if (persistedFailedSections.length > 0 && !activeSpine.isFinal) {
+        // acknowledgement. Once confirmed, it is recorded on this spine
+        // version (`incompleteAcknowledgedAt`; legacy `isFinal` counts too),
+        // so it is asked once per version, not on every run.
+        if (persistedFailedSections.length > 0 && !isIncompleteAcknowledged(activeSpine)) {
             setShowIncompleteGenerateConfirm(true);
             return;
         }
@@ -1425,6 +1441,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         currentStage: pipelineStage,
         hasStructuredPlan: Boolean(activeSpine?.structuredPRD),
         safetyBlocked: activeSpine?.safetyReview?.status === 'blocked',
+        viewingHistoricalVersion: isOldVersion,
         decisionCenterOpen,
         openItemCount,
     });
@@ -1686,7 +1703,14 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                     confirmLabel="Generate anyway"
                     dismissOnBackdropClick={false}
                     onCancel={() => setShowIncompleteGenerateConfirm(false)}
-                    onConfirm={() => { setShowIncompleteGenerateConfirm(false); proceedToAssetGeneration(); }}
+                    onConfirm={() => {
+                        setShowIncompleteGenerateConfirm(false);
+                        // Durable record of this explicit acknowledgement, bound to
+                        // this spine version: resume, Sync outputs, and dependency-
+                        // graph regeneration keep working after this first run.
+                        if (activeSpine) acknowledgeIncompleteSpine(projectId, activeSpine.id);
+                        proceedToAssetGeneration();
+                    }}
                 >
                     <p className="text-sm leading-6 text-neutral-600">
                         {persistedFailedSections.length} section{persistedFailedSections.length === 1 ? '' : 's'} of this PRD failed to

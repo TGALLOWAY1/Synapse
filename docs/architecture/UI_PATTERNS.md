@@ -194,16 +194,26 @@ A partial PRD (`generationMeta.failedSections` non-empty) must not silently
 drive downstream artifact generation. `evaluateSpineGenerationGate(spine, opts)`
 is the code-level guardrail (defense-in-depth alongside the UI, mirroring the
 safety-blocked check): it returns `allowed:false` for a safety-blocked spine, a
-spine with no `structuredPRD`, or an incomplete spine that is neither
-acknowledged (`acknowledgeIncomplete`) nor a legacy `isFinal` spine (the durable
-acknowledgement recorded by the removed Finalize flow, so older projects still
-resume/retry after reload; nothing sets `isFinal` any more). `startAll` /
+historical (non-latest, `isLatest === false`) spine, a spine with no
+`structuredPRD`, or an incomplete spine that is not acknowledged — neither by
+the per-run `acknowledgeIncomplete` flag, nor by the durable
+`SpineVersion.incompleteAcknowledgedAt`, nor by a legacy `isFinal` (the record
+the removed Finalize flow left behind; nothing sets it any more). `startAll` /
 `regenerateSlots` early-return when the gate disallows. Every UI route into
 output generation — the Plan page's top-bar **Generate outputs** and the Build
 stage's banner — goes through `ProjectWorkspace.handleGenerateAssets`, which
 interposes an explicit "Generate assets from an incomplete PRD?" confirmation
-for any non-legacy-final spine with `failedSections`; only "Generate anyway"
-proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+for a spine with `failedSections` that is not yet acknowledged; only "Generate
+anyway" proceeds — it passes `acknowledgeIncomplete` for the run AND records
+`incompleteAcknowledgedAt` on that spine version (`acknowledgeIncompleteSpine`,
+a guarded persistent write), so it is asked once per version and resume, Sync
+outputs, and dependency-graph regeneration keep working afterwards. The Sync
+outputs modal (`UpdateAssetsPlanModal`) offers the same confirmation inline
+(`incompletePrdAcknowledgement`) when the latest version is unacknowledged,
+instead of a dead-end reason. The record is bound to the version: a later
+spine version (edit, decision apply, section retry, restore, merge,
+regenerate) never inherits it — only an in-place decision amend of the same
+version keeps it. Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 

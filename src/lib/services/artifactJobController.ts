@@ -37,7 +37,7 @@ import {
 } from '../coreArtifactPipeline';
 import { findMissingRequiredDependencies } from '../artifactDependencyGate';
 import { isAbortError } from '../concurrency';
-import { evaluateSpineGenerationGate } from '../artifactGenerationGate';
+import { evaluateSpineGenerationGate, isHistoricalSpine } from '../artifactGenerationGate';
 import { getStrongModel } from '../geminiClient';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 import { buildAutoMockupSettings } from '../mockupDefaults';
@@ -1128,6 +1128,11 @@ export const artifactJobController = {
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
         assertArtifactGenerationAllowed(args.projectId);
+        // Only the latest PRD may drive generation (the other entry points get
+        // this from evaluateSpineGenerationGate): retrying from a historical
+        // spine would make an old plan's output the current one.
+        if (isHistoricalSpine((useProjectStore.getState().spineVersions[args.projectId] || [])
+            .find(s => s.id === args.spineVersionId))) return;
         if (blockedByRunElsewhere(args.projectId)) return;
         const failureKey = retryFailureKey(args.projectId, slot);
         if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {

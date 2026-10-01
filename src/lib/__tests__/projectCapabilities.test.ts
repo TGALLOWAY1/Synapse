@@ -78,6 +78,10 @@ describe('project capabilities', () => {
         ]) expect(PERSISTENT_STORE_ACTIONS.has(action)).toBe(true);
     });
 
+    it('guards the durable incomplete-PRD acknowledgement like every other spine write', () => {
+        expect(PERSISTENT_STORE_ACTIONS.has('acknowledgeIncompleteSpine')).toBe(true);
+    });
+
     it('no longer lists the removed Finalize/commitment writes', () => {
         for (const action of [
             'markSpineFinal', 'createReadinessReview', 'authorizeReadinessCommitment',

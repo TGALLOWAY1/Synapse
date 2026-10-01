@@ -7,6 +7,10 @@ import type { PipelineStage } from '../types';
  * routes are unchanged, only the presented steps collapsed. There is no
  * Finalize, Generate, or Review step and no "unavailable" label: output
  * generation is reached from the Plan page and the Build stage directly.
+ *
+ * History Mode (a historical, non-latest PRD version selected for viewing)
+ * is a read-only Plan view: Build stays inert there, because the Build stage
+ * would regenerate outputs from that old PRD and make them current.
  */
 export type JourneyStepId = 'plan' | 'decide' | 'build';
 
@@ -33,6 +37,8 @@ export type JourneyPresentationInput = {
     currentStage: PipelineStage;
     hasStructuredPlan: boolean;
     safetyBlocked?: boolean;
+    /** A historical (non-latest) PRD version is selected — History Mode. */
+    viewingHistoricalVersion?: boolean;
     /** The Decision Center slide-over is open over the current surface. */
     decisionCenterOpen?: boolean;
     /** Open decisions + assumptions to confirm. */
@@ -57,7 +63,9 @@ const JOURNEY_STEPS: readonly JourneyStepDefinition[] = [
     },
 ] as const;
 
-const isOutputStage = (stage: PipelineStage) =>
+/** The persisted stage keys the Build step presents (`workspace`, plus the
+ * legacy `mockups` / `artifacts` keys). */
+export const isOutputPipelineStage = (stage: PipelineStage): boolean =>
     stage === 'workspace' || stage === 'mockups' || stage === 'artifacts';
 
 export function deriveJourneyPresentation(
@@ -69,14 +77,17 @@ export function deriveJourneyPresentation(
         decide: safePlan,
         // The Build stage renders only over a safe structured plan; without one
         // the workspace falls back to the plan view, so the step stays inert.
-        build: safePlan,
+        // A historical spine never drives the Build stage (History Mode is a
+        // read-only Plan view), so Build is inert until the user returns to
+        // the latest version.
+        build: safePlan && !input.viewingHistoricalVersion,
     };
     // The Decision Center is a layer over the current surface, so it wins
     // while open. Both planning surfaces (`prd` and the `review` Challenge
     // stage) and a legacy persisted History stage present as Plan.
     const activeStep: JourneyStepId = input.decisionCenterOpen && enabled.decide
         ? 'decide'
-        : safePlan && isOutputStage(input.currentStage)
+        : enabled.build && isOutputPipelineStage(input.currentStage)
             ? 'build'
             : 'plan';
     const openItemCount = Math.max(0, input.openItemCount ?? 0);

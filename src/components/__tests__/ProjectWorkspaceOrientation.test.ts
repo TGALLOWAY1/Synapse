@@ -129,6 +129,49 @@ describe('ProjectWorkspace orientation', () => {
         expect(handler).toContain("setPipelineStage('workspace')");
     });
 
+    // History Mode selects an old PRD version. The Build stage's retry and
+    // regenerate actions would generate outputs from that old PRD and make
+    // them current, so Build is never presented against a historical spine.
+    it('never presents the Build stage against a historical spine', () => {
+        const journeyStart = workspace.indexOf('const journeyPresentation = deriveJourneyPresentation(');
+        const journeyCall = workspace.slice(journeyStart, workspace.indexOf('});', journeyStart));
+        expect(journeyCall).toContain('viewingHistoricalVersion: isOldVersion');
+
+        const stageStart = workspace.indexOf('const pipelineStage: PipelineStage =');
+        expect(stageStart).toBeGreaterThan(-1);
+        const stage = workspace.slice(stageStart, workspace.indexOf(';', stageStart));
+        expect(stage).toContain('isOldVersion && isOutputPipelineStage(requestedStage)');
+        expect(stage).toContain("? 'prd'");
+
+        // Navigating to an output stage leaves History Mode first.
+        const setterStart = workspace.indexOf('const applyPresentationStage = useCallback(');
+        const setter = workspace.slice(setterStart, workspace.indexOf('}, [', setterStart));
+        expect(setter).toContain('if (isOutputPipelineStage(stage)) setViewedSpineId(null);');
+
+        // The header CTA and the Build-stage banner stay hidden there too.
+        for (const gate of ['const showAssetsPill =', 'const showBuildGenerateBanner =']) {
+            const gateStart = workspace.indexOf(gate);
+            expect(workspace.slice(gateStart, workspace.indexOf(';', gateStart))).toContain('!isOldVersion');
+        }
+    });
+
+    // "Generate anyway" is the durable incomplete-PRD acknowledgement now that
+    // Finalize (and its `isFinal`) is gone: recorded on the spine version,
+    // asked once per version, and offered inline wherever Sync outputs needs it.
+    it('records the incomplete-PRD acknowledgement on the spine version and offers it in Sync outputs', () => {
+        const confirmStart = workspace.indexOf('confirmLabel="Generate anyway"');
+        expect(confirmStart).toBeGreaterThan(-1);
+        const confirm = workspace.slice(confirmStart, workspace.indexOf('</ConfirmDialog>', confirmStart));
+        expect(confirm).toContain('acknowledgeIncompleteSpine(projectId, activeSpine.id)');
+
+        const handlerStart = workspace.indexOf('const handleGenerateAssets');
+        const handler = workspace.slice(handlerStart, workspace.indexOf('const openDecisionCenter', handlerStart));
+        expect(handler).toContain('!isIncompleteAcknowledged(activeSpine)');
+
+        expect(artifactWorkspaceSource).toContain('onAcknowledge: () => acknowledgeIncompleteSpine(projectId, latestSpineId)');
+        expect(artifactWorkspaceSource).not.toContain('Acknowledge the incomplete PRD before regenerating outputs.');
+    });
+
     it('keeps critique in Refine while decisions open in the universal slide-over', () => {
         const reviewContainerStart = workspace.indexOf('<ReviewWorkspaceContainer');
         const reviewContainer = workspace.slice(

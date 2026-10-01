@@ -34,6 +34,7 @@ export type SpineSlice = {
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
+    acknowledgeIncompleteSpine: ProjectState['acknowledgeIncompleteSpine'];
     setSpineError: ProjectState['setSpineError'];
     setSpineSafetyReview: ProjectState['setSpineSafetyReview'];
     initPreflightSession: ProjectState['initPreflightSession'];
@@ -462,6 +463,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // A new version is a new plan: it never inherits the previous
+                // version's incomplete-PRD acknowledgement.
+                incompleteAcknowledgedAt: undefined,
                 structuredPRD: nextStructuredPRD,
                 responseText: opts?.responseText ?? src.responseText,
                 // A user edit / retry is a settled state, never an in-flight run.
@@ -664,6 +668,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // Never inherited: a decision apply or a section retry that
+                // leaves sections failed needs its own "Generate anyway".
+                incompleteAcknowledgedAt: undefined,
                 structuredPRD: nextStructuredPRD,
                 responseText: renderPremiumMarkdown(nextStructuredPRD),
                 generationPhase: 'complete',
@@ -744,6 +751,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // A restore appends a new version; it never carries the
+                // restored version's incomplete-PRD acknowledgement.
+                incompleteAcknowledgedAt: undefined,
                 generationPhase: 'complete',
                 generationError: undefined,
                 provenance: {
@@ -799,6 +809,24 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
                 s.id === spineId ? { ...s, generationPhase: 'running' as const, updatedAt: Date.now() } : s
+            );
+            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    acknowledgeIncompleteSpine: (projectId: string, spineId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const spine = projectSpines.find(s => s.id === spineId);
+            // Only the latest, settled, incomplete version can be
+            // acknowledged, and the first acknowledgement is the record.
+            if (!spine || !spine.isLatest || spine.incompleteAcknowledgedAt) return state;
+            if (spine.generationPhase === 'running') return state;
+            if ((spine.generationMeta?.failedSections?.length ?? 0) === 0) return state;
+            const now = Date.now();
+            const updatedSpines = projectSpines.map(s =>
+                s.id === spineId ? { ...s, incompleteAcknowledgedAt: now, updatedAt: now } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });

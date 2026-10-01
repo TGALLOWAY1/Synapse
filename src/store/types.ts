@@ -303,6 +303,14 @@ export interface ProjectState {
     // interrupted-generation error (see markInterruptedGenerations).
     markSpineGenerationStarted: (projectId: string, spineId: string) => void;
 
+    // Durable incomplete-PRD acknowledgement: records the user's explicit
+    // "Generate anyway" on the LATEST spine when it has failed sections, so
+    // the generation gate keeps allowing resume / Sync outputs / dependency-
+    // graph regeneration for that exact version. No-op for a complete,
+    // historical, unknown, or already-acknowledged spine. A later spine
+    // version never inherits it.
+    acknowledgeIncompleteSpine: (projectId: string, spineId: string) => void;
+
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;
 
