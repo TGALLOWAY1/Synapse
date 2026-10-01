@@ -22,6 +22,7 @@ import { PrdViewTabs } from './prd/PrdViewTabs';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
 import { isDisplayableFeatureId } from '../lib/derive/prdDecisions';
 import { groupConstraintItems } from '../lib/prdConstraintCategories';
+import { isStructuredPrdContentEqual } from '../lib/structuredPrdEquality';
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
 import type { ConsequentialPrdEditRecognition } from '../lib/planning';
@@ -66,6 +67,12 @@ interface StructuredPRDViewProps {
     structuredPRD: StructuredPRD;
     readOnly: boolean;
     /**
+     * Short explanation shown above the content while `readOnly` is set for a
+     * temporary reason (e.g. "Editing unlocks when generation finishes.").
+     * Optional — hosts that are permanently read-only omit it.
+     */
+    readOnlyNotice?: string;
+    /**
      * Active view (Overview | Features). Optional controlled prop: hosts wire it
      * to URL query state (`?prdView=…`) for deep-linkable, refresh-stable
      * navigation. When omitted the component keeps view state internally, so it
@@ -78,7 +85,7 @@ interface StructuredPRDViewProps {
     /**
      * Fired the moment a branch is created from the selection popover (before the
      * AI reply resolves). Hosts use it to reveal the branches sidebar so the new
-     * branch thread + "Consolidate to Document" bar are immediately visible.
+     * branch thread + its "Consolidate now" action are immediately visible.
      * Optional — standalone/legacy usages (e.g. tests) render unchanged.
      */
     onBranchCreated?: () => void;
@@ -96,6 +103,13 @@ type EditingSection =
     | 'primaryActions'
     | null;
 
+// Outcome of a PRD save attempt. 'locked': the view is read-only (e.g. a PRD
+// run started while an editor was open) — nothing is written and the open
+// editor keeps its draft. 'unchanged': the edit is content-identical to the
+// current PRD — nothing is appended, because every new version flags all
+// generated outputs as needing an update.
+type SaveOutcome = 'saved' | 'unchanged' | 'locked';
+
 // Human labels for edit-summary provenance (e.g. "Updated section: Vision").
 const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'targetUsers' | 'risks', string> = {
     vision: 'Vision',
@@ -105,7 +119,7 @@ const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'target
     risks: 'Risks',
 };
 
-export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions, onBranchCreated }: StructuredPRDViewProps) {
+export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, readOnlyNotice, view, onViewChange, onOpenDecisions, onBranchCreated }: StructuredPRDViewProps) {
     const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PLANNING_RECORDS);
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
@@ -207,7 +221,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // Single branch-creation path shared by the typed-intent form (desktop) and
     // the one-tap action chips (mobile). Same history-tracked flow as before.
     const submitBranch = async (rawIntent: string) => {
-        if (!selection || !rawIntent.trim() || isSubmitting) return;
+        if (readOnly || !selection || !rawIntent.trim() || isSubmitting) return;
         try {
             setIsSubmitting(true);
             const anchorText = selection.text;
@@ -237,12 +251,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     // Edits must NOT overwrite the current version in place — append a new
     // version (preserving history) via editSpineStructuredPRD. Each call site
-    // passes a useful default summary; no manual entry required.
+    // passes a useful default summary; no manual entry required. Nothing is
+    // written while read-only (a PRD run may still be rewriting this spine in
+    // place — appending would fork it) or when the edit changes nothing.
     const savePRD = (
         updated: StructuredPRD,
         editSummary: string,
         options?: { recognizeConsequentialEdit?: boolean },
-    ) => {
+    ): SaveOutcome => {
+        if (readOnly) return 'locked';
+        if (isStructuredPrdContentEqual(structuredPRD, updated)) return 'unchanged';
         const result = editSpineStructuredPRD(projectId, spineId, updated, {
             responseText: structuredPRDToMarkdown(updated),
             changeSource: 'user_edit',
@@ -250,6 +268,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             recognizeConsequentialEdit: options?.recognizeConsequentialEdit,
         });
         setEditRecognition(result.recognition?.classification === 'copy_edit' ? null : result.recognition ?? null);
+        return 'saved';
     };
 
     // Decisions-tab confirm/reject/undo edits. These coalesce onto the latest
@@ -262,6 +281,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         kind: 'confirmed' | 'corrected' | 'reopened',
         count = 1,
     ) => {
+        if (readOnly) return;
         editSpineStructuredPRD(projectId, spineId, updated, {
             responseText: structuredPRDToMarkdown(updated),
             changeSource: 'decision_edit',
@@ -281,28 +301,31 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         setEditValue('');
     };
 
+    // Section saves close the editor unless the save was locked out, in which
+    // case the draft stays open until editing unlocks. An unchanged save just
+    // closes the editor.
     const saveTextSection = (section: 'vision' | 'coreProblem' | 'architecture') => {
         const updated = { ...structuredPRD, [section]: editValue };
-        savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`);
+        if (savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`) === 'locked') return;
         setEditingSection(null);
     };
 
     const saveListSection = (section: 'targetUsers' | 'risks') => {
         const items = editValue.split('\n').map(s => s.trim()).filter(Boolean);
         const updated = { ...structuredPRD, [section]: items };
-        savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`);
+        if (savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`) === 'locked') return;
         setEditingSection(null);
     };
 
     const saveDomainEntities = () => {
         const updated = { ...structuredPRD, domainEntities: parseEntities(editValue) };
-        savePRD(updated, 'Updated section: Domain Entities');
+        if (savePRD(updated, 'Updated section: Domain Entities') === 'locked') return;
         setEditingSection(null);
     };
 
     const savePrimaryActions = () => {
         const updated = { ...structuredPRD, primaryActions: parseActions(editValue) };
-        savePRD(updated, 'Updated section: Primary Actions');
+        if (savePRD(updated, 'Updated section: Primary Actions') === 'locked') return;
         setEditingSection(null);
     };
 
@@ -1284,6 +1307,15 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     return (
         <div className="relative">
+            {readOnly && readOnlyNotice && (
+                <p
+                    role="status"
+                    className="mb-4 flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs font-medium text-indigo-800"
+                >
+                    <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+                    {readOnlyNotice}
+                </p>
+            )}
             <PrdViewTabs
                 active={activeView}
                 onChange={setView}

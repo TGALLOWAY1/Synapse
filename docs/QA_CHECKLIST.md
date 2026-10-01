@@ -67,7 +67,9 @@ organized."*
 - [ ] Type the idea, set a project name, choose **App**.
 - [ ] Submit. The dialog **"How would you like to start?"** appears with three
       options: **Develop the idea**, **Draft a working plan**, **Explore deeply**.
-- [ ] Choose **Develop the idea**. Clarification questions generate.
+- [ ] Choose **Develop the idea**. Clarification questions generate (also on
+      `npm run dev`, whose React StrictMode double-runs effects). While you
+      answer, the header badge reads **Clarifying…**, not Generating….
 - [ ] Questions arrive one at a time with a **Question N of M** progress header.
 - [ ] The questions are worth asking — they target decisions that change the
       product (who it is for, the core workflow, scope), not trivia that could
@@ -78,7 +80,8 @@ organized."*
       **Open questions**.
 - [ ] **Edit answers** returns to the questions without losing them.
 - [ ] **Generate PRD** starts generation; the progress timeline shows real
-      stages advancing, not a static spinner.
+      stages advancing, not a static spinner. Until it finishes the plan is
+      read-only, with **"Editing unlocks when generation finishes."** above it.
 - [ ] Generation completes and lands on the plan view.
 
 **Safety gate** — start a second project with an idea that should be refused
@@ -104,7 +107,9 @@ On the **Overview** tab:
 - [ ] Because the idea was vague, the plan **surfaces gaps** — assumptions and
       open decisions — rather than inventing certainty about everything.
 - [ ] Each section's **Edit** works in place: change text, **Save changes**,
-      value persists. **Cancel editing** discards.
+      value persists. **Cancel editing** discards. **Save changes** with
+      nothing changed creates no new version (the header version number stays
+      put).
 
 On the **Features** tab:
 
@@ -130,13 +135,15 @@ This is the least-covered path in the codebase — exercise it properly.
 - [ ] Pick an action, give an instruction, and start a branch.
 - [ ] The branch conversation returns a proposal that actually addresses the
       instruction.
-- [ ] **Consolidate to Document** → choose a scope → generate the patch.
+- [ ] **Consolidate now** → choose a scope → generate the patch.
 - [ ] The patch preview shows what will change.
 - [ ] **Commit to New Spine** applies it, and the plan text visibly changes.
 - [ ] The change is **appended** as a new version — the previous version is
       still in Version History, not overwritten.
 - [ ] If consolidation fails to find its anchor, you get a clear error — the
       edit is not silently dropped.
+- [ ] Open branches survive other edits: with a branch still open, edit a
+      section inline — the branch is still listed under **Active Branches**.
 
 Then stage several edits:
 

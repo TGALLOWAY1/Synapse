@@ -31,6 +31,7 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignSetupStep } from './setup/DesignSetupStep';
 import { shouldShowDesignSetup } from '../lib/designSetup';
+import { deriveHeaderPlanStatus, isPreflightClarifying, isPrdRunInFlight } from '../lib/prdRunState';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
     getArtifactMeta,
@@ -773,6 +774,22 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     );
     const isPRDActivelyGenerating = isPRDGenerating || sectionsStillRunning;
 
+    // A PRD run may still be rewriting the viewed spine in place. Unlike
+    // isPRDActivelyGenerating this also covers the final consistency-review
+    // pass (no section status) and is never true during the preflight
+    // interview — it drives the header badge's "Generating…".
+    const isActivePrdRunInFlight = isPrdRunInFlight(activeSpine, { sectionsRunning: sectionsStillRunning });
+    // PRD edit lock: while a run is writing the LATEST spine in place, nothing
+    // may append a version on top of it — the new latest would freeze the
+    // partial PRD while the finished PRD landed on a hidden older version (and
+    // outputs would generate from the truncated one). Gates every PRD edit
+    // entry point: the PRD view (inline/feature edits, add/delete, highlight →
+    // branch), the branch rail (consolidate / stage / apply staged), restore,
+    // and Regenerate Draft — and hides the outputs pill, so no output starts
+    // from a spine still being rewritten. The compare-and-append barrier
+    // refuses such appends too.
+    const isPrdEditLocked = isPrdRunInFlight(latestSpine, { sectionsRunning: sectionsStillRunning });
+
     // A settled run can still hold a failed section (the pipeline returns a
     // partial PRD without setting generationError). Keep the progress timeline
     // — and its Run again affordance — visible while any section is in error.
@@ -1233,10 +1250,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     // Optional preflight clarification: while a non-completed session exists and
     // no PRD has been produced (and the request isn't blocked), the workspace
     // hosts the clarification flow instead of the PRD/progress view.
-    const showPreflight = !!activeSpine?.preflightSession
-        && !activeSpine.preflightSession.completed
-        && !activeSpine.structuredPRD
-        && activeSpine.safetyReview?.status !== 'blocked';
+    const showPreflight = isPreflightClarifying(activeSpine);
 
     // Setup-stage design selection: right after clarification (or immediately,
     // on the Generate Immediately path), while PRD generation runs in the
@@ -1299,7 +1313,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
     };
 
     const handleRestoreSpine = (sourceSpineId: string) => {
-        if (!canPerformProjectAction(projectId, 'persist')) return;
+        // A restore appends a new latest version — never on top of a running PRD.
+        if (!canPerformProjectAction(projectId, 'persist') || isPrdEditLocked) return;
         revertSpineToVersion(projectId, sourceSpineId);
         // Return to the (new) latest version after restoring.
         setViewedSpineId(null);
@@ -1338,7 +1353,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         // see the stale React state and would launch two concurrent pipelines
         // whose results interleave on different spines.
         if (regenerateInFlight.current) return;
-        if (!projectId || !canPerformProjectAction(projectId, 'generate') || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
+        if (!projectId || !canPerformProjectAction(projectId, 'generate') || !latestSpine || isGenerating || hasBranches || isOldVersion || isPrdEditLocked) return;
         regenerateInFlight.current = true;
         try {
             setIsGenerating(true);
@@ -1429,6 +1444,11 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 },
             });
             if (appendResult.status === 'stale') {
+                if (appendResult.reason === 'generation_running') {
+                    setSectionStatus(projectId, id, { status: 'error', error: 'PRD generation was still running, so this retry was not saved. Run it again once generation finishes.' });
+                    appendPrdProgress(projectId, `↻ ${title} finished while generation was still running — run it again once it finishes.`);
+                    return;
+                }
                 setSectionStatus(projectId, id, { status: 'error', error: 'The PRD changed before this retry could be saved. Retry on the latest version.' });
                 appendPrdProgress(projectId, `↻ ${title} finished, but the PRD changed — run it again on the latest version.`);
                 return;
@@ -1503,9 +1523,11 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 : 'Generate exploratory outputs from this working plan — committing the plan comes first';
     // `structuredPRD` turns truthy after the FIRST section streams in, so this
     // pill used to appear mid-generation and invite the user to build outputs
-    // from a half-written plan. Gate it on the run being settled.
+    // from a half-written plan. Gate it on the run being settled — including
+    // the final consistency-review pass, which still rewrites the spine in
+    // place but emits no section status (isPrdEditLocked covers it).
     const showAssetsPill = !!activeSpine?.structuredPRD
-        && !isPRDActivelyGenerating
+        && !isPrdEditLocked
         && activeSpine?.safetyReview?.status !== 'blocked'
         && !isOldVersion
         && pipelineStage !== 'workspace';
@@ -1909,21 +1931,19 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         handleExport();
     };
 
-    const headerPlanStatus = activeSpine?.safetyReview?.status === 'blocked'
-        ? 'Blocked'
-        : activeSpine?.generationError
-            ? 'Generation failed'
-            : isPRDActivelyGenerating
-                ? 'Generating…'
-                : isCommitmentUnverifiable
-                    ? 'Readiness unavailable'
-                    : displaysCurrentCommitment
-                        ? isLegacyPlanCommitted
-                            ? 'Legacy commitment · readiness not recorded'
-                            : currentCommittedReadiness?.review.conclusion === 'not_ready'
-                                ? 'Proceeding with accepted risk'
-                                : 'Plan committed'
-                        : 'Working plan';
+    // "Clarifying…" while the preflight interview runs (the spine only carries
+    // the generation placeholder then — no PRD run has started), "Generating…"
+    // only once a run is actually in flight.
+    const headerPlanStatus = deriveHeaderPlanStatus({
+        blocked: activeSpine?.safetyReview?.status === 'blocked',
+        generationFailed: !!activeSpine?.generationError,
+        clarifying: showPreflight,
+        generating: isActivePrdRunInFlight,
+        commitmentUnverifiable: isCommitmentUnverifiable,
+        displaysCurrentCommitment,
+        legacyCommitted: isLegacyPlanCommitted,
+        acceptedRisk: currentCommittedReadiness?.review.conclusion === 'not_ready',
+    });
 
     return (
         <div className="flex h-screen flex-col overflow-x-hidden bg-neutral-900 text-neutral-100">
@@ -1942,7 +1962,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`max-w-[44vw] truncate whitespace-nowrap rounded px-2 py-0.5 text-xs md:max-w-none md:shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`max-w-[44vw] truncate whitespace-nowrap rounded px-2 py-0.5 text-xs md:max-w-none md:shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : (showPreflight || isActivePrdRunInFlight) ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine ? `${getVersionLabel(activeSpine.id)} · ${headerPlanStatus}` : 'Initializing…'}
                     </span>
                     {!capabilities.isReadOnly && (
@@ -2033,7 +2053,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                 </button>
                                 <button
                                     onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
-                                    disabled={isGenerating || hasBranches || isOldVersion}
+                                    disabled={isGenerating || hasBranches || isOldVersion || isPrdEditLocked}
+                                    title={isPrdEditLocked ? 'Regenerate unlocks when generation finishes.' : undefined}
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
                                 >
                                     <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
@@ -2221,7 +2242,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                         after: latestSpine?.structuredPRD,
                     })}
                     getStaleArtifactTitles={getStaleArtifactTitles}
-                    onRestore={handleRestoreSpine}
+                    onRestore={isPrdEditLocked ? undefined : handleRestoreSpine}
                     onClose={() => setShowPrdHistory(false)}
                 />
             )}
@@ -2413,12 +2434,14 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                         Compare with current
                                     </button>
                                 )}
-                                <button
-                                    onClick={() => setBannerRestoreOpen(true)}
-                                    className="font-semibold underline hover:text-yellow-900"
-                                >
-                                    Restore this version
-                                </button>
+                                {!isPrdEditLocked && (
+                                    <button
+                                        onClick={() => setBannerRestoreOpen(true)}
+                                        className="font-semibold underline hover:text-yellow-900"
+                                    >
+                                        Restore this version
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => setViewedSpineId(null)}
                                     className="font-semibold underline hover:text-yellow-900"
@@ -2656,7 +2679,8 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                                     projectId={projectId}
                                                     spineId={activeSpine.id}
                                                     structuredPRD={activeSpine.structuredPRD}
-                                                    readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
+                                                    readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist') || isPrdEditLocked}
+                                                    readOnlyNotice={isPrdEditLocked && !isOldVersion ? 'Editing unlocks when generation finishes.' : undefined}
                                                     view={prdView}
                                                     onViewChange={setPrdView}
                                                     onOpenDecisions={(recordId, returnTo) => openDecisionCenter(recordId, returnTo ?? planReturnTarget)}
@@ -2726,6 +2750,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                                         onCanvasOpen={(branchId) => setActiveCanvasBranchId(branchId)}
                                         onStage={handleStageBranch}
                                         onReviewStaged={() => setShowStagedReview(true)}
+                                        readOnly={isPrdEditLocked}
                                     />
                                 ) : (
                                     <div className="text-sm text-neutral-500 p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4 flex items-center justify-center gap-2">

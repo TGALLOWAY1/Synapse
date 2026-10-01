@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { clusterGroundedFindings, validateSpecialistFindings } from '../normalize';
-import { parseSpecialistOutput, SpecialistOutputValidationError } from '../specialistOutput';
+import {
+    MAX_SPECIALIST_FINDINGS,
+    parseSpecialistOutput,
+    specialistOutputSchema,
+    SpecialistOutputValidationError,
+} from '../specialistOutput';
 import { makeManifest, validCoverageChecks, validResponse } from './reviewTestUtils';
 
 describe('specialist output and clustering', () => {
@@ -14,6 +19,30 @@ describe('specialist output and clustering', () => {
             findings: [],
         }));
         expect(output.findings).toEqual([]);
+    });
+
+    it('keeps only the first MAX_SPECIALIST_FINDINGS findings instead of rejecting a long response', () => {
+        const manifest = makeManifest();
+        const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const template = JSON.parse(validResponse(locator)) as { findings: Array<Record<string, unknown>> };
+        const findings = Array.from({ length: MAX_SPECIALIST_FINDINGS + 3 }, (_, index) => ({
+            ...template.findings[0],
+            title: `Finding ${index + 1}`,
+        }));
+        // Anything past the cap is dropped before validation, so even a
+        // malformed overflow item cannot fail the run.
+        findings.push({ title: 'Malformed overflow finding' });
+        const output = parseSpecialistOutput(JSON.stringify({ ...template, findings }));
+        expect(output.findings).toHaveLength(MAX_SPECIALIST_FINDINGS);
+        expect(output.findings.map(finding => finding.title)).toEqual(
+            Array.from({ length: MAX_SPECIALIST_FINDINGS }, (_, index) => `Finding ${index + 1}`),
+        );
+    });
+
+    it('sends a response schema with no array bounds (Gemini rejects a bounded findings array with HTTP 400)', () => {
+        const serialized = JSON.stringify(specialistOutputSchema);
+        expect(serialized).not.toContain('maxItems');
+        expect(serialized).not.toContain('minItems');
     });
 
     it('rejects invalid closed-set fields', () => {

@@ -93,6 +93,23 @@ not reintroduce per-component `onMouseUp` selection logic.
     already type `Highlight` / `HighlightRegistry` (as `Map<string,
     Highlight>`), so no ambient declaration is required.
 
+- **Locked while a PRD run is in flight.** `ProjectWorkspace` renders
+  `StructuredPRDView` with `readOnly` (plus `readOnlyNotice` — "Editing
+  unlocks when generation finishes.") whenever
+  `isPrdRunInFlight(latestSpine, …)` holds (`src/lib/prdRunState.ts`; see the
+  generation lifecycle in STATE_AND_AUTH.md — it also covers the final
+  consistency-review pass). Read-only disables the selection hook (no dialog,
+  no new branch), every inline section and feature editor, add/delete/confirm
+  feature, and the grounding refresh; `savePRD` / `saveDecision` /
+  `submitBranch` also refuse while read-only, so an editor already open when
+  the lock engages keeps its draft and Save writes nothing until unlock. The
+  branch rail (`BranchList readOnly`), restore, and Regenerate Draft are locked
+  too, and the Generate outputs pill is hidden — nothing may append a version
+  on top of, or start outputs from, a spine the pipeline is still writing in
+  place.
+  Saving a section with nothing changed appends no version (the editor just
+  closes).
+
 `index.html` carries `viewport-fit=cover` so safe-area insets resolve on
 notched devices.
 

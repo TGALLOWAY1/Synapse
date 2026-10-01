@@ -51,7 +51,9 @@ export type CompareAndAppendStructuredPRDResult =
         status: 'stale';
         expectedLatestSpineId: string;
         actualLatestSpineId?: string;
-        reason?: 'spine_changed' | 'content_changed' | 'decision_changed';
+        // 'generation_running': the latest spine is still being written in
+        // place by a PRD run; appending on top of it would fork the run.
+        reason?: 'spine_changed' | 'content_changed' | 'decision_changed' | 'generation_running';
     };
 
 export type EditSpineStructuredPRDResult = {
@@ -59,6 +61,10 @@ export type EditSpineStructuredPRDResult = {
     /** Present only when a user-authored content edit ran the bounded
      * consequential-edit recognizer. */
     recognition?: import('../lib/planning/consequentialEditRecognition').ConsequentialPrdEditRecognition;
+    /** True when the edit was content-identical to the edited version (see
+     * isStructuredPrdContentEqual): nothing was appended or amended, and
+     * `newSpineId` is the edited version's own id. */
+    unchanged?: boolean;
 };
 
 export type ReadinessMutationFailureReason =

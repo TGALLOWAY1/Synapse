@@ -1,5 +1,6 @@
 import { canonicalSpineToPromptJson } from '../canonicalPrdSpine';
 import { SPECIALIST_REGISTRY } from './specialists';
+import { MAX_SPECIALIST_FINDINGS } from './specialistOutput';
 import type { ReviewContextManifest, ReviewSpecialistId } from './types';
 
 const MAX_LOCATORS_PER_SOURCE = 40;
@@ -92,6 +93,6 @@ export function buildSpecialistPrompt(
         'Evidence locator index (the only admissible evidence):',
         JSON.stringify(locatorIndex, null, 2),
         '',
-        'Return only the required JSON object. Keep findings concise and actionable.',
+        `Return only the required JSON object. Keep findings concise and actionable. Return at most ${MAX_SPECIALIST_FINDINGS} findings, most material first.`,
     ].join('\n');
 }

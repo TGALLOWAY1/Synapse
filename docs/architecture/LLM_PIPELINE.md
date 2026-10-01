@@ -52,6 +52,22 @@
   hand a wide section zero headroom. When adding a section that emits several
   collections in one response, give it the wide cap.
 
+  **Response schemas: never bound arrays of objects.** Gemini rejects some
+  `responseSchema`s outright — HTTP 400 `INVALID_ARGUMENT` ("Request contains
+  an invalid argument."), before any generation — when an array of objects
+  carries `maxItems`. Verified 2026-10 against `gemini-3.1-pro-preview` and
+  `gemini-3.8-flash`: the specialist-review `findings` array (`maxItems: 12`)
+  and `complexTargetReasoningSchema`'s `candidates` (`maxItems: 12`, with a
+  nested `questions` `maxItems: 5`) failed every call, and the identical
+  schemas without the bounds return 200. (A small bounded array such as
+  `decisionOptionsSchema`'s 2–3 `options` is accepted, but don't rely on it.)
+  Keep the schema unbounded, state the limit in the prompt, and enforce counts
+  in code after parsing — truncate (the specialist prompt asks for at most
+  `MAX_SPECIALIST_FINDINGS`, most material first, and `parseSpecialistOutput`
+  keeps the first that many) or fail closed into the structured-repair loop
+  (complex reasoning's exact candidate count and ≤5 questions). Regression tests assert both shipped
+  schemas carry no `maxItems`/`minItems`.
+
 - **LLM Trace Viewer (`src/lib/trace/`, `src/components/developer/`) — a
   developer-only debugging surface.** Every call through the geminiClient
   chokepoint is captured (request, redacted body, raw response, parsed JSON,
@@ -915,3 +931,21 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   unknowns. `prdService` appends `buildClarificationPromptBlock()` (the
   authoritative-intent instruction; skipped → open unknowns) to the prompt
   **after** the safety gate, so every section receives it via `ctx.idea`.
+- **Question generation is one-shot per spine and StrictMode-safe.**
+  `PreflightView` requests questions at most once per `(projectId, spineId)`
+  — a module-level in-flight registry plus a per-mount ref — and has **no**
+  unmount-cancellation flag: the request writes its result to the store
+  itself (safe after unmount; a removed project's write is caught), so React
+  StrictMode's dev double-invoked effect (mount → cleanup → mount) and a
+  navigate-away-and-back both reuse the one in-flight request and the
+  questions land exactly once. Do not re-add a `cancelled` cleanup flag next
+  to the one-shot guard — that combination dropped the only result under
+  StrictMode and `npm run dev` spun on "Preparing your clarification
+  questions…" forever. Regression:
+  `src/components/__tests__/PreflightViewStrictMode.test.tsx`.
+- **The header badge reads Clarifying… during the interview.** The spine
+  carries the `'Generating PRD...'` placeholder while preflight runs, but no
+  PRD run has started; `isPreflightClarifying` (`src/lib/prdRunState.ts`, the
+  same predicate that hosts `PreflightView`) drives **Clarifying…**, and
+  **Generating…** shows only once `isPrdRunInFlight` holds (see the generation
+  lifecycle in STATE_AND_AUTH.md).
