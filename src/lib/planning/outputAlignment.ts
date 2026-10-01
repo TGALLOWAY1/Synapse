@@ -29,6 +29,11 @@ import {
     type StaleReason,
 } from '../artifactDependencyGraph';
 import { findFeatureReferences, makeSpineChangeResolver } from '../spineChangeAnalysis';
+import {
+    currentPrdInputHashesForSpine,
+    versionContentHash,
+    type ArtifactProjectInputs,
+} from '../artifactInputSlices';
 
 export type OutputAlignmentState = 'aligned' | 'possibly_affected' | 'stale';
 export type OutputAlignmentConfidence = 'definite' | 'possible' | 'unknown';
@@ -55,6 +60,12 @@ export interface ProjectOutputAlignmentInput {
     artifactVersions: ArtifactVersion[];
     spineVersions: SpineVersion[];
     job?: ProjectJobState;
+    /**
+     * The project options generation reads. With it, fingerprinted outputs are
+     * judged by input fingerprints exactly as in the freshness seam; without
+     * it every output falls back to version-id comparison.
+     */
+    project?: ArtifactProjectInputs;
 }
 
 export interface ProjectOutputAlignmentSummary {
@@ -128,7 +139,10 @@ function projectAlignment(
     const generatedFromSpineId = version.sourceRefs.find(ref => ref.sourceType === 'spine')
         ?.sourceArtifactVersionId;
     const removedReferences = removedFeatureStillReferenced(evaluation, version.content);
-    const tokenMismatch = hasReason(evaluation, 'design_tokens_changed');
+    // A changed design preset is the design system's own visual-direction
+    // drift: as definite as a mockup built on superseded tokens.
+    const tokenMismatch = hasReason(evaluation, 'design_tokens_changed')
+        || hasReason(evaluation, 'design_direction_changed');
     const prdChange = evaluation.reasons.find(reason => reason.kind === 'prd_changed')?.changeSummary;
     const meaningfulPrdChange = Boolean(prdChange?.hasChanges);
     const noStructuralChange = prdChange?.comparable === true && !prdChange.hasChanges;
@@ -245,6 +259,7 @@ export function deriveProjectOutputAlignment(
     const latestSpine = input.spineVersions.find(spine => spine.isLatest);
     const snapshots: DependencyEvaluationInput['snapshots'] = {};
     const slotStatus: DependencyEvaluationInput['slotStatus'] = {};
+    const currentInputHashes: DependencyEvaluationInput['currentInputHashes'] = {};
     const artifactsByNode = new Map<ArtifactSlotKey, Artifact>();
     const versionsByNode = new Map<ArtifactSlotKey, ArtifactVersion>();
 
@@ -256,6 +271,12 @@ export function deriveProjectOutputAlignment(
         if (artifact && version) {
             artifactsByNode.set(nodeId, artifact);
             versionsByNode.set(nodeId, version);
+            // Same fingerprints as the freshness seam, computed only where an
+            // output recorded one to compare against.
+            const current = version.provenance?.inputHashes
+                ? currentPrdInputHashesForSpine(nodeId, latestSpine, input.project)
+                : undefined;
+            if (current) currentInputHashes[nodeId] = current;
             snapshots[nodeId] = {
                 artifactId: artifact.id,
                 version: {
@@ -265,6 +286,7 @@ export function deriveProjectOutputAlignment(
                     sourceRefs: version.sourceRefs,
                     provenance: version.provenance,
                     metadata: version.metadata,
+                    contentHash: versionContentHash(version),
                 },
             };
         }
@@ -283,6 +305,7 @@ export function deriveProjectOutputAlignment(
         latestSpineId: latestSpine?.id,
         latestSpineProvenance: latestSpine?.provenance,
         currentDesignTokensHash: typeof currentTokensHash === 'string' ? currentTokensHash : undefined,
+        currentInputHashes,
         snapshots,
         slotStatus,
         spineChangeFor: makeSpineChangeResolver(input.spineVersions, latestSpine?.id),

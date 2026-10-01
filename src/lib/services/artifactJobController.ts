@@ -1,7 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import type {
+    ArtifactInputHashes,
     ArtifactValidationBlocker,
     ArtifactSlotKey,
+    ArtifactVersion,
     CoreArtifactSubtype,
     ProjectPlatform,
     SourceRef,
@@ -13,7 +15,14 @@ import { latestProjectActivity } from '../crossTabMerge';
 import { getTabId, isOutputRunLiveElsewhere, OUTPUT_RUN_HEARTBEAT_MS } from '../outputRunLease';
 import { generateCoreArtifact, selectArtifactModel, ARTIFACT_TRUNCATED_BLOCKER } from './coreArtifactService';
 import type { GeminiTokenUsage } from '../geminiClient';
-import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
+import {
+    buildCorePromptCall,
+    comparePrdInputs,
+    computeArtifactInputHashes,
+    currentPrdInputHashesForSpine,
+    selectCorePromptInput,
+    selectMockupSpecInput,
+} from '../artifactInputSlices';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
@@ -29,6 +38,7 @@ import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
     expandWithHiddenDependencyClosure,
+    expandWithInputConsumers,
     isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
@@ -40,7 +50,6 @@ import { isAbortError } from '../concurrency';
 import { evaluateSpineGenerationGate, isHistoricalSpine } from '../artifactGenerationGate';
 import { getStrongModel } from '../geminiClient';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
-import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
 import { selectPreferredDesignSystem } from '../designTokens';
 import { parseScreenInventory } from '../screenInventoryNormalize';
@@ -163,7 +172,9 @@ function spineVersionForStamp(projectId: string, spineVersionId: string): string
     return spine?.generationMeta?.failedSections ?? [];
 }
 
-function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersionId: string): boolean {
+// Only the preferred (currently displayed) version of a slot counts. Older
+// versions — e.g. after the user reverted to an earlier version — never do.
+function preferredVersionForSlot(projectId: string, slot: ArtifactSlotKey): ArtifactVersion | undefined {
     const store = useProjectStore.getState();
     const type = slot === 'mockup' ? 'mockup' : 'core_artifact';
     const subtype: CoreArtifactSubtype | undefined = slot === 'mockup' ? undefined : slot;
@@ -171,24 +182,63 @@ function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersi
     const match = subtype
         ? artifacts.find(a => a.subtype === subtype)
         : artifacts[0];
-    if (!match) return false;
-    // Only the preferred (currently displayed) version counts as "done" for
-    // this spine. Older versions linked to this spine — e.g. after the user
-    // reverted to an earlier version — should not block re-generation.
-    const preferred = store.getPreferredVersion(projectId, match.id);
-    if (!preferred) return false;
-    return preferred.sourceRefs.some(
-        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
+    if (!match) return undefined;
+    return store.getPreferredVersion(projectId, match.id);
+}
+
+const hasSpineRef = (version: ArtifactVersion, spineVersionId: string): boolean =>
+    version.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId);
+
+/**
+ * Is this version current for the spine — the same PRD-side verdict the
+ * freshness engine reaches? A version with a comparable input fingerprint
+ * (artifactInputSlices.ts) is current when the spine's inputs still match
+ * what it was generated from, whichever spine version it was generated
+ * against; a legacy version is current only for the exact spine it references.
+ *
+ * PRD side only, like the spine-ref rule it extends: the design direction is
+ * a project setting the user re-applies explicitly (Change direction → its
+ * regenerate confirmation, or Sync). The engine reports a changed preset as
+ * `design_direction_changed`, but generation never reads it as "not done" —
+ * otherwise a preset change would silently regenerate the design system
+ * through the early design-system run, racing that confirmation.
+ */
+function isVersionCurrentForSpine(
+    projectId: string,
+    slot: ArtifactSlotKey,
+    version: ArtifactVersion,
+    spineVersionId: string,
+): boolean {
+    const store = useProjectStore.getState();
+    const spine = (store.spineVersions[projectId] || []).find(s => s.id === spineVersionId);
+    const inputs = comparePrdInputs(
+        slot,
+        version.provenance?.inputHashes,
+        currentPrdInputHashesForSpine(slot, spine, store.projects[projectId]),
     );
+    if (inputs.comparable) return !inputs.prdChanged;
+    return hasSpineRef(version, spineVersionId);
+}
+
+/** Is the slot's preferred output current for this spine (no generation needed)? */
+function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersionId: string): boolean {
+    const preferred = preferredVersionForSlot(projectId, slot);
+    return !!preferred && isVersionCurrentForSpine(projectId, slot, preferred, spineVersionId);
 }
 
 /**
  * Auto-resume is recovery for an explicitly started output run, not an entry
- * side effect of opening Explore/Build. At least one completed current-spine
- * output is the durable evidence that such a run had begun before reload.
+ * side effect of opening Explore/Build. At least one output GENERATED FOR this
+ * spine (its spine ref) is the durable evidence that such a run had begun
+ * before reload. Deliberately the spine-ref check, not the fingerprint one: an
+ * output that is merely still current for a newer spine is evidence of
+ * nothing, and reading it as a started run would regenerate on page entry.
  */
 export function hasAnyCompletedSlotForSpine(projectId: string, spineVersionId: string): boolean {
-    return ALL_SLOT_KEYS.some(slot => isSlotDoneForSpine(projectId, slot, spineVersionId));
+    return ALL_SLOT_KEYS.some(slot => {
+        const preferred = preferredVersionForSlot(projectId, slot);
+        return !!preferred && hasSpineRef(preferred, spineVersionId);
+    });
 }
 
 /**
@@ -321,6 +371,7 @@ async function runCoreArtifactSlot(
     await semaphore.acquire();
     let content: string;
     let extraMetadata: Record<string, unknown> = {};
+    let inputHashes: ArtifactInputHashes;
     try {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
         const store = useProjectStore.getState();
@@ -331,29 +382,37 @@ async function runCoreArtifactSlot(
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         }, runId);
-        // Read the chosen design-system preset off the project here (rather than
-        // threading it through every startAll/regenerate/resume call site) so
-        // ALL generation paths consistently honor it. Only design_system uses it.
+        // The project options (design-system preset, product name, platform)
+        // are read off the project here (rather than threaded through every
+        // startAll/regenerate/resume call site) so ALL generation paths
+        // consistently honor them.
         const project = store.getProject(projectId);
-        const designSystemPreset = project?.designSystemPreset;
-        // Build the Canonical PRD Spine — the primary source of truth — freshly
-        // from THIS run's structuredPRD (rather than trusting a persisted copy,
-        // which could lag an edit). Deterministic and cheap. The persisted
-        // spine on the SpineVersion is a diagnostic/diffing convenience only.
         const spineVersion = (store.spineVersions[projectId] || []).find(s => s.id === spineVersionId);
-        const canonicalSpine = buildCanonicalPrdSpine(structuredPRD, {
-            projectName: project?.productName || project?.name,
-            platform: project?.platform,
-            designSystemPreset,
+        // Everything PRD-side the prompt reads comes from ONE projection — the
+        // slot's input slice (artifactInputSlices.ts) — and the prompt is
+        // built from it, so the fingerprint recorded below covers exactly what
+        // the model saw. The Canonical PRD Spine is rebuilt freshly from THIS
+        // run's structuredPRD (never a persisted copy, which could lag an
+        // edit); the persisted spine is a diagnostic convenience only.
+        const promptInput = selectCorePromptInput({
+            structuredPRD,
+            prdMarkdown: prdContent,
+            project,
             safetyReview: spineVersion?.safetyReview,
+        });
+        const call = buildCorePromptCall(promptInput, {
             sourceSpineVersionId: spineVersionId,
             sourcePrdVersion: spineVersion?.prdVersion,
         });
-        const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
+        // Fingerprint the inputs as the call reads them: the shared map gains
+        // entries while this slot generates (its layer-mates finish), but a
+        // declared dependency's entry is settled before its layer starts.
+        inputHashes = computeArtifactInputHashes(subtype, promptInput, generatedArtifacts);
+        const result = await generateCoreArtifact(subtype, call.prdContent, call.structuredPRD, {
             generatedArtifacts,
             signal,
-            designSystemPreset,
-            canonicalSpine,
+            designSystemPreset: call.designSystemPreset,
+            canonicalSpine: call.canonicalSpine,
             traceContext: {
                 sessionId: traceSessionId,
                 projectId,
@@ -514,6 +573,8 @@ async function runCoreArtifactSlot(
         `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}` +
             (repairApplied ? ' · auto-enriched PRD traceability' : ''),
         parentVersionId,
+        // changeSource keeps its generation/regeneration default.
+        { inputHashes },
     );
 
     writeStore.setSlotStatus(projectId, subtype, {
@@ -524,45 +585,71 @@ async function runCoreArtifactSlot(
     }, runId);
 }
 
-const readPreferredArtifactForSpine = (
+// A dependency is usable as generation context for a spine when its
+// preferred version is current for that spine (generated for it, or still
+// matching its inputs) and carries no unresolved blocking validation.
+const usableContextVersion = (
     projectId: string,
     subtype: CoreArtifactSubtype,
     spineVersionId: string,
-): string | null => {
+): { artifactId: string; version: ArtifactVersion } | null => {
     const store = useProjectStore.getState();
     const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
     if (!artifact) return null;
     const preferred = store.getPreferredVersion(projectId, artifact.id);
     if (!preferred) return null;
-    const matches = preferred.sourceRefs.some(
-        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
-    );
-    return matches && isArtifactVersionEligibleAsGenerationContext(preferred)
-        ? preferred.content
+    return isVersionCurrentForSpine(projectId, subtype, preferred, spineVersionId)
+        && isArtifactVersionEligibleAsGenerationContext(preferred)
+        ? { artifactId: artifact.id, version: preferred }
         : null;
 };
+
+const readPreferredArtifactForSpine = (
+    projectId: string,
+    subtype: CoreArtifactSubtype,
+    spineVersionId: string,
+): string | null => usableContextVersion(projectId, subtype, spineVersionId)?.version.content ?? null;
 
 const readPreferredArtifactRef = (
     projectId: string,
     subtype: CoreArtifactSubtype,
     spineVersionId: string,
 ): { artifactId: string; versionId: string } | null => {
-    const store = useProjectStore.getState();
-    const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
-    if (!artifact) return null;
-    const preferred = store.getPreferredVersion(projectId, artifact.id);
-    if (!preferred) return null;
-    const matches = preferred.sourceRefs.some(
-        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
-    );
-    return matches && isArtifactVersionEligibleAsGenerationContext(preferred)
-        ? { artifactId: artifact.id, versionId: preferred.id }
-        : null;
+    const usable = usableContextVersion(projectId, subtype, spineVersionId);
+    return usable ? { artifactId: usable.artifactId, versionId: usable.version.id } : null;
 };
+
+/**
+ * Seed a run's dependency context with every core output not being generated
+ * in it that is usable for the run's spine — so a dependent regenerated alone
+ * still reads an upstream that is current by fingerprint but was generated
+ * against an older spine version.
+ */
+function seedGenerationContext(
+    projectId: string,
+    spineVersionId: string,
+    exclude: ReadonlySet<CoreArtifactSubtype> = new Set(),
+): Partial<Record<CoreArtifactSubtype, string>> {
+    const context: Partial<Record<CoreArtifactSubtype, string>> = {};
+    for (const meta of CORE_ARTIFACT_PIPELINE) {
+        if (exclude.has(meta.subtype)) continue;
+        const content = readPreferredArtifactForSpine(projectId, meta.subtype, spineVersionId);
+        if (content !== null) context[meta.subtype] = content;
+    }
+    return context;
+}
 
 async function runMockupSlot(args: StartArgs, signal: AbortSignal, runId?: string): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform } = args;
-    const settings = buildAutoMockupSettings(prdContent, structuredPRD, projectPlatform);
+    // The spec reads only its input slice (artifactInputSlices.ts): product
+    // name, vision, and these auto settings.
+    const specInput = selectMockupSpecInput({
+        structuredPRD,
+        prdMarkdown: prdContent,
+        project: { platform: projectPlatform },
+    });
+    const { settings } = specInput;
+    let inputHashes: ArtifactInputHashes;
 
     const semaphore = getMockupSemaphore(projectId);
     await semaphore.acquire();
@@ -585,6 +672,11 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal, runId?: strin
         const componentInventoryRaw = readPreferredArtifactForSpine(
             projectId, 'component_inventory', spineVersionId,
         );
+
+        inputHashes = computeArtifactInputHashes('mockup', specInput, {
+            ...(screenInventoryRaw !== null ? { screen_inventory: screenInventoryRaw } : {}),
+            ...(componentInventoryRaw !== null ? { component_inventory: componentInventoryRaw } : {}),
+        });
 
         const screenInventory = screenInventoryRaw
             ? parseScreenInventory(screenInventoryRaw)
@@ -667,6 +759,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal, runId?: strin
         sourceRefs,
         `Auto-generate ${settings.fidelity} ${settings.platform} mockup (${settings.scope.replace('_', ' ')})`,
         parentVersionId,
+        { inputHashes },
     );
 
     writeStore.setSlotStatus(projectId, 'mockup', {
@@ -688,6 +781,12 @@ async function executeJob(
     controller: AbortController,
     slotKeys: ArtifactSlotKey[],
     runId: string,
+    // Slots in the run only because one of their inputs regenerates in it
+    // (expandWithInputConsumers). Each runs only once an input has produced
+    // new, trusted content in THIS run; otherwise it is still current and is
+    // left as it is — so a failing optional input never costs a paid rebuild
+    // of its consumers that would reproduce the same degraded output.
+    followers: ReadonlySet<ArtifactSlotKey> = new Set(),
 ): Promise<void> {
     const signal = controller.signal;
     const { projectId } = args;
@@ -695,7 +794,27 @@ async function executeJob(
     const wantsMockup = slotKeys.includes('mockup');
     const coreSubtypes = new Set(slotKeys.filter((k): k is CoreArtifactSubtype => k !== 'mockup'));
 
-    const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
+    // Seed the dependency context from the store for any core slot that is not
+    // being generated in this run and is usable for this spine — later layers
+    // may consume them as dependency context. (Needs-review versions are never
+    // usable: an untrustworthy artifact must not seed a later layer.)
+    const generatedArtifacts = seedGenerationContext(projectId, args.spineVersionId, coreSubtypes);
+
+    // Core slots that produced new, trusted content in this run (their entry
+    // in the dependency context is set only then — a needs_review result never
+    // enters it). A follower runs only if one of its inputs is in here.
+    const fresh = new Set<ArtifactSlotKey>();
+    const followerHasFreshInput = (slot: ArtifactSlotKey): boolean =>
+        (slot === 'mockup' ? MOCKUP_DEPENDENCIES : getArtifactMeta(slot).dependsOn).some(dep => fresh.has(dep));
+    const skipFollower = (slot: ArtifactSlotKey): void => {
+        // Still current: report it done, and keep its existing content
+        // available to later layers (it was excluded from the seed above).
+        if (slot !== 'mockup') {
+            const content = readPreferredArtifactForSpine(projectId, slot, args.spineVersionId);
+            if (content !== null) generatedArtifacts[slot] = content;
+        }
+        useProjectStore.getState().setSlotStatus(projectId, slot, { status: 'done', finishedAt: Date.now() }, runId);
+    };
 
     // Per-slot observations for the orchestration WorkflowRun (artifact bundle).
     // Captures wall-clock start/end + dependency edges so the Metrics dashboard
@@ -707,22 +826,6 @@ async function executeJob(
     // Viewer groups every slot (and the mockup) under a single generation.
     const traceSessionId = `assets-${projectId}-${artifactRunStart}`;
 
-    // Seed `generatedArtifacts` from the store for any core slot already done
-    // for this spine — later layers may consume them as dependency context.
-    for (const meta of CORE_ARTIFACT_PIPELINE) {
-        if (coreSubtypes.has(meta.subtype)) continue;
-        const existing = useProjectStore.getState().getArtifacts(projectId, 'core_artifact').find(a => a.subtype === meta.subtype);
-        if (!existing) continue;
-        const preferred = useProjectStore.getState().getPreferredVersion(projectId, existing.id);
-        // Skip needs_review (blocking-validation) versions — an untrustworthy
-        // artifact must not seed dependency context for a later layer.
-        if (preferred
-            && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
-            && isArtifactVersionEligibleAsGenerationContext(preferred)) {
-            generatedArtifacts[meta.subtype] = preferred.content;
-        }
-    }
-
     const corePromise = (async () => {
         const layers = buildDependencyLayers();
         for (const layer of layers) {
@@ -730,10 +833,15 @@ async function executeJob(
             const tasks = layer
                 .filter(meta => coreSubtypes.has(meta.subtype))
                 .map(meta => async () => {
+                    if (followers.has(meta.subtype) && !followerHasFreshInput(meta.subtype)) {
+                        skipFollower(meta.subtype);
+                        return;
+                    }
                     const startedAt = Date.now();
                     let usage: GeminiTokenUsage | undefined;
                     try {
                         await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId, (u) => { usage = u; }, runId);
+                        if (generatedArtifacts[meta.subtype] !== undefined) fresh.add(meta.subtype);
                         nodeObs.push({
                             nodeId: meta.subtype,
                             nodeName: meta.title,
@@ -783,6 +891,10 @@ async function executeJob(
             try {
                 await corePromise;
                 if (signal.aborted) return;
+                if (followers.has('mockup') && !followerHasFreshInput('mockup')) {
+                    skipFollower('mockup');
+                    return;
+                }
                 const startedAt = Date.now();
                 await runMockupSlot(args, signal, runId);
                 nodeObs.push({
@@ -842,6 +954,12 @@ async function executeJob(
     }
 }
 
+// The slots whose preferred output is NOT current for the spine: missing, or
+// generated from inputs that no longer match it (artifactInputSlices.ts; a
+// legacy output, any other spine). A slot still current for the spine stays
+// out — the point of input fingerprints — unless one of its inputs is
+// regenerated in the same run (startAll re-queues those consumers; see
+// expandWithInputConsumers).
 function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
     // Retired subtypes (e.g. prompt_pack, folded into the consolidated
     // implementation_plan) never generate in new runs — they're excluded
@@ -978,8 +1096,10 @@ export const artifactJobController = {
 
     /**
      * Kick off generation of every downstream slot not yet done for this
-     * spine. Idempotent: a re-call while active is a no-op; a re-call after
-     * completion only queues slots still missing.
+     * spine, followed by every output that consumes one of them (rebuilt only
+     * once an input it reads actually regenerates). Idempotent: a re-call
+     * while active is a no-op; a re-call after completion only queues slots
+     * still missing.
      *
      * `autoResume` marks a run started by `resumeIfNeeded` rather than by the
      * user: each slot it runs counts toward that slot's automatic budget, and a
@@ -1029,11 +1149,21 @@ export const artifactJobController = {
         const capped = opts.autoResume
             ? pending.filter(k => autoResumeAttemptsFor(args.projectId, args.spineVersionId, k) >= MAX_AUTO_RESUME_ATTEMPTS)
             : [];
-        const runSlots = pending.filter(k => !capped.includes(k));
-        if (runSlots.length === 0) return;
+        const regenerated = pending.filter(k => !capped.includes(k));
+        if (regenerated.length === 0) return;
         // Same wake rule as resumeIfNeeded: hidden slots ride along, but are
         // never the sole reason an automatic run starts.
-        if (opts.autoResume && runSlots.every(isHiddenSlot)) return;
+        if (opts.autoResume && regenerated.every(isHiddenSlot)) return;
+        // Every output that consumes a slot regenerated in this run follows it
+        // (dependency order comes from executeJob): an output still current for
+        // the spine — including one generated for this very spine without an
+        // optional input that was unavailable then (a plan without its user
+        // flows, a mockup without an inventory) — would otherwise stay built on
+        // superseded or absent content. executeJob runs such a follower only
+        // once one of its inputs actually produced new content. Capped slots
+        // never ride along.
+        const runSlots = expandWithInputConsumers(regenerated, new Set(capped));
+        const followers = new Set(runSlots.filter(k => !regenerated.includes(k)));
 
         const runId = uuidv4();
         const store = useProjectStore.getState();
@@ -1042,9 +1172,10 @@ export const artifactJobController = {
             autoResume: opts.autoResume,
             carryOverSlots: capped,
         });
-        // Mark already-completed slots as 'done' so the UI shows them green.
+        // Mark already-completed slots as 'done' so the UI shows them green
+        // (capped slots keep their carried-over failed state).
         for (const key of ALL_SLOT_KEYS) {
-            if (!pending.includes(key)) {
+            if (!runSlots.includes(key) && !capped.includes(key)) {
                 store.setSlotStatus(args.projectId, key, { status: 'done', finishedAt: Date.now() }, runId);
             }
         }
@@ -1054,7 +1185,7 @@ export const artifactJobController = {
         const heartbeat = setInterval(() => beatOutputRun(args.projectId, runId), OUTPUT_RUN_HEARTBEAT_MS);
 
         const controller = new AbortController();
-        const promise = executeJob(args, controller, runSlots, runId).finally(() => {
+        const promise = executeJob(args, controller, runSlots, runId, followers).finally(() => {
             clearInterval(heartbeat);
             // Settled (completed, failed, or cancelled) — not interrupted by a
             // page load, so drop the marker. A no-op if a newer run re-stamped it.
@@ -1186,18 +1317,9 @@ export const artifactJobController = {
             error: undefined,
         }, runId);
 
-        const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
-        for (const meta of CORE_ARTIFACT_PIPELINE) {
-            const existing = store.getArtifacts(args.projectId, 'core_artifact').find(a => a.subtype === meta.subtype);
-            if (!existing) continue;
-            const preferred = store.getPreferredVersion(args.projectId, existing.id);
-            // Skip needs_review versions — they must not seed dependency context.
-            if (preferred
-                && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
-                && isArtifactVersionEligibleAsGenerationContext(preferred)) {
-                generatedArtifacts[meta.subtype] = preferred.content;
-            }
-        }
+        // Dependency context: every usable core output for this spine
+        // (needs_review versions never seed it).
+        const generatedArtifacts = seedGenerationContext(args.projectId, args.spineVersionId);
 
         const promise = (async () => {
             try {

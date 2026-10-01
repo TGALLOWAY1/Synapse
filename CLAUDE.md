@@ -336,7 +336,13 @@ rationale and detail.
 9. **One freshness engine:** `evaluateDependencyGraph` via
    `src/lib/artifactFreshness.ts` (`useProjectFreshness` /
    `evaluateProjectFreshness`) is THE staleness source — never hand-roll the
-   store→input loop or re-add the deleted `stalenessSlice`. The derived
+   store→input loop or re-add the deleted `stalenessSlice`. It compares each
+   output's recorded input fingerprint (`provenance.inputHashes`) with the
+   current inputs — version ids only for versions without a comparable one.
+   The fingerprint and the prompt share one projection, the per-slot slice in
+   `src/lib/artifactInputSlices.ts`: a generation path must build its prompt
+   from that slice and stamp the fingerprint, and every clone path must carry,
+   rebase, or drop it deliberately. The derived
    output-alignment projection (`getProjectOutputAlignment`, on the downstream
    update plan slice) layers planning semantics on top; it never replaces the
    engine. System freshness vocabulary stays separate from user

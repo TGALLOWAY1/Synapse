@@ -129,7 +129,10 @@
   re-pointed branch whose anchor text no longer exists in the latest PRD
   surfaces ConsolidationModal's existing not-found error.
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
-  tracking; source-ref staleness detection against the current spine.
+  tracking; the provenance the freshness engine compares (spine/dependency
+  `sourceRefs` and the `provenance.inputHashes` input fingerprint, which
+  restore and overlay clones carry and mark-current rebases — see
+  VERSIONING_AND_EXPORT.md).
   `revertArtifactToVersion` restores an older version by appending a **cloned**
   `ArtifactVersion` (increments `versionNumber`, becomes preferred, carries
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`

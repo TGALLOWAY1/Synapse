@@ -2740,6 +2740,37 @@ export type VersionProvenance = {
     // version in place instead of appending one per keystroke — see
     // `updateArtifactOverlay`. Always paired with changeSource 'user_edit'.
     overlayEdit?: boolean;
+    // ArtifactVersion only: fingerprints of the exact inputs the generator
+    // read (see ArtifactInputHashes). Absent on legacy versions and on
+    // versions whose content no longer corresponds to recorded inputs.
+    inputHashes?: ArtifactInputHashes;
+};
+
+// Fingerprints of the inputs an artifact version was generated from, recorded
+// at generation time by the artifact job controller and computed by
+// src/lib/artifactInputSlices.ts — the per-slot slice that the prompt builder
+// and the hasher share. The freshness engine (evaluateDependencyGraph) compares
+// them with the fingerprints of the CURRENT inputs instead of comparing version
+// ids, so a restore to identical content, a no-op save, or an edit outside the
+// slot's slice leaves the output current. Provenance, so it is persisted with
+// the version; the comparison itself is derived on every read. Every field is
+// optional at the version level (`VersionProvenance.inputHashes?`): legacy
+// versions have none and keep the version-id comparison.
+export type ArtifactInputHashes = {
+    /**
+     * Fingerprint scheme + the slot's slice version. A record made under a
+     * different scheme is never compared (the engine falls back to ids), so
+     * changing what a slot reads cannot mass-flag existing outputs.
+     */
+    scheme: string;
+    /** The PRD-side inputs the generator read: its slice of the structured
+     *  PRD and PRD markdown, plus product identity and the safety review. */
+    spine: string;
+    /** The design-direction input (the selected design-system preset). */
+    designBrief?: string;
+    /** Per consumed upstream artifact: the fingerprint of the exact content
+     *  fed to generation. Absent for a dependency that was not available. */
+    dependencies?: Partial<Record<CoreArtifactSubtype, string>>;
 };
 
 export type HistoryEvent = {

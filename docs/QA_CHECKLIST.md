@@ -306,6 +306,9 @@ engine), `src/components/downstream/`.
 - [ ] Restoring an earlier version **appends** a new version — the history is
       not rewound and nothing is deleted.
 - [ ] Work done after the restored point is still reachable in history.
+- [ ] Restoring the exact content your outputs were generated from (e.g.
+      undoing an edit) leaves them **current**: the restore confirmation
+      warns about none of them and Sync outputs offers nothing to update.
 - [ ] Viewing an older version (Plan → **Timeline** → a past version) is
       read-only: the journey's **Build** step is inert, and anything that opens
       the outputs (e.g. **Continue to Build**) returns to the latest version

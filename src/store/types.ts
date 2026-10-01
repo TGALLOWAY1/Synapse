@@ -349,8 +349,9 @@ export interface ProjectState {
         sourceRefs: SourceRef[],
         generationPrompt: string,
         parentVersionId?: string | null,
-        // Optional attribution override; defaults to ai_generation /
-        // ai_regeneration by version number.
+        // Optional attribution; changeSource defaults to ai_generation /
+        // ai_regeneration by version number when the caller passes none
+        // (e.g. the job controller passes only the input fingerprint).
         provenance?: VersionProvenance,
     ) => { versionId: string };
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => void;

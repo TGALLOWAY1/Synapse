@@ -164,9 +164,30 @@ Three rules keep runs from fighting each other or looping:
   a spine change) settling late can't flip the new run's slots to
   `interrupted`. Untagged writes stay unguarded (legacy callers, tests). New
   controller write paths must pass the run id.
+- **"Current for the spine" follows the freshness engine.** The controller's
+  `isSlotDoneForSpine` / dependency-context reads (`isVersionCurrentForSpine`)
+  apply the engine's PRD-side comparison: an output with a comparable input
+  fingerprint is current for a spine whose inputs still match, whichever spine
+  version it was generated against; a legacy output only for the exact spine it
+  references. So `startAll` skips outputs current for the spine — except that
+  every output consuming a slot the run regenerates follows it
+  (`expandWithInputConsumers`, dependency order), including one generated for
+  this very spine without an optional input that was unavailable then (a plan
+  without its user flows, a mockup without an inventory, rebuilt on resume
+  once the input regenerates). A follower runs only once one of its inputs
+  produced new, trusted content in that run; otherwise it is left as it is
+  (done), and auto-resume-capped slots never follow. `executeJob` /
+  `retrySlot` seed fingerprint-current upstreams
+  as dependency context (`seedGenerationContext`) — without that, regenerating
+  one dependent alone would miss its required inputs. The verdict is PRD-side
+  only: a changed design preset is the engine's `design_direction_changed`
+  report, never "not done" for generation (else `ensureDesignSystemForSpine`,
+  fired on any project change, would regenerate the design system behind
+  Change direction's confirmation).
 - **Resume evidence (`hasResumeEvidence`).** Auto-resume is recovery for a run
   that was started, never an entry side effect of opening Build. Evidence is
-  (1) an output already completed for the spine, (2) this session's job for the
+  (1) an output already completed for the spine — generated FOR it (its spine
+  ref), never merely current for it by fingerprint, (2) this session's job for the
   spine still holding queued/generating/interrupted slots, or (3) the durable
   `Project.outputRun` marker for the spine showing a run that died —
   `'interrupted'`, or `'running'` but no longer alive anywhere (see the lease
@@ -226,6 +247,10 @@ Three rules keep runs from fighting each other or looping:
   manual cap it is per page session (jobs are not persisted).
 
 Covered by `src/lib/services/__tests__/artifactJobController.runs.test.ts`,
+`src/lib/services/__tests__/artifactJobController.inputHashes.test.ts`
+(fingerprint stamping, fingerprint-current context, the pending set, and the
+consumers re-queued behind a regenerated input — `expandWithInputConsumers`,
+unit-tested in `src/lib/__tests__/coreArtifactPipeline.test.ts`),
 `src/store/__tests__/generationJobsSlice.test.ts`,
 `src/lib/__tests__/artifactJobResume.test.ts`, and
 `src/store/__tests__/interruptedGeneration.test.ts`.
@@ -523,6 +548,22 @@ stale and why, and the safe update order. See
   `update_recommended`, never hard `needs_update`). `sourceRefs` already
   travel in `ArtifactVersion` through persistence/sync/snapshots, so no
   schema change was involved.
+- **Input fingerprints (`src/lib/artifactInputSlices.ts`).** Generation also
+  stamps `provenance.inputHashes` — fingerprints of exactly what the generator
+  read: its slot's slice of the PRD (`spine`), the design direction
+  (`designBrief`), and the content of each upstream it consumed
+  (`dependencies` — a declared upstream absent from it was unavailable then),
+  under a versioned `scheme`. `ARTIFACT_INPUT_SLICES` is the
+  per-slot declaration of what each generator reads; the job controller builds
+  every core prompt from the same projection it fingerprints
+  (`selectCorePromptInput` → `buildCorePromptCall`), and drift tests pin that a
+  prompt reads nothing outside its slice. Today every core prompt reads the
+  whole PRD (canonical spine + full PRD markdown appendix); the mockup spec
+  reads only the product name, vision, and auto settings. Fingerprints hash
+  raw inputs, never derived renderings, so a deploy that re-renders a prompt
+  never flips one. Clones keep or rebase them: artifact restore and overlay
+  clones carry the source's fingerprint; "Mark as up to date" rebases it onto
+  the confirmed inputs. Full model: `docs/ARTIFACT_DEPENDENCY_GRAPH.md`.
 - **`evaluateDependencyGraph` is THE single freshness engine (SYN-005).** The
   legacy `stalenessSlice` / `getArtifactStaleness` (3-value `StalenessState`:
   current/possibly_outdated/outdated) was deleted; every surface now reads this
@@ -537,11 +578,26 @@ stale and why, and the safe update order. See
   (needs_update | update_recommended) and `hasDesignTokenDrift` are the shared
   staleness predicates; `needs_review` is handled explicitly as a separate
   validation-blocked status. `FreshnessBadge` is the inline badge for stale
-  statuses. Staleness itself is deterministic: spine-ref drift and recorded
-  dependency-ref drift → `needs_update`; the mockup design-tokensHash rule (a
-  `design_tokens_changed` reason) uses hash comparison over version-id
-  comparison — a token-identical regen keeps mockups current; missing/error/
-  generating come from artifact presence + live job slots. A live or durable
+  statuses. Staleness itself is deterministic and compares **inputs, not ids**
+  wherever a version carries a comparable fingerprint: a moved PRD-side
+  fingerprint → `prd_changed`; a moved design brief (design system only) →
+  `design_direction_changed`; a consumed upstream whose content fingerprint
+  moved → `dependency_changed` (a content-identical clone — overlay edit,
+  mark-current, restore — is not drift); a declared upstream the version was
+  generated WITHOUT that is now usable generation context (current for the
+  spine, not `needs_review`) → `dependency_changed` ("was not available when
+  this was generated"). So a PRD restore to identical
+  content, a no-op save, or an edit outside what an output reads leaves it
+  current. Versions without a comparable fingerprint (legacy, another scheme,
+  or current inputs the seam cannot fingerprint — no structured PRD, unknown
+  project) keep spine-ref drift and recorded dependency-ref drift →
+  `needs_update`. The mockup design-tokensHash rule (a `design_tokens_changed`
+  reason) uses hash comparison over version-id comparison — a token-identical
+  regen keeps mockups current; missing/error/generating come from artifact
+  presence + live job slots. `buildDependencyEvaluationInput` reads
+  `state.projects` for the fingerprints' project options, and
+  `useProjectFreshness` subscribes to those options as primitives (the
+  output-run heartbeat rewrites the project record without re-evaluating). A live or durable
   blocking validation disposition is `needs_review`; it remains separate from
   planning alignment, propagates downstream as trouble, and cannot be cleared
   with Mark current. Upstream trouble propagates downstream as `impactedBy`

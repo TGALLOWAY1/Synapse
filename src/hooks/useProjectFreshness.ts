@@ -1,14 +1,18 @@
 // React binding for the canonical artifact-freshness seam (SYN-005). Subscribes
-// to the four project store maps the evaluation needs and returns a stable,
-// memoized `ProjectFreshness` for one project.
+// to the four project store maps the evaluation needs — plus the project
+// options the input fingerprints read — and returns a stable, memoized
+// `ProjectFreshness` for one project.
 //
-// SELECTOR-STABILITY RULE (CLAUDE.md; React error #185): each of the four store
-// reads is its OWN selector returning the store's own reference (or undefined)
-// — never a `?? []` / `?? {}` literal inside a selector (that allocates a fresh
-// empty container every call, making useSyncExternalStore see an endless
-// snapshot change). The single useMemo keyed on those four refs + projectId is
-// the only place work happens, so the returned object is reference-stable until
-// one of the underlying slices actually changes.
+// SELECTOR-STABILITY RULE (CLAUDE.md; React error #185): each store read is
+// its OWN selector returning the store's own reference, a primitive, or
+// undefined — never a `?? []` / `?? {}` literal inside a selector (that
+// allocates a fresh empty container every call, making useSyncExternalStore
+// see an endless snapshot change). The project options are read as four
+// primitives rather than the project object, so the output-run heartbeat
+// (which rewrites the project record every few seconds) does not re-evaluate
+// freshness. The single useMemo keyed on those refs + projectId is the only
+// place work happens, so the returned object is reference-stable until one of
+// the underlying inputs actually changes.
 
 import { useMemo } from 'react';
 import { useProjectStore } from '../store/projectStore';
@@ -47,6 +51,11 @@ export function useProjectFreshness(projectId: string): ProjectFreshness {
     const artifactVersions = useProjectStore(s => s.artifactVersions[projectId]);
     const spineVersions = useProjectStore(s => s.spineVersions[projectId]);
     const jobs = useProjectStore(s => s.jobs[projectId]);
+    const projectExists = useProjectStore(s => s.projects[projectId] !== undefined);
+    const projectName = useProjectStore(s => s.projects[projectId]?.name);
+    const productName = useProjectStore(s => s.projects[projectId]?.productName);
+    const platform = useProjectStore(s => s.projects[projectId]?.platform);
+    const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
 
     return useMemo(() => {
         const state: FreshnessStateSlice = {
@@ -54,6 +63,9 @@ export function useProjectFreshness(projectId: string): ProjectFreshness {
             artifactVersions: artifactVersions ? { [projectId]: artifactVersions } : {},
             spineVersions: spineVersions ? { [projectId]: spineVersions } : {},
             jobs: { [projectId]: jobs },
+            projects: projectExists
+                ? { [projectId]: { name: projectName, productName, platform, designSystemPreset } }
+                : {},
         };
         const context = buildDependencyEvaluationInput(state, projectId);
         // The hook owns its resolver's lifecycle (memoized with this pass),
@@ -72,5 +84,8 @@ export function useProjectFreshness(projectId: string): ProjectFreshness {
             latestSpineId: context.latestSpineId,
             recommendedUpdates,
         };
-    }, [projectId, artifacts, artifactVersions, spineVersions, jobs]);
+    }, [
+        projectId, artifacts, artifactVersions, spineVersions, jobs,
+        projectExists, projectName, productName, platform, designSystemPreset,
+    ]);
 }

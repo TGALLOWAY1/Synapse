@@ -15,6 +15,7 @@ import { extractStructuredPlan } from '../services/implementationPlanParser';
 import { hashReviewValue } from '../review/hash';
 import { isLikelyUnaffected, summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
 import { deriveProjectOutputAlignment } from './outputAlignment';
+import type { ArtifactProjectInputs } from '../artifactInputSlices';
 import {
     downstreamPlanningContextHash,
     sealDownstreamUpdatePlan,
@@ -34,6 +35,8 @@ export type DeriveDownstreamUpdatePlansInput = {
     spineVersions: SpineVersion[];
     planningRecords: PlanningRecord[];
     createdAt?: number;
+    /** Project options — lets the alignment read input fingerprints (see outputAlignment). */
+    project?: ArtifactProjectInputs;
 };
 
 const SUPPORTED_SLOTS = new Set<DownstreamUpdateArtifactSlot>(['screen_inventory', 'user_flows', 'data_model', 'implementation_plan']);
@@ -629,7 +632,10 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
     const latest = input.spineVersions.find(spine => spine.isLatest);
     if (!latest) return [];
     const alignment = deriveProjectOutputAlignment({
-        artifacts: input.artifacts, artifactVersions: input.artifactVersions, spineVersions: input.spineVersions,
+        artifacts: input.artifacts,
+        artifactVersions: input.artifactVersions,
+        spineVersions: input.spineVersions,
+        project: input.project,
     });
     const planningContextHash = downstreamPlanningContextHash(input.planningRecords);
     const authority = findSourceAuthority(input.planningRecords, latest.id);

@@ -66,9 +66,11 @@ versions of **both** PRDs (spines) and artifacts:
 - `VersionCompareView` — section-aware inline diff for PRDs, word diff for
   artifact text. Read-only except for opening the restore confirmation.
 - `RevertConfirmModal` — non-destructive restore confirmation; the PRD variant
-  warns which downstream artifacts will be marked possibly outdated (computed by
-  the caller via `evaluateProjectFreshness` — the artifacts currently
-  `up_to_date` with the latest spine).
+  warns which downstream artifacts the restore would take out of date
+  (`slotsInvalidatedByRestore` in `artifactFreshness.ts`: up to date now, not
+  up to date as of the restored version — a restore appends a
+  content-identical clone, so an output whose input fingerprint matches the
+  restored content stays current and is not listed).
 
 Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts`**
 (pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
@@ -110,6 +112,21 @@ attaches a `changeSummary` to `prd_changed` reasons + a node-level
 in the graph detail panel ("What changed: …", removed-feature still-referenced
 warnings), the `FreshnessBadge` tooltip, and the artifact-header strip.
 Everything is computed at read time from stored snapshots — nothing persisted.
+
+**Whether a PRD change is drift at all is decided by input fingerprints**
+(`src/lib/artifactInputSlices.ts`; full model in
+`docs/ARTIFACT_DEPENDENCY_GRAPH.md`). A generated version records
+`provenance.inputHashes` — fingerprints of exactly what its generator read —
+and the engine raises `prd_changed` only when the PRD-side fingerprint of the
+current inputs differs, so a content-identical restore, a no-op save, or an
+undone edit flags nothing. (Fingerprints compare the actual generation inputs,
+never `summarizeSpineChange`, which is deliberately lossy — e.g. it ignores
+per-page state fields the canonical spine feeds to generation.) The change
+summary and `likelyUnaffected` stay on both paths: once a fingerprint moves,
+the summary explains *what* changed, and because every core prompt reads the
+whole PRD, the affinity hint remains the only signal that a hard
+`prd_changed` is probably immaterial — still advisory, never a suppression.
+Versions without a comparable fingerprint keep the spine-id comparison.
 
 **User overlay edits are versioned (`artifactSlice.updateArtifactOverlay`).**
 Artifact `content` is never user-editable, so `ArtifactVersion.metadata`
@@ -169,14 +186,35 @@ edits append or amend a `user_edit` version additionally flagged
 `provenance.overlayEdit` (the flag is what makes a version eligible for
 in-place amend), and always record an `Edited` history event; the graph treats
 a non-empty overlay as manually-edited. New version-creating code paths must
-stamp a changeSource.
+stamp a changeSource (`createArtifactVersion` defaults it by version number
+when the caller passes only other provenance, e.g. the job controller's input
+fingerprint).
+
+**The input fingerprint (`provenance.inputHashes`) is provenance of the
+content it was recorded with**, so every artifact version-creating path
+decides what it carries: generation stamps it (`runCoreArtifactSlot`,
+`runMockupSlot`); clones that keep content and refs carry the source's
+(`revertArtifactToVersion` — so restoring identical content stays current —
+and `updateArtifactOverlay`'s appended clone; its amend keeps it in place);
+`markArtifactCurrentForSpine` rebases it (below); a path that changes content
+without regenerating (an applied selective downstream update) drops it, and
+that version falls back to the id comparison. A new clone path must make the
+same choice — carrying a fingerprint onto content it does not describe would
+hide real drift.
 
 **"Mark as up to date" (`artifactSlice.markArtifactCurrentForSpine`).** The
 escape hatch for trivial PRD changes: appends a CLONED preferred version whose
 `sourceRefs` are **rebased** — spine ref → the confirmed spine version AND
 every `core_artifact` ref → that dependency's current preferred version
-(refreshing a recorded design tokensHash `anchorInfo`). Rebasing only the spine
-ref would leave the graph still reporting `dependency_changed`; never do a
+(refreshing a recorded design tokensHash `anchorInfo`) — and whose input
+fingerprint is **rebased with them** (`rebasedInputHashes`: the confirmed
+spine's PRD-side fingerprint + the current content fingerprint of every
+declared dependency that exists now — including one the source was generated
+without, which clears its "was not available" flag), so later edits are
+judged against what the user confirmed. When the confirmed spine cannot be
+fingerprinted faithfully the
+clone carries none and its rebased refs decide. Rebasing only the spine ref
+would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
 detail panel and the artifact-header strip when stale.
 

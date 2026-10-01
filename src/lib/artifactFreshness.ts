@@ -21,6 +21,12 @@ import type {
 import { selectPreferredDesignSystem } from './designTokens/storeSelectors';
 import { makeSpineChangeResolver } from './spineChangeAnalysis';
 import {
+    currentPrdInputHashesForSpine,
+    versionContentHash,
+    type ArtifactProjectInputs,
+    type CurrentPrdInputHashes,
+} from './artifactInputSlices';
+import {
     buildArtifactDependencyGraph,
     evaluateDependencyGraph,
     type ArtifactDependencyGraph,
@@ -46,6 +52,12 @@ export interface FreshnessStateSlice {
     spineVersions: Record<string, SpineVersion[]>;
     /** Transient per-project generation job state (live slot statuses). */
     jobs?: Record<string, ProjectJobState | undefined>;
+    /**
+     * The project options generation reads (name, platform, design preset).
+     * Required to compute the CURRENT input fingerprints faithfully; when the
+     * project is absent the evaluation falls back to version-id comparison.
+     */
+    projects?: Record<string, ArtifactProjectInputs | undefined>;
 }
 
 export interface FreshnessBuildOptions {
@@ -106,7 +118,12 @@ const EMPTY_SPINES: readonly SpineVersion[] = [];
  *                    (omitted entirely when includeSlotStatus === false),
  *   - currentDesignTokensHash → selectPreferredDesignSystem(...).tokensHash,
  *   - latest spine → the `asOfSpineId` spine when given, else the `isLatest`
- *                    spine (`spineVersionIds` always lists every spine in order).
+ *                    spine (`spineVersionIds` always lists every spine in order),
+ *   - currentInputHashes → per slot, the latest spine's PRD-side input
+ *                    fingerprint (artifactInputSlices) — only when the spine has
+ *                    a structured PRD and `state.projects` knows the project,
+ *   - snapshot.contentHash → the preferred version's content fingerprint, which
+ *                    fingerprinted dependents compare against.
  */
 export function buildDependencyEvaluationInput(
     state: FreshnessStateSlice,
@@ -120,6 +137,7 @@ export function buildDependencyEvaluationInput(
     const versions = state.artifactVersions?.[projectId] ?? EMPTY_VERSIONS;
     const spines = (state.spineVersions?.[projectId] ?? EMPTY_SPINES) as SpineVersion[];
     const job = state.jobs?.[projectId];
+    const project = state.projects?.[projectId];
 
     const asOfSpine = opts.asOfSpineId
         ? spines.find(s => s.id === opts.asOfSpineId)
@@ -136,6 +154,7 @@ export function buildDependencyEvaluationInput(
     const snapshots: DependencyEvaluationInput['snapshots'] = {};
     const slotStatus: Partial<Record<ArtifactSlotKey, GenerationStatus>> = {};
     const artifactIdBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
+    const currentInputHashes: Partial<Record<ArtifactSlotKey, CurrentPrdInputHashes>> = {};
 
     for (const node of graph.nodes) {
         if (node.id === 'prd') continue;
@@ -148,6 +167,12 @@ export function buildDependencyEvaluationInput(
         const preferred = artifact ? preferredFor(artifact.id) : undefined;
         if (artifact && preferred) {
             artifactIdBySlot[slotKey] = artifact.id;
+            // Fingerprint the current inputs only where an output recorded a
+            // fingerprint to compare against (none during a first PRD run).
+            const current = preferred.provenance?.inputHashes
+                ? currentPrdInputHashesForSpine(slotKey, latestSpine, project)
+                : undefined;
+            if (current) currentInputHashes[slotKey] = current;
             snapshots[slotKey] = {
                 artifactId: artifact.id,
                 version: {
@@ -157,6 +182,7 @@ export function buildDependencyEvaluationInput(
                     sourceRefs: preferred.sourceRefs,
                     provenance: preferred.provenance,
                     metadata: preferred.metadata,
+                    contentHash: versionContentHash(preferred),
                 },
             };
         }
@@ -176,6 +202,7 @@ export function buildDependencyEvaluationInput(
         latestSpineId,
         latestSpineProvenance: latestSpine?.provenance,
         currentDesignTokensHash,
+        currentInputHashes,
         snapshots,
         ...(includeSlotStatus ? { slotStatus } : {}),
     };
@@ -202,6 +229,27 @@ export function evaluateProjectFreshness(
     context.input.spineChangeFor = makeSpineChangeResolver(context.spines, context.latestSpineId);
     const evaluations = evaluateDependencyGraph(context.graph, context.input);
     return { context, evaluations };
+}
+
+/**
+ * Output slots a PRD restore of an OLDER version (`targetSpineId`, never the
+ * latest — only older versions offer Restore) would take out of date: those
+ * up to date now that would not be once the target's content is latest. A
+ * restore appends a content-identical clone of the target, so evaluating as of
+ * the target answers it — an output whose input fingerprint matches the
+ * target's inputs stays current, while one current only by its spine ref
+ * (legacy) does not. For the revert confirmation's warning.
+ */
+export function slotsInvalidatedByRestore(
+    state: FreshnessStateSlice,
+    projectId: string,
+    targetSpineId: string,
+): ArtifactSlotKey[] {
+    const now = evaluateProjectFreshness(state, projectId);
+    const after = evaluateProjectFreshness(state, projectId, { asOfSpineId: targetSpineId });
+    return (Object.keys(now.context.artifactIdBySlot) as ArtifactSlotKey[]).filter(slot =>
+        now.evaluations.get(slot)?.status === 'up_to_date'
+        && after.evaluations.get(slot)?.status !== 'up_to_date');
 }
 
 /**

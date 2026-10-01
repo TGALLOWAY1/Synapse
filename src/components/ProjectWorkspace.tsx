@@ -55,8 +55,7 @@ import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { DecisionCenterSlideOver } from './review/DecisionCenterSlideOver';
 import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
 import { DemoReadOnlyNotice } from './DemoReadOnlyNotice';
-import { evaluateProjectFreshness } from '../lib/artifactFreshness';
-import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
+import { buildDependencyEvaluationInput, slotsInvalidatedByRestore } from '../lib/artifactFreshness';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
 import {
     buildDownstreamUpdatePlanCurrentContext,
@@ -1015,19 +1014,18 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
         }))
         .reverse();
 
-    // Downstream artifacts that would be marked possibly outdated if a different
-    // PRD version becomes latest — i.e. those currently in sync with the latest
-    // spine. Used to warn in the revert confirmation.
-    const getStaleArtifactTitles = (): string[] => {
+    // Downstream artifacts a restore of `targetSpineId` would take out of date
+    // — up to date now, not once the target's content is latest (an output
+    // whose input fingerprint matches the target stays current). Used to warn
+    // in the revert confirmation.
+    const getStaleArtifactTitles = (targetSpineId: string): string[] => {
         if (!projectId) return [];
-        // Artifacts currently in sync with the latest spine (up_to_date) are
-        // exactly the ones a revert to a different PRD version will invalidate.
-        const { context, evaluations } = evaluateProjectFreshness(useProjectStore.getState(), projectId);
+        const state = useProjectStore.getState();
+        const { artifactIdBySlot } = buildDependencyEvaluationInput(state, projectId);
         const titles: string[] = [];
-        for (const [slot, artifactId] of Object.entries(context.artifactIdBySlot)) {
-            if (!artifactId) continue;
-            if (evaluations.get(slot as DependencyNodeId)?.status !== 'up_to_date') continue;
-            const artifact = getArtifact(projectId, artifactId);
+        for (const slot of slotsInvalidatedByRestore(state, projectId, targetSpineId)) {
+            const artifactId = artifactIdBySlot[slot];
+            const artifact = artifactId ? getArtifact(projectId, artifactId) : undefined;
             if (artifact) titles.push(artifact.title);
         }
         return titles;
@@ -1765,7 +1763,7 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 <RevertConfirmModal
                     kind="prd"
                     sourceLabel={getVersionLabel(activeSpine.id)}
-                    staleArtifactTitles={getStaleArtifactTitles()}
+                    staleArtifactTitles={getStaleArtifactTitles(activeSpine.id)}
                     onCancel={() => setBannerRestoreOpen(false)}
                     onConfirm={() => handleRestoreSpine(activeSpine.id)}
                 />
