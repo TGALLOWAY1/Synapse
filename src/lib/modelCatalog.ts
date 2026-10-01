@@ -30,15 +30,21 @@ export const MODEL_CATALOG: ModelOption[] = [
         tier: 'current',
     },
     {
-        id: 'gemini-3.1-flash-lite-preview',
+        id: 'gemini-3.1-flash-lite',
         name: 'Gemini 3.1 Flash-Lite',
-        description: 'Cheapest option. Good for quick drafts and iteration.',
+        description: 'Cheapest option, with full GA quotas. Good for quick drafts and iteration.',
         tier: 'current',
     },
     {
         id: 'gemini-3.7-flash',
         name: 'Gemini 3.7 Flash',
         description: 'Previous-generation GA Flash — superseded by 3.8 Flash.',
+        tier: 'legacy',
+    },
+    {
+        id: 'gemini-3.1-flash-lite-preview',
+        name: 'Gemini 3.1 Flash-Lite Preview',
+        description: 'Preview build with reduced quotas — superseded by the GA 3.1 Flash-Lite.',
         tier: 'legacy',
     },
     {

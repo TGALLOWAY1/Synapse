@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DEFAULT_GEMINI_MODEL } from '../geminiClient';
 import { migrateGeminiFlashModel } from '../modelMigration';
+import { CURRENT_MODELS, LEGACY_MODELS } from '../modelCatalog';
 import { normalizeError, userMessage } from '../errors';
 
 const LATEST_FLASH = 'gemini-3.8-flash';
+const LATEST_FLASH_LITE = 'gemini-3.1-flash-lite';
 const FLASH_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_10';
 
 describe('Gemini Flash model default', () => {
@@ -62,12 +64,20 @@ describe('migrateGeminiFlashModel', () => {
         expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH);
     });
 
-    it('leaves Pro and Flash-Lite selections untouched', () => {
+    it('leaves Pro and GA Flash-Lite selections untouched', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3.1-pro-preview');
-        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite-preview');
+        localStorage.setItem('GEMINI_FAST_MODEL', LATEST_FLASH_LITE);
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe('gemini-3.1-pro-preview');
-        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe('gemini-3.1-flash-lite-preview');
+        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH_LITE);
+    });
+
+    it('moves a Flash-Lite preview selection to GA Flash-Lite, never up to Flash', () => {
+        localStorage.setItem('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview');
+        localStorage.setItem('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite-preview');
+        migrateGeminiFlashModel();
+        expect(localStorage.getItem('GEMINI_MODEL')).toBe(LATEST_FLASH_LITE);
+        expect(localStorage.getItem('GEMINI_FAST_MODEL')).toBe(LATEST_FLASH_LITE);
     });
 
     it('runs even when the previous migration wave already ran', () => {
@@ -88,6 +98,16 @@ describe('migrateGeminiFlashModel', () => {
         localStorage.setItem('GEMINI_MODEL', 'gemini-3.7-flash');
         migrateGeminiFlashModel();
         expect(localStorage.getItem('GEMINI_MODEL')).toBe('gemini-3.7-flash');
+    });
+});
+
+describe('model catalog', () => {
+    it('lists the default and GA Flash-Lite as current, the Flash-Lite preview as legacy', () => {
+        const current = CURRENT_MODELS.map((m) => m.id);
+        expect(current).toContain(DEFAULT_GEMINI_MODEL);
+        expect(current).toContain(LATEST_FLASH_LITE);
+        expect(current).not.toContain('gemini-3.1-flash-lite-preview');
+        expect(LEGACY_MODELS.map((m) => m.id)).toContain('gemini-3.1-flash-lite-preview');
     });
 });
 

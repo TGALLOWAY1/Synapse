@@ -272,7 +272,7 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
             'Gemini quota error — your request hit the FREE-TIER quota even though you expect paid tier. ' +
             'Likely causes: (1) your API key is tied to a Google Cloud project without billing enabled — ' +
             'recreate the key in AI Studio on the project that has billing; (2) set your billing project ID ' +
-            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Flash-Lite Preview) ' +
+            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Pro Preview) ' +
             'have reduced quotas even on paid tier — switch to a GA model like gemini-3.8-flash. ' +
             `Raw: ${message}`
         );

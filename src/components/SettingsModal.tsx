@@ -6,7 +6,7 @@ import { DEFAULT_GEMINI_MODEL, DEFAULT_FAST_MODEL, DEFAULT_STRONG_MODEL } from '
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
 import { ArtifactModelsSection } from './settings/ArtifactModelsSection';
-import { CURRENT_MODELS, LEGACY_MODELS, type ModelOption } from '../lib/modelCatalog';
+import { CURRENT_MODELS, LEGACY_MODELS, modelDisplayName, type ModelOption } from '../lib/modelCatalog';
 import {
     getArtifactModelOverrides,
     setArtifactModelOverrides,
@@ -384,7 +384,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 <p className="text-[11px] leading-relaxed">
                                     Preview models have reduced per-project quotas <em>even on paid tier</em>.
                                     If you see persistent rate-limit / free-tier errors, switch to a stable model
-                                    (e.g. Gemini 2.5 Flash in Legacy models) until the Gemini 3 series exits preview.
+                                    such as {modelDisplayName(DEFAULT_GEMINI_MODEL)}.
                                 </p>
                             </div>
                         )}
