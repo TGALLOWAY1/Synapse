@@ -139,24 +139,6 @@ export async function deleteProject(id: string, opts: { hard?: boolean } = {}): 
   if (!resp.ok && resp.status !== 404) throw await parseError(resp, 'delete_failed');
 }
 
-/** Restore a soft-deleted project. */
-export async function restoreProject(id: string): Promise<void> {
-  await requestJson(
-    `${API_BASE}?action=restore&id=${encodeURIComponent(id)}`,
-    { method: 'POST' },
-    'restore_failed',
-  );
-}
-
-/** Set/clear a project's archived status without deleting it. */
-export async function setProjectArchived(id: string, archived: boolean): Promise<void> {
-  await requestJson(
-    `${API_BASE}?action=${archived ? 'archive' : 'unarchive'}&id=${encodeURIComponent(id)}`,
-    { method: 'POST' },
-    'archive_failed',
-  );
-}
-
 /** Bulk import bundles (idempotent on project id). */
 export async function importProjects(bundles: ProjectBundle[]): Promise<ImportResult> {
   return requestJson<ImportResult>(

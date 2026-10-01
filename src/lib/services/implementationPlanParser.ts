@@ -78,7 +78,7 @@ export interface MilestoneDetails {
     deliverables: ParsedDeliverable[];
 }
 
-export const MILESTONE_HEADING =
+const MILESTONE_HEADING =
     /^###\s+Milestone\s+(\d+)\s*[:\-—]?\s*(.+?)\s*(\(([^)]*)\))?\s*$/i;
 
 const SECTION_LABEL = /^\*\*([^*]+):\*\*\s*(.*)$/;

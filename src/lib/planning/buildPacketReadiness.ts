@@ -123,7 +123,7 @@ export const BUILD_PACKET_CRITERION_ORDER: readonly BuildPacketCriterionId[] = [
     'reasoning_committed',
 ];
 
-export const BUILD_PACKET_CRITERION_LABELS: Record<BuildPacketCriterionId, string> = {
+const BUILD_PACKET_CRITERION_LABELS: Record<BuildPacketCriterionId, string> = {
     artifacts_present: 'Required outputs generated',
     sources_current: 'Packet inputs current',
     validation_clear: 'Output validation clear',

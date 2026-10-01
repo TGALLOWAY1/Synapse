@@ -189,7 +189,7 @@ const UNIVERSAL_SECTIONS = ['vision', 'coreProblem', 'constraints'] as const;
  * annotation — never to suppress a hard needs_update (every artifact really is
  * generated from the whole PRD). Keys are versionDiff SECTION_SPECS keys.
  */
-export const ARTIFACT_SECTION_AFFINITY: Record<ArtifactSlotKey, readonly string[]> = {
+const ARTIFACT_SECTION_AFFINITY: Record<ArtifactSlotKey, readonly string[]> = {
     design_system: [...UNIVERSAL_SECTIONS, 'targetUsers', 'uxPages'],
     screen_inventory: [...UNIVERSAL_SECTIONS, 'features', 'uxPages', 'targetUsers', 'primaryActions'],
     user_flows: [...UNIVERSAL_SECTIONS, 'features', 'uxPages', 'targetUsers', 'primaryActions'],

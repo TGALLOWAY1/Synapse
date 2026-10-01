@@ -67,7 +67,7 @@ export const screenNotePlanningSourceScopeKey = (input: {
     input.screenId,
 ].join(':');
 
-export const buildScreenNotePlanningConcernInput = (input: {
+const buildScreenNotePlanningConcernInput = (input: {
     artifactId: string;
     artifactVersionId: string;
     spineVersionId: string;

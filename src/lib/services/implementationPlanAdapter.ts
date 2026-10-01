@@ -114,7 +114,7 @@ function extractPromptSection(body: string, heading: RegExp): string | undefined
     return joined || undefined;
 }
 
-export function promptPackFromLegacyCard(card: PromptCard): ImplementationPromptPack {
+function promptPackFromLegacyCard(card: PromptCard): ImplementationPromptPack {
     const requirements = splitBullets(extractPromptSection(card.promptBody, /^requirements$/i));
     const expected = splitBullets(extractPromptSection(card.promptBody, /^expected output$/i));
     const inScope = splitBullets(extractPromptSection(card.promptBody, /^features? in scope$/i))

@@ -8,6 +8,11 @@ The Export dialog downloads the PRD, individual artifacts, a combined bundle,
 or structured JSON. It also offers a **"Copy for coding agent"** preset
 (`buildAgentHandoff` in `src/lib/exportHandoff.ts`): an instruction preamble +
 PRD + build-relevant core artifacts (mockups excluded), with copy and download.
+The preamble points the agent at the **Implementation Plan** — its per-milestone
+Prompt Packs (the plan's Prompts tab; the full prompt bodies live in the plan's
+trailing `json synapse-plan` block). The standalone Prompt Pack artifact is
+retired, so the preamble must not name it as a source; `exportHandoff.test.ts`
+asserts this.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
 

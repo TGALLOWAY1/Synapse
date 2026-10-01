@@ -45,7 +45,7 @@ const describeCurrentnessReason = (reason: ReadinessReviewCurrentnessReason): st
     return labels[reason];
 };
 
-export function readinessActionLabel(target: ReadinessActionTarget): string {
+function readinessActionLabel(target: ReadinessActionTarget): string {
     if (target.kind === 'prd') return 'Strengthen this PRD section';
     if (target.kind === 'feature') return 'Review first-release scope';
     if (target.kind === 'planning_record') return 'Resolve in Decision Center';

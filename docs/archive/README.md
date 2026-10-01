@@ -2,8 +2,9 @@
 
 Historical design notes and audits from earlier phases of Synapse's
 development. These files are retained for context but are **not current
-documentation** — see [`../architecture.md`](../architecture.md),
-[`../artifact-flow.md`](../artifact-flow.md), and
+documentation** — see the **Architecture docs index** in
+[`CLAUDE.md`](../../CLAUDE.md#architecture-docs-index) (the per-subsystem docs
+under [`../architecture/`](../architecture/)) and
 [`../deployment.md`](../deployment.md) for the current product.
 
 | File | What it is |

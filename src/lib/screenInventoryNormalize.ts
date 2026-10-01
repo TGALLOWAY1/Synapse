@@ -97,7 +97,7 @@ export function normalizeScreenInventory(raw: unknown): ScreenInventoryContent |
  * user-facing rename — display-name edits are an overlay and do not touch
  * the stored content this reads.
  */
-export function assignStableScreenIds(sections: ScreenInventorySection[]): ScreenInventorySection[] {
+function assignStableScreenIds(sections: ScreenInventorySection[]): ScreenInventorySection[] {
     const used = new Set<string>();
     for (const section of sections) {
         for (const screen of section.screens) {

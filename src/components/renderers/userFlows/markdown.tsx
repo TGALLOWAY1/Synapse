@@ -8,11 +8,3 @@ export function inlineMd(text: string) {
         </ReactMarkdown>
     );
 }
-
-export function blockMd(text: string) {
-    return (
-        <div className="prose prose-sm prose-neutral max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-        </div>
-    );
-}

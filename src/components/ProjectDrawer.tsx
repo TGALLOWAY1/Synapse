@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
@@ -7,6 +8,8 @@ import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
 import { commitmentRemainsCurrent, compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine, projectCommitmentCopy } from '../lib/planning';
 import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { ConfirmDialog } from './common/ConfirmDialog';
 
 interface ProjectDrawerProps {
     isOpen: boolean;
@@ -21,6 +24,10 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
     const authLoading = useAuthStore((s) => s.loading);
     const syncPhase = useProjectSyncStore((s) => s.phase);
     const navigate = useNavigate();
+    // The drawer stays mounted while closed (it slides off-screen), so Escape
+    // only participates while it is open.
+    useEscapeKey(onClose, isOpen);
+    const [projectPendingDelete, setProjectPendingDelete] = useState<{ id: string; name: string } | null>(null);
     // Don't flash a "no projects yet" empty state while we're still resolving the
     // session or pulling the user's projects from the server.
     const isResolving = authLoading || (!!user && syncPhase === 'loading');
@@ -87,6 +94,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                     <button
                         onClick={onClose}
                         className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition"
+                        aria-label="Close projects"
                     >
                         <X size={18} />
                     </button>
@@ -163,13 +171,11 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            if (window.confirm(`Delete "${p.name}"?`)) {
-                                                artifactJobController.cancelAll(p.id);
-                                                deleteProject(p.id);
-                                            }
+                                            setProjectPendingDelete({ id: p.id, name: p.name });
                                         }}
-                                        className="p-1 text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                        className="p-1 text-neutral-600 hover:text-red-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
                                         title="Delete"
+                                        aria-label={`Delete project ${p.name}`}
                                     >
                                         <Trash2 size={14} />
                                     </button>
@@ -179,6 +185,24 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                     })}
                 </div>
             </div>
+
+            {/* Rendered beside the drawer, not inside it: the drawer's transform
+                would otherwise become the containing block of the dialog's
+                fixed-position backdrop. */}
+            {projectPendingDelete && (
+                <ConfirmDialog
+                    tone="danger"
+                    title={`Delete "${projectPendingDelete.name}"?`}
+                    cancelLabel="Cancel"
+                    confirmLabel="Delete"
+                    onCancel={() => setProjectPendingDelete(null)}
+                    onConfirm={() => {
+                        artifactJobController.cancelAll(projectPendingDelete.id);
+                        deleteProject(projectPendingDelete.id);
+                        setProjectPendingDelete(null);
+                    }}
+                />
+            )}
         </>
     );
 }

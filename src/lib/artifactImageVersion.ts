@@ -84,5 +84,3 @@ export function remapInheritedImageMetadata(
     else delete next[IMAGE_SOURCE_KEY];
     return next;
 }
-
-export const IMAGE_SOURCE_METADATA_KEY = IMAGE_SOURCE_KEY;

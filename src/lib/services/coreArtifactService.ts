@@ -57,7 +57,7 @@ export interface CoreArtifactGenerationResult {
  * JSON mid-string. The cap is generous headroom, not a target; responses only
  * spend what they emit.
  */
-export const ARTIFACT_MAX_OUTPUT_TOKENS = 32768;
+const ARTIFACT_MAX_OUTPUT_TOKENS = 32768;
 
 /** Blocker the job controller surfaces for a truncated artifact body. */
 export const ARTIFACT_TRUNCATED_BLOCKER: ArtifactValidationBlocker = {

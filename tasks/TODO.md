@@ -162,6 +162,7 @@ the dedicated artifacts).
       regresses, thread `domainEntities`/lean `uxPages` into those artifacts'
       structured `prdSummary` context in `coreArtifactService.ts` rather than
       re-fattening the PRD.
-- [ ] **Dead `PRD_GENERATION_STAGES` labels** in `src/components/generationStages.ts`
-      still mention "Defining data model…" but have no consumers — remove the
-      dead exports in a cleanup pass.
+- [x] **(Dead `PRD_GENERATION_STAGES` labels — removed.)** The unused stage lists
+      in `src/components/generationStages.ts` (`PRD_GENERATION_STAGES`,
+      `PRD_REGENERATION_STAGES`, `STALE_REFRESH_STAGES`,
+      `BUNDLE_GENERATION_STAGES`) had no consumers and were deleted.

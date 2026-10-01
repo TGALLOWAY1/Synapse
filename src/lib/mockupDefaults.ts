@@ -7,13 +7,13 @@ import type {
 } from '../types';
 
 // Project-level platform ('app' / 'web') maps directly to the mockup shell.
-export const mapProjectPlatform = (p?: ProjectPlatform): MockupPlatform =>
+const mapProjectPlatform = (p?: ProjectPlatform): MockupPlatform =>
     p === 'app' ? 'mobile' : 'desktop';
 
 // Choose fidelity between 'mid' (structured) and 'high' (polished) based on
 // PRD richness. Sparse PRDs yield 'mid'; feature-heavy or long PRDs yield
 // 'high'. Wireframe ('low') is intentionally never auto-selected.
-export const pickFidelity = (prd: string, structured?: StructuredPRD): MockupFidelity => {
+const pickFidelity = (prd: string, structured?: StructuredPRD): MockupFidelity => {
     const words = prd.trim().split(/\s+/).filter(Boolean).length;
     if (structured) {
         const feats = structured.features ?? [];

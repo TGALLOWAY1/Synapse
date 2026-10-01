@@ -374,6 +374,53 @@ store access and no navigation. Two constraints ride on that handler:
   explicit user action (rule 13). A rejected flag (stale plan version) is
   reported inline rather than silently navigating nowhere.
 
+### Overlays: Escape, confirmations, landmarks
+
+Drawers, modals, and confirmations share a few small rules. Each exists because
+its absence was found in an accessibility pass (axe + keyboard), so do not
+re-introduce the old shapes.
+
+- **Escape closes the topmost overlay — `useEscapeKey(onClose, enabled = true)`**
+  (`src/hooks/useEscapeKey.ts`). One shared `window` keydown listener dispatches
+  to the **most recently enabled** overlay only, so stacked layers unwind one per
+  keypress (confirm dialog → drawer; restore confirmation → compare view →
+  version history) and a single keypress can never close two. It ignores an
+  Escape that something inside the overlay already handled (`defaultPrevented`,
+  e.g. an inline editor cancelling its own edit) and IME composition. Pass
+  `enabled` for always-mounted overlays (`ProjectDrawer` stays mounted
+  off-screen, so it passes `isOpen`). It is **only** the Escape half: focus
+  trapping, focus restoration, and scroll locking stay per component. The older
+  hand-rolled handlers (`HistoryPanel`, `DecisionCenterSlideOver`,
+  `ExportModal`, …) fold Escape into a combined keydown/Tab-trap listener (some
+  with their own nested-dialog checks) and have **not** been migrated; they are
+  not layer-aware, so do not stack a hook-based overlay on top of one without
+  migrating it first.
+- **Never call the native `window.confirm()`.** Use `ConfirmDialog`
+  (`src/components/common/ConfirmDialog.tsx`) with local open-state, rendered
+  conditionally (mounting is opening). It carries what the native dialog gave
+  for free: Escape cancels (through `useEscapeKey`), focus lands on **Cancel**
+  (the least destructive action), Tab stays inside, and focus returns to the
+  opener on close. Tones: `default` (indigo), `danger` (red confirm — deletions
+  and discards), `amber` (warning gate). Keep the original question as the
+  title and any detail as body copy. Pass **`portal`** when the opener sits in a
+  transformed or z-indexed container (a sliding drawer, the branch rail, a
+  sticky banner): an in-place fixed backdrop there is confined to that
+  container or painted beneath sibling UI. Also render the dialog **beside**,
+  not inside, any ancestor whose own click handler closes something
+  (`SnapshotsPanel` renders it as a sibling of the panel root), because React
+  click events bubble through the component tree.
+- **One `<main>` per page, never inside an overlay.** The Home page and the
+  Plan/History stage of the workspace each expose a single `<main>`; the
+  Explore/Build stage gets its own from `ArtifactWorkspace` (the two never
+  render together). Wrapping the whole workspace area in `<main>` would nest
+  `ArtifactWorkspace`'s `<aside>` landmark inside it. Known gaps: the Review
+  stage has no `<main>`, and `DecisionCenter` renders its own `<main>` and
+  `<header>` inside the dialog-role slide-over, which duplicates the page's
+  landmarks when opened over the Plan stage.
+- **Icon-only buttons need an `aria-label`** (not just `title`), and form
+  fields need a real `<label>` (visually hidden via `sr-only` where the design
+  has none), not a placeholder.
+
 ### Interactive product tour (`src/components/tour/`)
 
 "Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with

@@ -27,9 +27,6 @@ export function sequentialEstimateMs(nodes: Pick<MetricNode, 'durationMs'>[]): n
     return nodes.reduce((sum, n) => sum + Math.max(0, n.durationMs), 0);
 }
 
-/** Total node runtime — identical math to the sequential estimate, named for clarity at call sites. */
-export const totalNodeRuntimeMs = sequentialEstimateMs;
-
 /**
  * Wall-clock runtime of the run, derived from the node span:
  * max(completedAt) − min(startedAt). Returns 0 for an empty run.

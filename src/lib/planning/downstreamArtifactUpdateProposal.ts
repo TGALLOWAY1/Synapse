@@ -18,11 +18,11 @@ import {
 
 export { resolveDownstreamUpdateRegionContent } from './downstreamRegionContent';
 
-export const DOWNSTREAM_ARTIFACT_UPDATE_PROPOSAL_SCHEMA_VERSION = 1 as const;
-export const DOWNSTREAM_ARTIFACT_UPDATE_REVIEW_EVENT_SCHEMA_VERSION = 1 as const;
-export const DOWNSTREAM_ARTIFACT_UPDATE_APPLICATION_SCHEMA_VERSION = 1 as const;
-export const DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_SCHEMA_VERSION = 1 as const;
-export const DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_EVENT_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_ARTIFACT_UPDATE_PROPOSAL_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_ARTIFACT_UPDATE_REVIEW_EVENT_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_ARTIFACT_UPDATE_APPLICATION_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_SCHEMA_VERSION = 1 as const;
+const DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_EVENT_SCHEMA_VERSION = 1 as const;
 
 export type DownstreamArtifactUpdateOperation = 'replace' | 'add' | 'remove' | 'structural' | 'review_only';
 export type DownstreamArtifactUpdateReviewAction =

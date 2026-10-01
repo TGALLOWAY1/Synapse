@@ -22,7 +22,7 @@ const runStatus = (status: string): ReviewRunView['status'] => {
     return status as ReviewRunView['status'];
 };
 
-export const buildReviewIssueViews = (
+const buildReviewIssueViews = (
     reviewId: string,
     issues: ReviewIssue[],
     findings: SpecialistFinding[],

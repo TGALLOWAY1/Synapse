@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -106,5 +107,137 @@ describe('ConfirmDialog', () => {
         );
         const confirmButton = screen.getByRole('button', { name: 'Update' });
         expect(confirmButton.className).toContain('bg-indigo-600');
+    });
+
+    it('applies the danger tone confirm-button styling', () => {
+        render(
+            <ConfirmDialog
+                tone="danger"
+                title='Delete "Acme"?'
+                cancelLabel="Cancel"
+                confirmLabel="Delete"
+                onCancel={vi.fn()}
+                onConfirm={vi.fn()}
+            />,
+        );
+        const confirmButton = screen.getByRole('button', { name: 'Delete' });
+        expect(confirmButton.className).toContain('bg-red-600');
+        expect(confirmButton.className).not.toContain('bg-indigo-600');
+    });
+
+    it('cancels on Escape, even when backdrop dismissal is disabled', () => {
+        const onCancel = vi.fn();
+        const onConfirm = vi.fn();
+        render(
+            <ConfirmDialog
+                title="Generate anyway?"
+                cancelLabel="Go back"
+                confirmLabel="Generate"
+                dismissOnBackdropClick={false}
+                onCancel={onCancel}
+                onConfirm={onConfirm}
+            />,
+        );
+        fireEvent.keyDown(document.body, { key: 'Escape' });
+        expect(onCancel).toHaveBeenCalledTimes(1);
+        expect(onConfirm).not.toHaveBeenCalled();
+    });
+
+    it('moves focus to Cancel on open and returns it to the opener on close', () => {
+        function Harness() {
+            const [open, setOpen] = useState(false);
+            return (
+                <>
+                    <button type="button" onClick={() => setOpen(true)}>Delete project</button>
+                    {open && (
+                        <ConfirmDialog
+                            title="Delete?"
+                            cancelLabel="Cancel"
+                            confirmLabel="Delete"
+                            onCancel={() => setOpen(false)}
+                            onConfirm={() => setOpen(false)}
+                        />
+                    )}
+                </>
+            );
+        }
+        render(<Harness />);
+        const opener = screen.getByRole('button', { name: 'Delete project' });
+        // fireEvent.click does not focus the button the way a real click does.
+        opener.focus();
+        fireEvent.click(opener);
+
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+
+        fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(document.activeElement).toBe(opener);
+    });
+
+    it('keeps Tab focus inside the dialog', () => {
+        render(
+            <ConfirmDialog
+                title="Delete?"
+                cancelLabel="Cancel"
+                confirmLabel="Delete"
+                onCancel={vi.fn()}
+                onConfirm={vi.fn()}
+            />,
+        );
+        const cancel = screen.getByRole('button', { name: 'Cancel' });
+        const confirm = screen.getByRole('button', { name: 'Delete' });
+
+        confirm.focus();
+        fireEvent.keyDown(confirm, { key: 'Tab' });
+        expect(document.activeElement).toBe(cancel);
+
+        fireEvent.keyDown(cancel, { key: 'Tab', shiftKey: true });
+        expect(document.activeElement).toBe(confirm);
+    });
+
+    it('renders in place by default and into document.body with portal', () => {
+        const { container, unmount } = render(
+            <ConfirmDialog
+                title="In place"
+                cancelLabel="Cancel"
+                confirmLabel="OK"
+                onCancel={vi.fn()}
+                onConfirm={vi.fn()}
+            />,
+        );
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        unmount();
+
+        const portaled = render(
+            <div data-testid="transformed-host">
+                <ConfirmDialog
+                    portal
+                    title="Portaled"
+                    cancelLabel="Cancel"
+                    confirmLabel="OK"
+                    onCancel={vi.fn()}
+                    onConfirm={vi.fn()}
+                />
+            </div>,
+        );
+        expect(portaled.getByTestId('transformed-host').querySelector('[role="dialog"]')).toBeNull();
+        expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    });
+
+    it('lets Escape dismiss only the topmost of two stacked dialogs', () => {
+        const lower = vi.fn();
+        const upper = vi.fn();
+        const { rerender } = render(
+            <ConfirmDialog title="Lower" cancelLabel="Cancel lower" confirmLabel="OK" onCancel={lower} onConfirm={vi.fn()} />,
+        );
+        rerender(
+            <>
+                <ConfirmDialog title="Lower" cancelLabel="Cancel lower" confirmLabel="OK" onCancel={lower} onConfirm={vi.fn()} />
+                <ConfirmDialog title="Upper" cancelLabel="Cancel upper" confirmLabel="OK" onCancel={upper} onConfirm={vi.fn()} />
+            </>,
+        );
+        fireEvent.keyDown(document.body, { key: 'Escape' });
+        expect(upper).toHaveBeenCalledTimes(1);
+        expect(lower).not.toHaveBeenCalled();
     });
 });

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Synapse — "From plain-language to product blueprint" — is an AI-native product
 definition environment that transforms a plain-language prompt into a
 structured PRD, then into UI mockups, downstream artifacts (screen inventory,
-data model, etc.), and visual annotations. The product workspace is a
+data model, etc.). The product workspace is a
 local-first React SPA — all PRD/branch/artifact state lives in localStorage via
 Zustand and that remains the live cache, but signed-in users' projects also
 **sync to a server `projects` collection** so they follow the user across
@@ -69,6 +69,7 @@ npm install          # Install dependencies
 npm run dev          # Vite dev server at http://localhost:5173
 npm run build        # tsc -b && vite build (TS check is part of build)
 npm run lint         # ESLint flat config, TS/TSX only
+npm run lint:dead    # knip dead-code report (opt-in; not part of lint or the pre-push gate)
 npm run preview      # Preview production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # Run a single test file in watch mode
@@ -217,10 +218,12 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
                    the shared touch-aware pipeline (see
                    docs/architecture/UI_PATTERNS.md).
   Build stage:     ArtifactWorkspace (exploratory or committed outputs; bundle/
-                   individual gen, refine, validate)
-                   + MockupsView (platform/fidelity/scope config)
-                   + MarkupImageView (MarkupImageSpec → SVG via
-                   MarkupImageRenderer). The `'workspace'` pipeline stage is
+                   individual gen, refine, validate; per-artifact renderers in
+                   src/components/renderers/)
+                   + the Screens view (src/components/experience/:
+                   ScreenListView / ScreenDetailView / MockupVariantsPanel)
+                   + MockupViewer (src/components/mockups/: approval gate and
+                   per-screen MockupScreenImage). The `'workspace'` pipeline stage is
                    labeled **"Explore"** for a working plan and **"Build"** for
                    a committed plan (the stage key/route stays `workspace`).
   History stage:   HistoryView — chronological timeline with diffs
@@ -251,7 +254,7 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 | [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph / freshness actions, build-packet readiness, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
 | [docs/architecture/SCREENS_EXPERIENCE.md](docs/architecture/SCREENS_EXPERIENCE.md) | The Screens view: stable screen ids, join layer, screen contracts, readiness/coverage, review workflow (4A), downstream impact (4B), handoff + trace bridge + export (5A–5C), mockup variants (3A–3D), overlays, URL-addressable selection | Anything under `src/components/experience/` or `src/lib/screen*` / `mockupVariant*` |
 | [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest + agent handoff, version history/compare/revert, change-aware staleness, provenance stamping, "Confirm aligned" | Exports, version history, revert, staleness UX |
-| [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, `/tour`, `/metrics` |
+| [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, overlay keyboard handling (`useEscapeKey`, `ConfirmDialog` — never native `confirm()`), landmarks, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, modals/drawers/confirmations, `/tour`, `/metrics` |
 
 Standalone design docs (referenced from the topic docs):
 `docs/SERVER_PROJECT_STORAGE.md`, `docs/AUTH_AND_PROVIDER_KEYS.md`,

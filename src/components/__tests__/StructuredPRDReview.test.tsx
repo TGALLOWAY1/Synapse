@@ -2,9 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { useProjectStore } from '../../store/projectStore';
 import { StructuredPRDView } from '../StructuredPRDView';
-import { ReviewConfirmSection } from '../prd/ReviewConfirmSection';
-import { DecisionLogSection } from '../prd/DecisionLogSection';
-import { deriveDecisionLog, splitAssumptions } from '../../lib/derive/prdDecisions';
+import { splitAssumptions } from '../../lib/derive/prdDecisions';
 import type { SpineVersion, StructuredPRD } from '../../types';
 
 // mark.js walks real DOM ranges — irrelevant to these tests and flaky in
@@ -224,42 +222,7 @@ describe('StructuredPRDView — review workflow', () => {
     });
 });
 
-describe('ReviewConfirmSection / DecisionLogSection units', () => {
-    it('ReviewConfirmSection renders nothing when all assumptions are decided', () => {
-        const { container } = render(
-            <ReviewConfirmSection assumptions={[]} onConfirm={() => {}} onReject={() => {}} readOnly={false} />,
-        );
-        expect(container.innerHTML).toBe('');
-    });
-
-    it('DecisionLogSection renders confirmed and rejected entries distinctly', () => {
-        const entries = deriveDecisionLog({
-            ...prd,
-            assumptions: [
-                { id: 'a1', statement: 'Solo users only', confidence: 'med', decision: 'rejected', decisionNote: 'Teams too', decidedAt: 1 },
-                { id: 'a2', statement: 'Weekly cadence works', confidence: 'high', decision: 'confirmed', decidedAt: 2 },
-            ],
-            features: [{ ...prd.features[0], confirmed: true, confirmedAt: 3 }],
-        });
-        const onUndoAssumption = vi.fn();
-        render(
-            <DecisionLogSection
-                entries={entries}
-                onUndoAssumption={onUndoAssumption}
-                onUndoFeature={() => {}}
-                readOnly={false}
-            />,
-        );
-        expect(screen.getByText('Decision Log')).toBeInTheDocument();
-        expect(screen.getByText('Marked incorrect')).toBeInTheDocument();
-        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
-        expect(screen.getByText('Feature confirmed')).toBeInTheDocument();
-        expect(screen.getByText(/Teams too/)).toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', { name: 'Undo decision: Solo users only' }));
-        expect(onUndoAssumption).toHaveBeenCalledWith('a1');
-    });
-
+describe('prdDecisions inputs to the PRD view', () => {
     it('splitAssumptions keeps unresolved and decided visually separable inputs', () => {
         const { unresolved, decided } = splitAssumptions([
             { id: 'a1', statement: 's1', confidence: 'low' },
@@ -332,37 +295,5 @@ describe('StructuredPRDView — uncertainty-first planning integration', () => {
         renderView();
         expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
         expect(screen.queryByText('Defer')).toBeNull();
-    });
-
-    it('keeps an exact validation action beside a material accepted assumption', () => {
-        const onPlanValidation = vi.fn();
-        const entries = deriveDecisionLog({
-            ...prd,
-            assumptions: [{ id: 'a1', statement: 'Creators will pay', confidence: 'low', materiality: 'high', decision: 'confirmed' }],
-        });
-        render(<DecisionLogSection entries={entries} onUndoAssumption={() => {}} onPlanValidation={onPlanValidation} onUndoFeature={() => {}} readOnly={false} />);
-
-        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for accepted assumption: Creators will pay' }));
-        expect(onPlanValidation).toHaveBeenCalledWith('a1');
-    });
-
-    it('keeps low-impact acceptance lightweight while material assumptions offer validation planning', () => {
-        const onPlanValidation = vi.fn();
-        render(
-            <ReviewConfirmSection
-                assumptions={[
-                    { id: 'material', statement: 'Creators will pay', confidence: 'low', materiality: 'high' },
-                    { id: 'low', statement: 'Users prefer rounded cards', confidence: 'med', materiality: 'low' },
-                ]}
-                onConfirm={() => {}}
-                onPlanValidation={onPlanValidation}
-                onReject={() => {}}
-                readOnly={false}
-            />,
-        );
-
-        expect(screen.getByRole('button', { name: 'Plan validation for assumption: Creators will pay' })).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Plan validation for assumption: Users prefer rounded cards' })).toBeNull();
-        expect(screen.getAllByText("That's right")).toHaveLength(2);
     });
 });

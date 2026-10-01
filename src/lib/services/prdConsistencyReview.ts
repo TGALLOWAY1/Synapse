@@ -127,7 +127,7 @@ const buildPrompt = (prd: StructuredPRD): string =>
  * wasted call on any rich PRD: the reply truncated, then failed its own
  * detail-loss guard.
  */
-export const REVIEW_MAX_OUTPUT_TOKENS = 16384;
+const REVIEW_MAX_OUTPUT_TOKENS = 16384;
 
 /**
  * Skip threshold: when the serialized PRD is close to what the output cap can

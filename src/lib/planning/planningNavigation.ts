@@ -216,7 +216,7 @@ function isRegion(value: unknown): value is PlanningArtifactRegionTarget {
             || isImplementationTarget(candidate.implementationTarget));
 }
 
-export function isPlanningDestination(value: unknown): value is PlanningDestination {
+function isPlanningDestination(value: unknown): value is PlanningDestination {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as Partial<PlanningDestination> & Record<string, unknown>;
     if (candidate.kind === 'prd') return optionalString(candidate.anchorId);

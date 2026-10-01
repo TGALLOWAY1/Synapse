@@ -48,7 +48,7 @@ Return only the JSON object matching the schema.`;
 
 // Generic fallback question sets, used only when AI question generation fails.
 // These are the exact sets specified in the product brief.
-export const FALLBACK_QUESTIONS_5: { question: string; intent: string }[] = [
+const FALLBACK_QUESTIONS_5: { question: string; intent: string }[] = [
     { question: 'Who is the primary user?', intent: 'Anchors the whole product to a real audience.' },
     { question: 'What problem are they trying to solve?', intent: 'Defines the core job to be done.' },
     { question: 'What should the MVP absolutely include?', intent: 'Sets the must-have scope.' },
@@ -56,7 +56,7 @@ export const FALLBACK_QUESTIONS_5: { question: string; intent: string }[] = [
     { question: 'How will you know the product is successful?', intent: 'Defines success criteria.' },
 ];
 
-export const FALLBACK_QUESTIONS_10: { question: string; intent: string }[] = [
+const FALLBACK_QUESTIONS_10: { question: string; intent: string }[] = [
     ...FALLBACK_QUESTIONS_5,
     { question: 'What are the most important user workflows?', intent: 'Drives screen and flow design.' },
     { question: 'Are there any technical constraints?', intent: 'Shapes architecture decisions.' },

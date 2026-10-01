@@ -118,7 +118,7 @@ function JourneyRow({ steps }: { steps: string[] }) {
 // gallery keys images by — the Experience workspace passes it so display
 // renames never orphan uploads. Omitted (standalone renderer), the gallery
 // keys by `screen.name` exactly as before.
-export function ScreenCard({
+function ScreenCard({
     screen,
     imageContext,
     imageStorageName,

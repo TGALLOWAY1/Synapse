@@ -6,6 +6,7 @@ import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
 import { regenerateGroundingFields } from '../lib/services/groundingService';
 import { SafetyBlockedError } from '../lib/safety';
 import { FeatureCard } from './FeatureCard';
+import { ConfirmDialog } from './common/ConfirmDialog';
 import { useSelectionPopover } from '../lib/useSelectionPopover';
 import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
@@ -104,6 +105,39 @@ const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'target
     targetUsers: 'Target Users',
     risks: 'Risks',
 };
+
+// Per-feature delete. Asks first through the shared ConfirmDialog (this replaced
+// a native confirm()); it owns its open state because `renderFeatureCard` is a
+// render helper, not a component, and so can't hold any.
+function DeleteFeatureButton({ featureName, onConfirm }: { featureName: string; onConfirm: () => void }) {
+    const [confirming, setConfirming] = useState(false);
+    return (
+        <>
+            <button
+                onClick={() => setConfirming(true)}
+                className="absolute -right-2 -top-2 p-1 bg-white border border-neutral-200 rounded-full text-neutral-300 hover:text-red-500 opacity-0 group-hover/feature:opacity-100 transition shadow-sm"
+                title="Delete feature"
+                aria-label="Delete feature"
+            >
+                <Trash2 size={12} />
+            </button>
+            {confirming && (
+                <ConfirmDialog
+                    portal
+                    tone="danger"
+                    title={`Delete feature "${featureName}"?`}
+                    cancelLabel="Cancel"
+                    confirmLabel="Delete"
+                    onCancel={() => setConfirming(false)}
+                    onConfirm={() => {
+                        setConfirming(false);
+                        onConfirm();
+                    }}
+                />
+            )}
+        </>
+    );
+}
 
 export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions, onBranchCreated }: StructuredPRDViewProps) {
     const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
@@ -840,18 +874,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             />
             {renderFeatureTrace(feature, hideSystem)}
             {!readOnly && (
-                <button
-                    onClick={() => {
-                        if (window.confirm(`Delete feature "${feature.name}"?`)) {
-                            handleDeleteFeature(feature.id);
-                        }
-                    }}
-                    className="absolute -right-2 -top-2 p-1 bg-white border border-neutral-200 rounded-full text-neutral-300 hover:text-red-500 opacity-0 group-hover/feature:opacity-100 transition shadow-sm"
-                    title="Delete feature"
-                    aria-label="Delete feature"
-                >
-                    <Trash2 size={12} />
-                </button>
+                <DeleteFeatureButton
+                    featureName={feature.name}
+                    onConfirm={() => handleDeleteFeature(feature.id)}
+                />
             )}
         </div>
     );

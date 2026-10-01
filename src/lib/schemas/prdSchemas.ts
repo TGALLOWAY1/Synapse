@@ -353,7 +353,7 @@ export const structuredPRDSchema = {
 // Each schema covers exactly the StructuredPRD fields its section produces.
 // Required lists are intentionally lenient (mirror structuredPRDSchema pattern).
 
-export const productBasicsSchema = {
+const productBasicsSchema = {
     type: "OBJECT",
     properties: {
         productName: { type: "STRING" },
@@ -366,7 +366,7 @@ export const productBasicsSchema = {
     required: ["vision", "targetUsers", "coreProblem"],
 };
 
-export const productThesisSliceSchema = {
+const productThesisSliceSchema = {
     type: "OBJECT",
     properties: {
         productThesis: productThesisSchema,
@@ -406,7 +406,7 @@ export const groundingSliceSchema = {
     required: ["domainEntities", "primaryActions"],
 };
 
-export const featuresSliceSchema = {
+const featuresSliceSchema = {
     type: "OBJECT",
     properties: {
         features: { type: "ARRAY", items: leanFeatureItemSchema },
@@ -415,7 +415,7 @@ export const featuresSliceSchema = {
     required: ["features"],
 };
 
-export const uxSliceSchema = {
+const uxSliceSchema = {
     type: "OBJECT",
     properties: {
         userLoops: { type: "ARRAY", items: userLoopItemSchema },
@@ -425,7 +425,7 @@ export const uxSliceSchema = {
     required: ["userLoops"],
 };
 
-export const architectureSliceSchema = {
+const architectureSliceSchema = {
     type: "OBJECT",
     properties: {
         architecture: { type: "STRING" },
@@ -436,7 +436,7 @@ export const architectureSliceSchema = {
     required: ["architecture"],
 };
 
-export const qualityRisksSliceSchema = {
+const qualityRisksSliceSchema = {
     type: "OBJECT",
     properties: {
         risks: { type: "ARRAY", items: { type: "STRING" } },
@@ -446,7 +446,7 @@ export const qualityRisksSliceSchema = {
     required: ["risks"],
 };
 
-export const metricsScopeSliceSchema = {
+const metricsScopeSliceSchema = {
     type: "OBJECT",
     properties: {
         mvpScope: mvpScopeSchema,

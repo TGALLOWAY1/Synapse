@@ -24,7 +24,7 @@ Phase 1 already applied in commit `claude/synapse-codebase-audit-tIUSS`.
 
 - [ ] **Merge `prdPipeline.ts` into `progressivePrdPipeline.ts`.** After the
   May 2026 cleanup `prdPipeline.ts` only re-exports types
-  (`PrdPipelineOptions`, `PrdPipelineResult`, `PRD_SCHEMA_VERSION`). Two
+  (`PrdPipelineOptions`, `PrdPipelineResult`). Two
   files import from it. Wait until `progressivePrdPipeline.ts` is stable for
   one release cycle, then inline and delete.
 - [ ] **Resolve "Password reset is coming soon" tooltip** at

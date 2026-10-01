@@ -44,10 +44,11 @@ the browser console), let you tune model routing without code changes:
 npm run dev          # Vite dev server
 npm run build        # tsc -b && vite build (type-check is part of the build)
 npm run lint         # ESLint (flat config, TS/TSX)
+npm run lint:dead    # knip dead-code report (opt-in; not part of the PR gate)
 npm run preview      # preview the production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # run a single test file in watch mode
-npx tsc --noEmit     # type-check without emitting
+npx tsc -b           # type-check (the root tsconfig is solution-style: `tsc --noEmit` checks nothing)
 ```
 
 Other scripts: `npm run mockup:harness` (mockup-generation evaluation harness),
