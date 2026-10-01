@@ -64,11 +64,13 @@ describe('ProjectConflictBanner — resolution outcomes are surfaced', () => {
 
     it('reports a missing cloud copy when choosing the cloud version', async () => {
         seedConflict();
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
         vi.mocked(resolveConflictUseCloud).mockResolvedValue('cloud_missing');
 
         render(<ProjectConflictBanner projectId="p1" />);
         fireEvent.click(screen.getByRole('button', { name: /Use cloud version/ }));
+        // The banner button opens a ConfirmDialog whose confirm button carries the same label.
+        const confirmButtons = screen.getAllByRole('button', { name: /Use cloud version/ });
+        fireEvent.click(confirmButtons[confirmButtons.length - 1]);
 
         await waitFor(() => expect(toastTitles()).toContain('No cloud version to use'));
     });
