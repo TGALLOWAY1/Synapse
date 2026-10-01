@@ -301,6 +301,9 @@ engine), `src/components/downstream/`.
 - [ ] Restoring an earlier version **appends** a new version — the history is
       not rewound and nothing is deleted.
 - [ ] Work done after the restored point is still reachable in history.
+- [ ] Restoring the exact content your outputs were generated from (e.g.
+      undoing an edit) leaves them **current**: the restore confirmation
+      warns about none of them and Sync outputs offers nothing to update.
 - [ ] Overflow menu → **Project History** shows the event timeline.
 
 Interrupt a generation (reload the page mid-run):

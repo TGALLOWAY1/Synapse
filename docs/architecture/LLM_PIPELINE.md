@@ -264,7 +264,9 @@
       latest is a legacy `isFinal` spine, the edited version isn't the latest, or **any
       `ArtifactVersion` carries a spine `sourceRef` to the latest version id**
       (an artifact was generated against it — amending under a referenced id
-      would let the freshness engine read changed content as "current"; e.g.
+      would let the freshness engine read changed content as "current" for a
+      legacy output it judges by spine id; a fingerprinted output would catch
+      the change, but the guard stays for the legacy ones; e.g.
       confirm → Generate outputs → confirm, or an early design-system run
       against a decision-edit version). A bulk **"Confirm all (N)"** control
       (inline two-step confirm) confirms every remaining unresolved assumption
@@ -623,7 +625,17 @@
     summary (they are dropped when a spine is present, used only in the legacy
     fallback). A spine with **no features** yields a null spine section → the
     legacy structured-summary fallback. Each artifact version stamps
-    `metadata.spineContextUsed` / `spineSchemaVersion`. Do **not** re-add the
+    `metadata.spineContextUsed` / `spineSchemaVersion`. **The job controller
+    builds every core prompt from the slot's input slice**
+    (`src/lib/artifactInputSlices.ts`: `selectCorePromptInput` →
+    `buildCorePromptCall` → `generateCoreArtifact`) and stamps
+    `provenance.inputHashes`, the fingerprint of exactly that input plus the
+    dependency content consumed — the freshness engine compares it instead of
+    version ids. Never feed `generateCoreArtifact` PRD-side input from outside
+    that projection; `artifactInputSlices.test.ts` pins that each core prompt
+    reads nothing outside its slice. Today every core prompt reads the whole
+    PRD (spine + full markdown appendix), so narrowing what a subtype reads is
+    a slice change its prompt and fingerprint make together. Do **not** re-add the
     duplicate glossary/summary blocks alongside the spine, do **not** feed long
     markdown into the spine (it must stay compact/structured), and do **not**
     re-order the prompt so the PRD markdown appendix precedes the structured

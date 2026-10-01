@@ -93,3 +93,10 @@ fallback during this first migration.
   is present (the spine subsumes both).
 - **Diagnostics:** each artifact version records `spineContextUsed` and
   `spineSchemaVersion` in `metadata`.
+- **Freshness:** the spine is built for each core prompt from the slot's input
+  slice (`src/lib/artifactInputSlices.ts`, `buildCorePromptCall`), and the
+  version records `provenance.inputHashes` — fingerprints of the RAW inputs
+  the spine and the markdown appendix are built from (structured PRD, stored
+  markdown, product-name fallback, platform, safety review, preset), never of
+  the spine itself, so a change to how the spine is built never moves a
+  fingerprint. See `docs/ARTIFACT_DEPENDENCY_GRAPH.md`.

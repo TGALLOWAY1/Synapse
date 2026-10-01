@@ -61,6 +61,16 @@ band are ordered so earlier ones make later ones easier.
 #### 1. Make staleness truthful, and say it once
 **Effort: medium · Risk: medium (shared engine + characterization tests)**
 
+> **Status (2026-10): the "truthful" half is done; "say it once" remains.**
+> `prd_changed` no longer fires on a spine-id change alone: every generated
+> version records an input fingerprint (`provenance.inputHashes`,
+> `src/lib/artifactInputSlices.ts`) of the actual generation inputs — exactly
+> the approach recommended below, never `summarizeSpineChange` — and the
+> engine compares it with the current inputs, so a content-identical restore
+> flags nothing (versions without a fingerprint keep the id comparison). The
+> evidence quoted below describes the pre-fingerprint engine. Routing every
+> surface through one user-facing projection is still open.
+
 `prd_changed` is still a pure spine-id comparison
 (`artifactDependencyGraph.ts:466-479`), and it counts as hard evidence
 unconditionally (`:532-539`). Because every restore mints a new spine id

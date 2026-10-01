@@ -25,8 +25,9 @@ interface VersionHistoryPanelProps {
     restoreKind: 'prd' | 'artifact';
     // Diff input for "compare this version against current".
     getCompareInput: (id: string) => CompareInput;
-    // PRD only: downstream artifacts that would go stale on restore.
-    getStaleArtifactTitles?: () => string[];
+    // PRD only: downstream artifacts a restore of the given version would take
+    // out of date (an output whose inputs the version matches stays current).
+    getStaleArtifactTitles?: (versionId: string) => string[];
     onRestore?: (id: string, opts?: { restoreOverlays?: boolean }) => void;
     // Artifact only: does the CURRENT version carry user overlay edits that a
     // restore would otherwise discard? Drives the keep-or-restore choice.
@@ -183,7 +184,7 @@ export function VersionHistoryPanel({
                 <RevertConfirmModal
                     kind={restoreKind}
                     sourceLabel={confirmEntry.label}
-                    staleArtifactTitles={restoreKind === 'prd' ? getStaleArtifactTitles?.() ?? [] : []}
+                    staleArtifactTitles={restoreKind === 'prd' ? getStaleArtifactTitles?.(confirmEntry.id) ?? [] : []}
                     hasCurrentOverlayEdits={hasCurrentOverlayEdits}
                     onCancel={() => setConfirmId(null)}
                     onConfirm={(opts) => doRestore(confirmEntry.id, opts)}

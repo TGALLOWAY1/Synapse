@@ -9,7 +9,9 @@ import {
 } from '../../lib/artifactFreshness';
 import { computeRecommendedUpdates } from '../../lib/artifactDependencyGraph';
 import { buildExportManifest, renderManifestMarkdown } from '../../lib/exportManifest';
-import type { SourceRef, StructuredPRD } from '../../types';
+import { buildOutputSyncRows } from '../../lib/outputSyncPlan';
+import { computeArtifactInputHashes, selectArtifactPrdInput } from '../../lib/artifactInputSlices';
+import type { ArtifactSlotKey, CoreArtifactSubtype, SourceRef, StructuredPRD } from '../../types';
 
 // THE SYN-005 ACCEPTANCE TEST — one canonical freshness engine, one verdict.
 //
@@ -124,5 +126,73 @@ describe('SYN-005 — every freshness surface agrees on one verdict', () => {
         // (d) The single shared status-label map PlanHeader / DataModelOverview /
         //     the export manifest all render from.
         expect(DEPENDENCY_STATUS_LABELS[planEval!.status]).toBe('Needs update');
+    });
+});
+
+describe('input fingerprints — every surface agrees on one verdict', () => {
+    /** data_model → implementation_plan, generated with fingerprints against v1. */
+    function seedFingerprinted() {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('P', 'idea', 'web');
+        const spine = useProjectStore.getState().spineVersions[projectId][0];
+        store.updateSpineStructuredPRD(projectId, spine.id, prd(), 'md');
+        const fingerprint = (slot: ArtifactSlotKey, deps: Partial<Record<CoreArtifactSubtype, string>> = {}) => {
+            const latest = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
+            return computeArtifactInputHashes(slot, selectArtifactPrdInput(slot, {
+                structuredPRD: latest.structuredPRD!,
+                prdMarkdown: latest.responseText,
+                project: useProjectStore.getState().projects[projectId],
+            }), deps);
+        };
+        const { artifactId: dataModelId } = store.createArtifact(projectId, 'core_artifact', 'Data Model', 'data_model');
+        const { versionId: dataModelV1 } = store.createArtifactVersion(
+            projectId, dataModelId, 'dm v1', {}, [spineRef(spine.id)], 'p', null,
+            { inputHashes: fingerprint('data_model') },
+        );
+        const { artifactId: planId } = store.createArtifact(projectId, 'core_artifact', 'Implementation Plan', 'implementation_plan');
+        store.createArtifactVersion(projectId, planId, 'plan v1', {}, [
+            spineRef(spine.id),
+            { id: uuidv4(), sourceArtifactId: dataModelId, sourceArtifactVersionId: dataModelV1, sourceType: 'core_artifact' },
+        ], 'p', null, { inputHashes: fingerprint('implementation_plan', { data_model: 'dm v1' }) });
+        return { projectId, spineId: spine.id, planId };
+    }
+
+    const surfaces = (projectId: string) => {
+        const state = useProjectStore.getState();
+        const { context, evaluations } = evaluateProjectFreshness(state, projectId);
+        const alignment = state.getProjectOutputAlignment(projectId);
+        const rows = buildOutputSyncRows({
+            graph: context.graph,
+            evaluations,
+            artifactIdBySlot: context.artifactIdBySlot,
+            recommendedUpdates: computeRecommendedUpdates(context.graph, evaluations),
+        });
+        return { evaluations, alignment, rows };
+    };
+
+    it('a PRD restored to identical content is current in the evaluator, aligned, and offers nothing to sync', () => {
+        const { projectId, spineId } = seedFingerprinted();
+        const store = useProjectStore.getState();
+        store.editSpineStructuredPRD(projectId, spineId, { ...prd(), risks: ['new risk'] });
+        store.revertSpineToVersion(projectId, spineId);
+
+        const { evaluations, alignment, rows } = surfaces(projectId);
+        expect(evaluations.get('data_model')).toMatchObject({ status: 'up_to_date', reasons: [] });
+        expect(evaluations.get('implementation_plan')).toMatchObject({ status: 'up_to_date', reasons: [] });
+        expect(alignment.outputs.every(output => output.state === 'aligned')).toBe(true);
+        expect(rows.find(row => row.id === 'data_model')).toMatchObject({ defaultChoice: 'skip', isDrifted: false });
+        // (The plan is still offered because this fixture never generated its
+        // screen/flow inputs — missing upstreams surface through impactedBy.)
+        expect([...(evaluations.get('implementation_plan')?.impactedBy ?? [])].sort()).toEqual(['screen_inventory', 'user_flows']);
+    });
+
+    it('a real PRD edit flags the same outputs in every surface', () => {
+        const { projectId, spineId, planId } = seedFingerprinted();
+        useProjectStore.getState().editSpineStructuredPRD(projectId, spineId, { ...prd(), vision: 'a new vision' });
+
+        const { evaluations, alignment, rows } = surfaces(projectId);
+        expect(evaluations.get('implementation_plan')?.status).toBe('needs_update');
+        expect(alignment.outputs.find(output => output.artifactId === planId)?.state).toBe('possibly_affected');
+        expect(rows.find(row => row.id === 'implementation_plan')?.defaultChoice).toBe('update');
     });
 });

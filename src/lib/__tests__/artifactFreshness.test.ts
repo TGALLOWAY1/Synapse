@@ -8,10 +8,17 @@ import {
     invertToArtifactIds,
     isStaleStatus,
     hasDesignTokenDrift,
+    slotsInvalidatedByRestore,
     DEPENDENCY_STATUS_LABELS,
     type FreshnessStateSlice,
 } from '../artifactFreshness';
-import type { Artifact, ArtifactVersion, SourceRef, SpineVersion, StructuredPRD } from '../../types';
+import {
+    computeArtifactInputHashes,
+    dependencyContentHash,
+    inputHashSchemeFor,
+    selectArtifactPrdInput,
+} from '../artifactInputSlices';
+import type { Artifact, ArtifactSlotKey, ArtifactVersion, SourceRef, SpineVersion, StructuredPRD } from '../../types';
 
 // Exercises the canonical freshness seam against a REAL Zustand store instance
 // (mirrors src/store/__tests__ suites). It also ABSORBS the coverage of the
@@ -254,5 +261,110 @@ describe('artifactFreshness — presentation helpers', () => {
         expect(DEPENDENCY_STATUS_LABELS.update_recommended).toBe('Update recommended');
         expect(DEPENDENCY_STATUS_LABELS.up_to_date).toBe('Up to date');
         expect(DEPENDENCY_STATUS_LABELS.source).toBe('Source of truth');
+    });
+});
+
+describe('artifactFreshness — input fingerprints', () => {
+    const richPrd = (vision: string): StructuredPRD => ({
+        ...prd(vision),
+        features: [{ id: 'f1', name: 'Feature One', description: 'd', userValue: 'v', complexity: 'low' }],
+    });
+
+    /** A screen inventory generated against v1 that recorded its input fingerprint. */
+    function seedFingerprinted() {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('P', 'idea', 'web');
+        const v1 = useProjectStore.getState().spineVersions[projectId][0];
+        store.updateSpineStructuredPRD(projectId, v1.id, richPrd('v1'), 'md v1');
+        const spine = useProjectStore.getState().spineVersions[projectId][0];
+        const slot: ArtifactSlotKey = 'screen_inventory';
+        const inputHashes = computeArtifactInputHashes(slot, selectArtifactPrdInput(slot, {
+            structuredPRD: spine.structuredPRD!,
+            prdMarkdown: spine.responseText,
+            project: useProjectStore.getState().projects[projectId],
+        }), {});
+        const { artifactId } = store.createArtifact(projectId, 'core_artifact', 'Screen Inventory', 'screen_inventory');
+        store.createArtifactVersion(projectId, artifactId, 'content', {}, [
+            { id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: v1.id, sourceType: 'spine' },
+        ], 'prompt', null, { inputHashes });
+        return { projectId, spineV1Id: v1.id };
+    }
+
+    it('assembles the current fingerprint for each fingerprinted output, and each output\'s content fingerprint', () => {
+        const { projectId } = seedFingerprinted();
+        const { input } = buildDependencyEvaluationInput(state(), projectId);
+        expect(input.currentInputHashes?.screen_inventory?.scheme).toBe(inputHashSchemeFor('screen_inventory'));
+        // Nothing to compare against → nothing computed.
+        for (const slot of ['design_system', 'data_model', 'mockup'] as ArtifactSlotKey[]) {
+            expect(input.currentInputHashes?.[slot], slot).toBeUndefined();
+        }
+        expect(input.snapshots.screen_inventory?.version.contentHash).toBe(dependencyContentHash('content'));
+    });
+
+    it('restoring the PRD to identical content keeps a fingerprinted output up to date', () => {
+        const store = useProjectStore.getState();
+        const { projectId, spineV1Id } = seedFingerprinted();
+        store.editSpineStructuredPRD(projectId, spineV1Id, richPrd('v2'));
+        expect(evaluateProjectFreshness(state(), projectId).evaluations.get('screen_inventory')?.status)
+            .toBe('needs_update');
+
+        store.revertSpineToVersion(projectId, spineV1Id);
+        const ev = evaluateProjectFreshness(state(), projectId).evaluations.get('screen_inventory');
+        expect(ev?.status).toBe('up_to_date');
+        expect(ev?.reasons).toEqual([]);
+    });
+
+    it('falls back to the spine-id comparison when the project is unknown to the slice', () => {
+        const store = useProjectStore.getState();
+        const { projectId, spineV1Id } = seedFingerprinted();
+        store.editSpineStructuredPRD(projectId, spineV1Id, richPrd('v2'));
+        store.revertSpineToVersion(projectId, spineV1Id);
+
+        const { projects: _projects, ...withoutProjects } = useProjectStore.getState();
+        void _projects;
+        const { context, evaluations } = evaluateProjectFreshness(withoutProjects, projectId);
+        expect(context.input.currentInputHashes).toEqual({});
+        expect(evaluations.get('screen_inventory')?.status).toBe('needs_update');
+    });
+
+    it('asOfSpineId fingerprints the given spine', () => {
+        const store = useProjectStore.getState();
+        const { projectId, spineV1Id } = seedFingerprinted();
+        store.editSpineStructuredPRD(projectId, spineV1Id, richPrd('v2'));
+        expect(evaluateProjectFreshness(state(), projectId, { asOfSpineId: spineV1Id }).evaluations
+            .get('screen_inventory')?.status).toBe('up_to_date');
+    });
+
+    it('the restore warning names only outputs a restore would actually take out of date', () => {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('P', 'idea', 'web');
+        const v1 = useProjectStore.getState().spineVersions[projectId][0];
+        store.updateSpineStructuredPRD(projectId, v1.id, richPrd('A'), 'md A');
+        const { newSpineId: v2 } = store.editSpineStructuredPRD(projectId, v1.id, richPrd('B'), { responseText: 'md B' });
+        store.revertSpineToVersion(projectId, v1.id); // v3: content A again
+        const v3 = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
+
+        // Both outputs generated from v3 (content A): one fingerprinted, one legacy.
+        const inputHashes = computeArtifactInputHashes('screen_inventory', selectArtifactPrdInput('screen_inventory', {
+            structuredPRD: v3.structuredPRD!,
+            prdMarkdown: v3.responseText,
+            project: useProjectStore.getState().projects[projectId],
+        }), {});
+        const ref = (): SourceRef[] => [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: v3.id, sourceType: 'spine' }];
+        const { artifactId: screensId } = store.createArtifact(projectId, 'core_artifact', 'Screen Inventory', 'screen_inventory');
+        store.createArtifactVersion(projectId, screensId, 'screens', {}, ref(), 'p', null, { inputHashes });
+        const { artifactId: dataId } = store.createArtifact(projectId, 'core_artifact', 'Data Model', 'data_model');
+        store.createArtifactVersion(projectId, dataId, 'dm', {}, ref(), 'p');
+
+        // Restoring v1 (content A, what the screens were generated from) keeps
+        // the fingerprinted output current; the legacy one follows its spine id.
+        expect(slotsInvalidatedByRestore(state(), projectId, v1.id)).toEqual(['data_model']);
+        // Restoring v2 (content B) takes both out of date.
+        expect(slotsInvalidatedByRestore(state(), projectId, v2).sort()).toEqual(['data_model', 'screen_inventory']);
+
+        // And the warning is honest: after the v1 restore, the screens read current.
+        store.revertSpineToVersion(projectId, v1.id);
+        expect(evaluateProjectFreshness(state(), projectId).evaluations.get('screen_inventory')?.status).toBe('up_to_date');
+        expect(evaluateProjectFreshness(state(), projectId).evaluations.get('data_model')?.status).toBe('needs_update');
     });
 });

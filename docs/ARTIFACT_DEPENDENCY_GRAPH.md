@@ -32,7 +32,9 @@ the feature keys off.)
   records a `spine` ref; mockup versions already recorded `core_artifact`
   refs for their inputs (the design_system ref carries the tokensHash in
   `SourceRef.anchorInfo`). Core artifacts recorded **only** the spine ref
-  before this feature.
+  before this feature. Since input fingerprints (below), every generated
+  version ALSO records `provenance.inputHashes` — fingerprints of exactly the
+  inputs its generator read.
 - **Freshness (SYN-005).** `evaluateDependencyGraph` is the ONE freshness
   engine. The old `stalenessSlice.getArtifactStaleness` (3-value
   `current | possibly_outdated | outdated`) was **deleted**; its spine-ref-drift
@@ -64,33 +66,120 @@ To change the map, change the pipeline constants — the graph follows.
 
 ## Staleness model (deterministic, no semantic diffing)
 
-Evaluated per node by `evaluateDependencyGraph()`:
+Evaluated per node by `evaluateDependencyGraph()`. **Inputs are compared, not
+version ids**, whenever the version carries a comparable input fingerprint;
+legacy versions keep the id rules.
 
-1. **PRD drift** — the version's `spine` ref ≠ the latest spine id →
-   `needs_update` (`prd_changed`).
-2. **Dependency drift** — a recorded `core_artifact` ref ≠ that dependency's
-   current preferred version id → `needs_update` (`dependency_changed`).
-   `runCoreArtifactSlot` now records these refs for each `dependsOn` input
-   (mirroring what `runMockupSlot` always did).
-3. **Design token drift** (mockup only) — recorded tokensHash
+### Input fingerprints (`src/lib/artifactInputSlices.ts`)
+
+A version id moves without any input moving all the time: a PRD restore to
+identical content mints a new spine id, a no-op save or an undone edit lands
+back on the same content, and an overlay edit, "Mark as up to date", or an
+artifact restore appends a content-identical clone of an upstream. Comparing
+ids flagged every downstream output in all of those cases (a one-sentence
+Vision edit, a decision apply, or a restore marked all seven outputs "Needs
+update" and the Sync modal preselected Regenerate on each — ~3 minutes and six
+model calls). So generation records what each output was built from:
+
+- **The slice map.** `ARTIFACT_INPUT_SLICES` declares, per slot, what its
+  generator reads: the PRD-side slice kind, the design-direction policy, and
+  the upstream artifacts whose content it consumes (the pipeline's own
+  `dependsOn`; the mockup's `screen_inventory` + `component_inventory` — its
+  design-system input stays tracked by tokensHash, rule 4 below).
+- **The projection is shared.** `selectArtifactPrdInput` projects a spine +
+  project onto a slot's slice. The job controller builds every core prompt
+  from that projection (`selectCorePromptInput` → `buildCorePromptCall` →
+  `generateCoreArtifact`) and the mockup spec's settings from
+  `selectMockupSpecInput`, so prompt and fingerprint cannot drift.
+  `artifactInputSlices.test.ts` pins it: inputs outside a slice change neither
+  the assembled prompt nor the fingerprint, and every input change the prompt
+  sees moves the fingerprint.
+- **What each slot reads today.**
+  - Every core artifact (design_system, screen_inventory, user_flows,
+    component_inventory, data_model, implementation_plan) — `core_prompt`:
+    the canonical PRD spine built from the WHOLE structured PRD (identity,
+    users, features, screen/entity seeds, constraints, safety, architecture,
+    design direction), the guardrails' feature ids, and the **full PRD
+    markdown appendix**, which renders essentially every structured field
+    (decisions included). So any PRD content edit — a Vision sentence, a
+    risk, a confirmed assumption — moves every core fingerprint, honestly:
+    the model would see it. Narrowing a subtype means narrowing what its
+    prompt reads (a new slice kind its prompt is built from).
+  - The mockup — `mockup_spec`: only the product name, the vision (title +
+    summary) and the auto settings (platform + a fidelity derived from
+    feature count, high-complexity count, and PRD length). A risks,
+    architecture, decision, or feature-description edit leaves it current.
+- **Fingerprints hash raw inputs** — the structured PRD, the stored PRD
+  markdown (`responseText`), the product-name fallback, platform, the safety
+  review's directive fields, the preset, and upstream content — never derived
+  renderings such as the canonical spine, so a deploy that changes how a
+  prompt or the spine is rendered never moves a fingerprint the user did not
+  touch. Hashing is canonical (sorted keys, collapsed whitespace, empty values
+  dropped) and 64-bit (`inputContentHash`).
+- **Recorded as provenance** (`provenance.inputHashes = { scheme, spine,
+  designBrief?, dependencies? }`, stamped by `runCoreArtifactSlot` /
+  `runMockupSlot`); every comparison is derived on read (rule 10). The
+  `scheme` carries the hashing version and the slot's slice version: a record
+  from another scheme is never compared (id fallback), so changing a slice can
+  never mass-flag existing outputs.
+- **The current side** is computed by the freshness seam
+  (`buildDependencyEvaluationInput` → `currentPrdInputHashesForSpine`, memoized
+  per spine object and shared by every core slot; each preferred version's
+  `contentHash` via `versionContentHash`, memoized per version object) — only
+  for slots whose output recorded a fingerprint, and only when the latest spine
+  has a structured PRD and the project is known; otherwise the engine falls
+  back to ids. `deriveProjectOutputAlignment` assembles the same fingerprints
+  (it takes the project), so alignment and freshness reach one verdict.
+
+### The rules
+
+1. **PRD drift** — fingerprinted: the recorded PRD-side fingerprint ≠ the
+   current one → `needs_update` (`prd_changed`, "The parts of the PRD this
+   output reads changed…"). Legacy: the version's `spine` ref ≠ the latest
+   spine id → `needs_update` (`prd_changed`).
+2. **Design direction drift** — fingerprinted, **design system only**: the
+   recorded design brief (the effective preset) ≠ the current one →
+   `needs_update` (`design_direction_changed`). Every core prompt carries the
+   direction (the spine's `design` block), so it is *recorded* for every core
+   slot, but only the design system — whose prompt takes the preset directive
+   as a hard constraint — is *compared*: a direction change invalidates the
+   design system and, through its tokens, the mockups (rule 4), as before.
+3. **Dependency drift** — fingerprinted: the recorded content fingerprint of
+   a consumed dependency ≠ that dependency's current `contentHash` →
+   `needs_update` (`dependency_changed`); a content-identical clone (overlay
+   edit, mark-current, restore) is **not** drift. Legacy: a recorded
+   `core_artifact` ref ≠ that dependency's current preferred version id →
+   `needs_update` (`dependency_changed`). `runCoreArtifactSlot` records these
+   refs for each `dependsOn` input (mirroring what `runMockupSlot` always did).
+4. **Design token drift** (mockup only) — recorded tokensHash
    (`SourceRef.anchorInfo`) ≠ current preferred design system's hash →
    `needs_update` (`design_tokens_changed`). Hash comparison beats
    version-id comparison so a token-identical regen keeps mockups current.
-4. **Legacy fallback** — no recorded dependency ref (pre-feature versions)
-   but the dependency's preferred version is newer than this artifact →
-   advisory `update_recommended` (`dependency_newer`).
-5. **Validation review** — a live or persisted blocking validation
+5. **Legacy fallback** — no recorded dependency ref or fingerprint
+   (pre-feature versions, or a dependency missing at generation time) but the
+   dependency's preferred version is newer than this artifact → advisory
+   `update_recommended` (`dependency_newer`).
+6. **Validation review** — a live or persisted blocking validation
    disposition → `needs_review`. This is deliberately distinct from
    planning alignment: the evaluator still records any PRD or dependency
    drift reasons, but the output cannot be marked current until validation is
    resolved or explicitly accepted under policy.
-6. **Missing / error / generating** — from artifact presence + the live job
+7. **Missing / error / generating** — from artifact presence + the live job
    slot state.
 
 Upstream trouble (including `needs_review`) additionally propagates
 downstream as `impactedBy`
 (transitive over hard edges), so an artifact whose own refs match still
 warns when an ancestor is stale — surfaced as the blue **Impacted** pill.
+That includes a fingerprint-current mockup whose screen inventory is stale:
+its own inputs did not move, but they will when the upstream regenerates.
+
+`changeSummary` and `likelyUnaffected` are kept on both paths: a moved
+fingerprint establishes drift, and the change summary still explains *what*
+changed; because every core prompt reads the whole PRD, the advisory
+"likely unaffected" hint (the affinity map in `spineChangeAnalysis.ts`) is
+still the only signal that a hard `prd_changed` is probably immaterial. It
+never suppresses the hard status.
 Manual edits (`provenance.changeSource === 'user_edit'`) surface as a
 caution flag, never a hard status.
 
@@ -113,6 +202,22 @@ vocabulary.
   batch never regenerates an artifact before an upstream input in the same
   batch. `computeRecommendedUpdates()` = stale ∪ missing ∪ errored ∪
   validation-review ∪ impacted nodes, in that order.
+- **Generation reads the same verdict.** The job controller's "is this slot
+  current for the spine?" (`isSlotDoneForSpine` → `isVersionCurrentForSpine`)
+  applies the engine's PRD-side comparison, so a run seeds fingerprint-current
+  upstreams generated against an older spine version as dependency context
+  (`seedGenerationContext`) and records refs to them — regenerating one
+  dependent alone still reads its required inputs. `startAll` skips
+  fingerprint-current outputs, except that an output whose input regenerates
+  in the same run rides along (never more than the spine-ref rule scheduled).
+  Resume
+  evidence stays spine-ref based: an output merely current for a newer spine
+  is not evidence that a run for it began. The controller's verdict is
+  PRD-side only — a changed design preset is reported by the engine
+  (`design_direction_changed`) but never makes the design system "not done",
+  or the early design-system run (which the workspace fires on any project
+  change) would regenerate it in the background, racing Change direction's
+  own regenerate confirmation.
 - **Update selected** → existing `artifactJobController.retrySlot`.
 - **Update all impacted** → `artifactJobController.regenerateSlots(slots,
   args)` — a thin wrapper over the existing `executeJob`, which already runs
@@ -128,8 +233,10 @@ vocabulary.
   inventory built from the old screens.
 - **Open artifact** → the hosting workspace view (`screen_inventory` and
   `mockup` route into the Screens experience view).
-- **Mark current** is unavailable for `needs_review`; synchronization cannot
-  convert a failed validation gate into a trusted output.
+- **Mark current** rebases the refs and the input fingerprint onto the
+  confirmed inputs (VERSIONING_AND_EXPORT.md). It is unavailable for
+  `needs_review`; synchronization cannot convert a failed validation gate into
+  a trusted output.
 
 ## UI
 
@@ -145,16 +252,24 @@ Change Impact / History tabs.
 ## Compatibility
 
 - Older projects lack dependency refs → the timestamp heuristic covers them
-  (advisory, never hard-stale). Everything else keys off data that already
-  exists (spine refs, versions, job slots).
-- No new persisted state; snapshots and `/api/projects` sync are unchanged
-  (`sourceRefs` already traveled in `ArtifactVersion`).
+  (advisory, never hard-stale). Versions without an input fingerprint keep
+  the id comparison; everything else keys off data that already exists
+  (spine refs, versions, job slots).
+- No new persisted collection: `provenance.inputHashes` is an optional field
+  on `ArtifactVersion`, which already travels through localStorage,
+  `/api/projects` sync, snapshots, and the recovery bundle.
 
 ## Known limitations / follow-ups
 
 - Node cards show version + date, not content-derived counts ("28 screens")
   — parsing every artifact on each render was deliberately skipped.
-- Fine-grained content hashing (`contentHash`) is not implemented; version
-  ids + tokensHash are the drift signals.
+- Every core prompt reads the whole PRD (the full markdown appendix), so a
+  PRD content edit anywhere still flags all six core outputs; only the mockup
+  has a narrow slice. Precision for the core outputs needs their prompts
+  narrowed (a new slice kind each prompt is built from) and live quality
+  validation — the slice map is where that lands.
+- Clones that change content without regenerating (an applied selective
+  downstream update) drop the fingerprint, so that version falls back to the
+  id comparison until its next regeneration.
 - `regenerateSlots` regenerates against the current final spine; it does not
   attempt per-artifact spine pinning.

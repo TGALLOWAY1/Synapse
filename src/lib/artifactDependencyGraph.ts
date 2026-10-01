@@ -14,12 +14,26 @@
 // view, where it has no row of its own but does have a Components section.
 //
 // Staleness is deterministic and metadata-driven — no LLM calls, no semantic
-// diffing:
+// diffing. When the version carries a comparable input fingerprint
+// (`provenance.inputHashes`, recorded at generation by artifactInputSlices.ts)
+// the evaluator compares INPUTS, not ids:
+//   1. PRD-side fingerprint ≠ current  → the PRD inputs this output reads
+//                                         changed                (needs_update)
+//   1b. design brief ≠ current (design
+//      system only)                    → visual direction moved (needs_update)
+//   2. recorded dep content hash ≠ the dep's current content
+//                                       → a dependency changed   (needs_update)
+// Legacy versions (no fingerprint, or one from another scheme) keep the id
+// comparison:
 //   1. spine ref ≠ latest spine        → the PRD changed        (needs_update)
 //   2. recorded dep ref ≠ current dep  → a dependency changed   (needs_update)
+// Both paths share:
 //   3. design tokensHash drift (mockup)→ visual direction moved (needs_update)
 //   4. no recorded dep ref (legacy) but the dep's preferred version is newer
 //      than this artifact              → advisory       (update_recommended)
+// So a restore to identical content, a no-op save, an edit outside what an
+// output reads, or an upstream clone with unchanged content (overlay edit,
+// mark-current, restore) leaves a fingerprinted output up to date.
 // Upstream staleness additionally propagates downstream as `impactedBy`, so
 // an artifact whose own refs match still warns when an ancestor is stale.
 //
@@ -41,6 +55,7 @@ import {
 } from './coreArtifactPipeline';
 import { isLikelyUnaffected, type SpineChangeSummary } from './spineChangeAnalysis';
 import { readArtifactValidationDisposition } from './artifactValidationPolicy';
+import { comparePrdInputs, type CurrentPrdInputHashes } from './artifactInputSlices';
 
 // ---------------------------------------------------------------------------
 // Graph shape
@@ -310,11 +325,12 @@ export type DependencyNodeStatus =
     | 'missing';           // expected by the map but never generated
 
 export type StaleReasonKind =
-    | 'prd_changed'            // spine ref no longer the latest spine
-    | 'dependency_changed'     // recorded upstream version ref ≠ current preferred
-    | 'design_tokens_changed'  // mockup tokensHash drift
-    | 'dependency_newer'       // legacy fallback: upstream regenerated later (no recorded ref)
-    | 'no_provenance';         // version has no spine ref at all
+    | 'prd_changed'               // PRD inputs fingerprint changed (legacy: spine ref no longer the latest spine)
+    | 'dependency_changed'        // upstream content fingerprint changed (legacy: recorded version ref ≠ current preferred)
+    | 'design_tokens_changed'     // mockup tokensHash drift
+    | 'design_direction_changed'  // design system: the selected design preset changed since generation
+    | 'dependency_newer'          // legacy fallback: upstream regenerated later (no recorded ref)
+    | 'no_provenance';            // version has no spine ref at all
 
 export interface StaleReason {
     kind: StaleReasonKind;
@@ -338,6 +354,13 @@ export interface DependencyVersionSnapshot {
     provenance?: VersionProvenance;
     /** Optional version metadata — used to detect user overlay edits. */
     metadata?: Record<string, unknown>;
+    /**
+     * Fingerprint of this version's content as a dependency
+     * (artifactInputSlices.dependencyContentHash). Dependents whose recorded
+     * fingerprint names this dependency compare against it; absent → they
+     * fall back to the version-id comparison.
+     */
+    contentHash?: string;
 }
 
 export interface DependencyNodeSnapshot {
@@ -352,6 +375,15 @@ export interface DependencyEvaluationInput {
     latestSpineProvenance?: VersionProvenance;
     /** tokensHash of the current preferred design system, when one exists. */
     currentDesignTokensHash?: string;
+    /**
+     * The CURRENT PRD-side input fingerprint per slot, computed from the
+     * latest spine exactly as generation records it
+     * (artifactInputSlices.currentPrdInputHashesForSpine). A version whose
+     * recorded fingerprint shares the slot's scheme is compared by
+     * fingerprint; a slot absent here (or a legacy version) falls back to the
+     * spine-id comparison.
+     */
+    currentInputHashes?: Partial<Record<ArtifactSlotKey, CurrentPrdInputHashes>>;
     /** Preferred-version snapshot per artifact node; absent = not generated. */
     snapshots: Partial<Record<ArtifactSlotKey, DependencyNodeSnapshot>>;
     /** Live generation status per slot (transient job state). */
@@ -462,23 +494,46 @@ export function evaluateDependencyGraph(
         const reasons: StaleReason[] = [];
         let advisory = false;
 
-        // 1. PRD drift — the artifact's recorded spine ref vs the latest spine.
+        // Input fingerprints: compared when the version recorded them under
+        // the slot's current scheme; otherwise every rule below falls back to
+        // its version-id form (legacy versions, unknown current inputs).
+        const recordedInputs = version.provenance?.inputHashes;
+        const inputs = comparePrdInputs(slotKey, recordedInputs, input.currentInputHashes?.[slotKey]);
+
+        // 1. PRD drift — the recorded PRD-side fingerprint vs the current one;
+        //    legacy: the artifact's recorded spine ref vs the latest spine.
         const spineRef = version.sourceRefs.find(r => r.sourceType === 'spine');
         const refLabel = spineLabel(input.spineVersionIds, spineRef?.sourceArtifactVersionId);
+        const prdChanged = inputs.comparable
+            ? inputs.prdChanged
+            : !!input.latestSpineId && !!spineRef && spineRef.sourceArtifactVersionId !== input.latestSpineId;
         if (!spineRef) {
             reasons.push({
                 kind: 'no_provenance',
                 detail: 'No recorded PRD link for this artifact — it may predate provenance tracking.',
             });
             advisory = true;
-        } else if (input.latestSpineId && spineRef.sourceArtifactVersionId !== input.latestSpineId) {
+        } else if (prdChanged) {
             const latestLabel = spineLabel(input.spineVersionIds, input.latestSpineId);
             const changeSummary = input.spineChangeFor?.(spineRef.sourceArtifactVersionId) ?? undefined;
+            const versions = refLabel && latestLabel && refLabel !== latestLabel
+                ? ` (generated from ${refLabel}, now on ${latestLabel})`
+                : '';
             reasons.push({
                 kind: 'prd_changed',
                 dependencyId: 'prd',
-                detail: `The PRD changed after this was generated${refLabel && latestLabel ? ` (generated from ${refLabel}, now on ${latestLabel})` : ''}.`,
+                detail: inputs.comparable
+                    ? `The parts of the PRD this output reads changed after it was generated${versions}.`
+                    : `The PRD changed after this was generated${versions}.`,
                 ...(changeSummary ? { changeSummary } : {}),
+            });
+        }
+        // 1b. Design direction — only slots whose generator takes the preset
+        //     as a hard constraint (the design system) compare it.
+        if (inputs.comparable && inputs.designDirectionChanged) {
+            reasons.push({
+                kind: 'design_direction_changed',
+                detail: 'The selected visual direction changed after this was generated — it no longer reflects the current design preset.',
             });
         }
 
@@ -510,6 +565,24 @@ export function evaluateDependencyGraph(
                 }
             }
 
+            // Fingerprinted dependency: compare the content this version
+            // consumed with the dependency's current content, so a clone with
+            // unchanged content (overlay edit, mark-current, restore) is not
+            // drift while a real regeneration is.
+            const recordedDepHash = inputs.comparable
+                ? recordedInputs?.dependencies?.[dep as CoreArtifactSubtype]
+                : undefined;
+            if (recordedDepHash !== undefined && depSnapshot.version.contentHash !== undefined) {
+                if (recordedDepHash !== depSnapshot.version.contentHash) {
+                    reasons.push({
+                        kind: 'dependency_changed',
+                        dependencyId: dep,
+                        detail: `${nodeTitle(graph, dep)} changed (now Version ${depSnapshot.version.versionNumber}) after this was created.`,
+                    });
+                }
+                continue;
+            }
+
             const recordedRef = version.sourceRefs.find(
                 r => r.sourceType === 'core_artifact' && r.sourceArtifactId === depSnapshot.artifactId,
             );
@@ -534,7 +607,10 @@ export function evaluateDependencyGraph(
         }
 
         const hasHardEvidence = reasons.some(r =>
-            r.kind === 'prd_changed' || r.kind === 'dependency_changed' || r.kind === 'design_tokens_changed',
+            r.kind === 'prd_changed'
+            || r.kind === 'dependency_changed'
+            || r.kind === 'design_tokens_changed'
+            || r.kind === 'design_direction_changed',
         );
         const status: DependencyNodeStatus = validationNeedsReview
             ? 'needs_review'

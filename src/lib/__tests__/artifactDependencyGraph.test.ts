@@ -19,7 +19,8 @@ import {
     RETIRED_ARTIFACT_SUBTYPES,
 } from '../coreArtifactPipeline';
 import { summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
-import type { SourceRef, StructuredPRD } from '../../types';
+import { ARTIFACT_INPUT_SLICES, inputHashSchemeFor } from '../artifactInputSlices';
+import type { ArtifactInputHashes, ArtifactSlotKey, CoreArtifactSubtype, SourceRef, StructuredPRD } from '../../types';
 
 const graph = buildArtifactDependencyGraph();
 
@@ -589,5 +590,189 @@ describe('expandSelectionWithTroubledUpstreams', () => {
         const evals = evaluateDependencyGraph(graph, healthyInput());
         const batch = expandSelectionWithTroubledUpstreams(graph, evals, ['mockup', 'prd']);
         expect(batch).toEqual(['mockup']);
+    });
+});
+
+// --- fingerprinted versions (provenance.inputHashes) ---------------------------
+//
+// Generation records what each output was built from (artifactInputSlices.ts);
+// the engine compares those fingerprints with the CURRENT inputs instead of
+// comparing version ids. The fixture: every output generated against spine v1,
+// recording PRD-side fingerprint 'prd-1' and the content fingerprint of each
+// dependency it consumed; each upstream's current content fingerprint is
+// `content-<slot>-1`.
+
+describe('evaluateDependencyGraph — fingerprinted versions', () => {
+    const slots = (input: DependencyEvaluationInput) =>
+        (Object.keys(input.snapshots) as ArtifactSlotKey[]);
+
+    const recordedFor = (slot: ArtifactSlotKey, prd = 'prd-1', brief = 'brief-1'): ArtifactInputHashes => {
+        const deps = ARTIFACT_INPUT_SLICES[slot].dependencies;
+        return {
+            scheme: inputHashSchemeFor(slot),
+            spine: prd,
+            ...(slot !== 'mockup' ? { designBrief: brief } : {}),
+            ...(deps.length > 0
+                ? { dependencies: Object.fromEntries(deps.map(dep => [dep, `content-${dep}-1`])) }
+                : {}),
+        };
+    };
+
+    /** healthyInput(), but every output carries a fingerprint and the latest spine is a NEW id (v2). */
+    function fingerprintedInput(current: { prd?: Partial<Record<ArtifactSlotKey, string>>; brief?: string } = {}): DependencyEvaluationInput {
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        input.currentInputHashes = {};
+        for (const slot of slots(input)) {
+            const snap = input.snapshots[slot]!;
+            snap.version.provenance = { changeSource: 'ai_generation', inputHashes: recordedFor(slot) };
+            snap.version.contentHash = `content-${slot}-1`;
+            input.currentInputHashes[slot] = {
+                scheme: inputHashSchemeFor(slot),
+                spine: current.prd?.[slot] ?? 'prd-1',
+                ...(slot !== 'mockup' ? { designBrief: current.brief ?? 'brief-1' } : {}),
+            };
+        }
+        return input;
+    }
+
+    it('a new spine version with unchanged inputs keeps every output up to date (restore / no-op / unrelated edit)', () => {
+        const evals = evaluateDependencyGraph(graph, fingerprintedInput());
+        for (const node of graph.nodes.filter(n => n.id !== 'prd')) {
+            expect(statusOf(evals, node.id), node.id).toBe('up_to_date');
+            expect(evals.get(node.id)?.reasons, node.id).toEqual([]);
+            expect(evals.get(node.id)?.impactedBy, node.id).toEqual([]);
+        }
+        // Provenance labels still say where each output came from.
+        expect(evals.get('data_model')?.prdVersionLabel).toBe('Version 1');
+    });
+
+    it('flags exactly the outputs whose PRD-side fingerprint moved, with the change summary attached', () => {
+        const summary = summarizeSpineChange(
+            { vision: 'v', targetUsers: [], coreProblem: '', features: [], architecture: '', risks: ['r'] },
+            { vision: 'v', targetUsers: [], coreProblem: '', features: [], architecture: '', risks: ['r2'] },
+        );
+        // A risks-only edit: every core prompt reads the PRD appendix, the
+        // mockup spec does not read risks.
+        const prd: Partial<Record<ArtifactSlotKey, string>> = {};
+        for (const meta of CORE_ARTIFACT_PIPELINE) prd[meta.subtype] = 'prd-2';
+        const input = fingerprintedInput({ prd });
+        input.spineChangeFor = (from) => (from === SPINE_V1 ? summary : null);
+        const evals = evaluateDependencyGraph(graph, input);
+
+        const plan = evals.get('implementation_plan')!;
+        expect(plan.status).toBe('needs_update');
+        expect(plan.reasons).toHaveLength(1);
+        expect(plan.reasons[0]).toMatchObject({ kind: 'prd_changed', dependencyId: 'prd', changeSummary: summary });
+        expect(plan.reasons[0].detail).toContain('generated from Version 1, now on Version 2');
+
+        // The mockup's own inputs did not move: it is up to date, and only
+        // IMPACTED through its upstreams (they will regenerate under it).
+        const mockup = evals.get('mockup')!;
+        expect(mockup.status).toBe('up_to_date');
+        expect(mockup.reasons).toEqual([]);
+        expect(mockup.impactedBy).toEqual(['screen_inventory', 'component_inventory', 'design_system']);
+    });
+
+    it('a fingerprint change under the SAME spine id still flags (content rewritten in place)', () => {
+        const input = fingerprintedInput({ prd: { data_model: 'prd-2' } });
+        input.spineVersionIds = [SPINE_V1];
+        input.latestSpineId = SPINE_V1;
+        const dataModel = evaluateDependencyGraph(graph, input).get('data_model')!;
+        expect(dataModel.status).toBe('needs_update');
+        expect(dataModel.reasons[0].kind).toBe('prd_changed');
+        expect(dataModel.reasons[0].detail).not.toContain('generated from');
+    });
+
+    it('dependency content changed → dependency_changed; a content-identical upstream clone is not drift', () => {
+        // data_model regenerated with new content.
+        const changed = fingerprintedInput();
+        changed.snapshots.data_model!.version.id = 'ver-data_model-2';
+        changed.snapshots.data_model!.version.versionNumber = 2;
+        changed.snapshots.data_model!.version.contentHash = 'content-data_model-2';
+        const plan = evaluateDependencyGraph(graph, changed).get('implementation_plan')!;
+        expect(plan.status).toBe('needs_update');
+        expect(plan.reasons).toEqual([expect.objectContaining({ kind: 'dependency_changed', dependencyId: 'data_model' })]);
+
+        // screen_inventory re-appended as a clone (overlay edit / mark-current /
+        // restore): new version id, identical content fingerprint.
+        const cloned = fingerprintedInput();
+        cloned.snapshots.screen_inventory!.version.id = 'ver-screen_inventory-2';
+        cloned.snapshots.screen_inventory!.version.versionNumber = 2;
+        const evals = evaluateDependencyGraph(graph, cloned);
+        for (const dependent of ['user_flows', 'component_inventory', 'implementation_plan', 'mockup'] as const) {
+            expect(statusOf(evals, dependent), dependent).toBe('up_to_date');
+        }
+    });
+
+    it('legacy versions without a fingerprint keep the version-id comparison', () => {
+        const input = fingerprintedInput();
+        // A legacy data_model (pre-fingerprint): only its spine ref speaks.
+        input.snapshots.data_model!.version.provenance = undefined;
+        // A legacy plan recorded the data_model by version id only.
+        input.snapshots.implementation_plan!.version.provenance = undefined;
+        input.snapshots.data_model!.version.id = 'ver-data_model-2';
+        const evals = evaluateDependencyGraph(graph, input);
+
+        expect(statusOf(evals, 'data_model')).toBe('needs_update');
+        expect(evals.get('data_model')?.reasons[0].kind).toBe('prd_changed');
+        const plan = evals.get('implementation_plan')!;
+        expect(plan.reasons.map(r => r.kind).sort()).toEqual(['dependency_changed', 'prd_changed']);
+        // Fingerprinted outputs alongside are judged by their fingerprints.
+        expect(statusOf(evals, 'screen_inventory')).toBe('up_to_date');
+    });
+
+    it('falls back to ids when the fingerprint is from another scheme or the current inputs are unknown', () => {
+        const otherScheme = fingerprintedInput();
+        otherScheme.snapshots.data_model!.version.provenance = {
+            inputHashes: { ...recordedFor('data_model'), scheme: 'ih0.core_prompt.1' },
+        };
+        expect(evaluateDependencyGraph(graph, otherScheme).get('data_model')?.reasons[0]?.kind).toBe('prd_changed');
+
+        const unknownCurrent = fingerprintedInput();
+        unknownCurrent.currentInputHashes = undefined;
+        const evals = evaluateDependencyGraph(graph, unknownCurrent);
+        expect(statusOf(evals, 'data_model')).toBe('needs_update');
+        expect(statusOf(evals, 'mockup')).toBe('needs_update');
+    });
+
+    it('a changed design preset flags the design system with its own reason, and nothing else', () => {
+        const evals = evaluateDependencyGraph(graph, fingerprintedInput({ brief: 'brief-2' }));
+        const design = evals.get('design_system')!;
+        expect(design.status).toBe('needs_update');
+        expect(design.reasons).toEqual([expect.objectContaining({ kind: 'design_direction_changed' })]);
+        for (const subtype of ['screen_inventory', 'user_flows', 'component_inventory', 'data_model', 'implementation_plan'] as CoreArtifactSubtype[]) {
+            expect(statusOf(evals, subtype), subtype).toBe('up_to_date');
+        }
+        // The mockup is impacted through the design system (its tokens will move).
+        expect(evals.get('mockup')?.impactedBy).toEqual(['design_system']);
+    });
+
+    it('the mockup keeps comparing design tokens by tokensHash', () => {
+        const input = fingerprintedInput();
+        input.currentDesignTokensHash = 'hash-b';
+        const mockup = evaluateDependencyGraph(graph, input).get('mockup')!;
+        expect(mockup.status).toBe('needs_update');
+        expect(mockup.reasons).toEqual([expect.objectContaining({ kind: 'design_tokens_changed' })]);
+    });
+
+    it('keeps the advisory likelyUnaffected hint on the fingerprint path', () => {
+        const before: StructuredPRD = { vision: 'v', targetUsers: ['u'], coreProblem: 'p', features: [], architecture: 'a', risks: ['r'] };
+        const summary = summarizeSpineChange(before, { ...before, risks: ['r', 'r2'] });
+        const prd: Partial<Record<ArtifactSlotKey, string>> = {};
+        for (const meta of CORE_ARTIFACT_PIPELINE) prd[meta.subtype] = 'prd-2';
+        const input = fingerprintedInput({ prd });
+        input.spineChangeFor = (from) => (from === SPINE_V1 ? summary : null);
+        const evals = evaluateDependencyGraph(graph, input);
+        // Every core prompt reads the risks (hard needs_update), but the screen
+        // inventory does not chiefly derive from them — the hint still says so.
+        expect(evals.get('screen_inventory')).toMatchObject({ status: 'needs_update', likelyUnaffected: true });
+        expect(evals.get('implementation_plan')?.likelyUnaffected).toBeUndefined();
+    });
+
+    it('recommends nothing for a restore to identical inputs', () => {
+        const input = fingerprintedInput();
+        expect(computeRecommendedUpdates(graph, evaluateDependencyGraph(graph, input))).toEqual([]);
     });
 });

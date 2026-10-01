@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type {
     AcceptArtifactValidationIssueResult,
     Artifact,
+    ArtifactSlotKey,
     ArtifactValidationAcceptance,
     ArtifactVersion,
     ArtifactType,
@@ -21,6 +22,12 @@ import {
 } from '../../lib/artifactValidationPolicy';
 import { inheritedImageMetadata } from '../../lib/artifactImageVersion';
 import { patchDestroysOverlayWork, pickOverlayKeys } from '../../lib/artifactOverlays';
+import { currentPrdInputHashesForSpine, rebasedInputHashes } from '../../lib/artifactInputSlices';
+
+// Clones that keep a version's content and source refs (restore, overlay edit)
+// keep the input fingerprint those refs and that content were generated from.
+const carriedInputHashes = (source: ArtifactVersion): Pick<VersionProvenance, 'inputHashes'> =>
+    source.provenance?.inputHashes ? { inputHashes: source.provenance.inputHashes } : {};
 
 export type ArtifactSlice = {
     artifacts: Record<string, Artifact[]>;
@@ -154,9 +161,13 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 isPreferred: true,
                 createdAt: now,
                 // Default attribution: first version = generation, later ones =
-                // regeneration. Callers with richer context can override.
-                provenance: provenance ?? {
-                    changeSource: versionNumber === 1 ? 'ai_generation' : 'ai_regeneration',
+                // regeneration. Callers with richer context can override; a
+                // caller passing only other provenance (e.g. the generation
+                // input fingerprint) keeps the default changeSource.
+                provenance: {
+                    ...provenance,
+                    changeSource: provenance?.changeSource
+                        ?? (versionNumber === 1 ? 'ai_generation' : 'ai_regeneration'),
                 },
             };
 
@@ -271,6 +282,9 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                     changeSource: 'revert',
                     revertedFromVersionId: sourceVersionId,
                     editSummary: `Restored from version ${src.versionNumber}`,
+                    // The restored content was generated from the source's
+                    // inputs — restoring identical content stays current.
+                    ...carriedInputHashes(src),
                 },
             };
 
@@ -364,6 +378,31 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             const spineIdx = (state.spineVersions[projectId] || []).findIndex(s => s.id === spineVersionId);
             const spineLabel = spineIdx >= 0 ? `PRD Version ${spineIdx + 1}` : 'the current PRD';
 
+            // Rebase the input fingerprint with the refs: record the confirmed
+            // spine's inputs and the current content of every rebased
+            // dependency (artifactInputSlices.rebasedInputHashes) — never a
+            // partial rebase. Without a faithful PRD-side fingerprint the
+            // clone carries none and the rebased refs decide (id comparison).
+            const slot: ArtifactSlotKey | undefined = artifact?.type === 'mockup' ? 'mockup' : artifact?.subtype;
+            const dependencyVersions: Partial<Record<CoreArtifactSubtype, ArtifactVersion>> = {};
+            for (const ref of rebasedRefs) {
+                if (ref.sourceType !== 'core_artifact' || ref.anchorInfo !== undefined) continue;
+                const depSubtype = projectArtifacts.find(a => a.id === ref.sourceArtifactId)?.subtype;
+                const depVersion = versions.find(v => v.id === ref.sourceArtifactVersionId);
+                if (depSubtype && depVersion) dependencyVersions[depSubtype] = depVersion;
+            }
+            const inputHashes = slot
+                ? rebasedInputHashes(
+                    slot,
+                    currentPrdInputHashesForSpine(
+                        slot,
+                        (state.spineVersions[projectId] || []).find(s => s.id === spineVersionId),
+                        state.projects[projectId],
+                    ),
+                    dependencyVersions,
+                )
+                : undefined;
+
             const updatedVersions = versions.map(v =>
                 v.artifactId === artifactId ? { ...v, isPreferred: false } : v
             );
@@ -388,6 +427,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 provenance: {
                     changeSource: 'marked_current',
                     editSummary: `Confirmed current for ${spineLabel}`,
+                    ...(inputHashes ? { inputHashes } : {}),
                 },
             };
 
@@ -765,6 +805,10 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                     changeSource: 'user_edit',
                     overlayEdit: true,
                     editSummary: opts.editSummary ?? opts.historyDescription,
+                    // Overlays never touch content, so the clone keeps the
+                    // generation inputs (and dependents keep reading it as
+                    // unchanged — its content fingerprint is the same).
+                    ...carriedInputHashes(preferred),
                 },
             };
 
