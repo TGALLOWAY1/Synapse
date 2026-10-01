@@ -77,40 +77,6 @@ export type EditSpineStructuredPRDResult = {
     unchanged?: boolean;
 };
 
-export type ReadinessMutationFailureReason =
-    | 'project_not_found'
-    | 'review_not_found'
-    | 'authorization_not_found'
-    | 'authorization_consumed'
-    | 'commitment_not_found'
-    | 'stale'
-    | 'tampered'
-    | 'hash_mismatch'
-    | 'accepted_concerns_mismatch'
-    | 'accepted_blockers_mismatch'
-    | 'blocking_snapshot_mismatch'
-    | 'rationale_required'
-    | 'containment_required'
-    | 'safety_blocked'
-    | 'already_committed'
-    | 'not_committed';
-
-export type CreateReadinessReviewResult =
-    | { status: 'created'; reviewId: string; review: ReadinessReview }
-    | { status: 'rejected'; reason: 'project_not_found' | 'safety_blocked' | 'stale' };
-
-export type AuthorizeReadinessCommitmentResult =
-    | { status: 'authorized'; authorizationEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
-export type CommitReadinessReviewResult =
-    | { status: 'committed'; commitmentEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
-export type ReopenReadinessCommitmentResult =
-    | { status: 'reopened'; reopenEventId: string }
-    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
-
 export type AssumptionEvidenceMutationGuard = {
     evidenceId: string;
     expectedEvidenceContentHash: string;
@@ -165,6 +131,9 @@ export interface ProjectState {
     reviewFindings: Record<string, SpecialistFinding[]>;
     reviewIssues: Record<string, ReviewIssue[]>;
     planningRecords: Record<string, PlanningRecord[]>;
+    // LEGACY, read-only: written only by the removed Finalize/readiness
+    // checkpoint. Kept so older projects round-trip through persistence,
+    // snapshots, sync, and the recovery bundle; nothing writes them now.
     readinessReviews: Record<string, ReadinessReview[]>;
     readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
     downstreamUpdatePlans: Record<string, DownstreamUpdatePlan[]>;
@@ -182,7 +151,6 @@ export interface ProjectState {
     createProject: (name: string, promptText: string, platform?: ProjectPlatform) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
-    markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     // An 'assistant' message also clears the branch's pendingReply marker.
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
@@ -530,35 +498,6 @@ export interface ProjectState {
         planningRecordId: string,
         proposal: AssumptionInterpretationProposal,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
-
-    // Durable readiness checkpoints. Reviews are immutable snapshots; user
-    // authority is recorded separately as append-only commitment events.
-    createReadinessReview: (projectId: string) => CreateReadinessReviewResult;
-    authorizeReadinessCommitment: (
-        projectId: string,
-        reviewId: string,
-        input: {
-            expectedIntegrityHash: string;
-            expectedAggregateHash: string;
-            acceptedConcernIds: string[];
-            rationale?: string;
-            containmentPlan?: string;
-            /** Required when the current checkpoint has explicit materiality
-             * blockers; omitted for legacy/no-blocker callers. */
-            acceptedBlockingRecordIds?: string[];
-            blockingSnapshotHash?: string;
-        },
-    ) => AuthorizeReadinessCommitmentResult;
-    commitReadinessReview: (
-        projectId: string,
-        reviewId: string,
-        authorizationEventId: string,
-    ) => CommitReadinessReviewResult;
-    reopenReadinessCommitment: (
-        projectId: string,
-        commitmentEventId: string,
-        reason?: string,
-    ) => ReopenReadinessCommitmentResult;
 
     // Immutable, version-bound downstream update plans. Generated snapshots
     // carry no user authority; review choices are separate append-only events.

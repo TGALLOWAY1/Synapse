@@ -11,7 +11,6 @@ const summary: WorkflowCheckpointSummary = {
     headline: 'Generation complete — 7 of 7 outputs ready',
     supportingText: 'Nothing failed.',
     detailsLabel: '1 note',
-    planningVerdict: { kind: 'working_plan', label: 'Working plan' },
     counts: {
         totalArtifacts: 7,
         readyArtifacts: 7,

@@ -38,7 +38,7 @@ export const TOUR_SCREENS: TourScreenMeta[] = [
     { id: 'refine', title: 'Refine specific parts of the document', shortLabel: 'Refine' },
     { id: 'decisions', title: 'Challenge the plan — the decisions stay yours', shortLabel: 'Decisions' },
     { id: 'versions', title: 'Nothing gets lost — every change is versioned', shortLabel: 'Versions' },
-    { id: 'assets', title: 'Commit the reasoning, then generate outputs', shortLabel: 'Build' },
+    { id: 'assets', title: 'Generate every build asset from the plan', shortLabel: 'Build' },
     { id: 'connections', title: 'Everything stays connected', shortLabel: 'Connected' },
 ];
 

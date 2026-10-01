@@ -27,8 +27,8 @@ interface Props {
  * and rendered FOUR competing actions — "Copy next prompt" styled primary
  * regardless of blockers, plus Review prompts, Convert/Manage tasks and Copy
  * plan. Every action now lives in `FinalReviewCard`, which promotes exactly one
- * primary from §W6's build-packet evaluation. Do not re-add an action here: a
- * second primary on this surface is the defect §W7 fixed.
+ * primary (the next build step). Do not re-add an action here: a second
+ * primary on this surface is the defect §W7 fixed.
  *
  * `plan.readiness` is also NOT the build-readiness signal — it only reports
  * whether the adapter could build a usable plan view model. The build-packet
@@ -68,7 +68,7 @@ export function PlanHeader({ plan, scope, prdVersionLabel, staleness }: Props) {
                 </div>
             </div>
 
-            {/* Plan-shape problems only — build-packet blockers live in Final
+            {/* Plan-shape problems only — build-packet checks live in Final
                 Review, and risks live in their own card. */}
             {(plan.readiness.missingInputs.length > 0 || plan.readiness.warnings.length > 0) && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">

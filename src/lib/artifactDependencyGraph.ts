@@ -79,7 +79,7 @@ export interface ArtifactDependencyGraph {
 const PRD_NODE: DependencyGraphNode = {
     id: 'prd',
     title: 'PRD',
-    description: 'Source of truth — the finalized product requirements',
+    description: 'Source of truth — the current product requirements',
 };
 
 const MOCKUP_NODE: DependencyGraphNode = {

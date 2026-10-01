@@ -388,7 +388,7 @@ describe('decision-edit coalescing', () => {
         expect(store().spineVersions[projectId]).toHaveLength(lenBefore + 1); // appended
     });
 
-    it('markSpineFinal on the latest breaks the chain (next decision edit appends)', () => {
+    it('a legacy final latest version breaks the chain (next decision edit appends)', () => {
         const { projectId, latestId } = seed();
         const store = () => useProjectStore.getState();
         store().editSpineStructuredPRD(projectId, latestId, prd('d1'), {
@@ -397,9 +397,8 @@ describe('decision-edit coalescing', () => {
             decisionDelta: { confirmed: 1 },
         });
         const decisionEdit = store().spineVersions[projectId].find(s => s.isLatest)!;
-        // Finality is granted only by commitReadinessReview (legacy
-        // markSpineFinal(…, true) is deliberately inert); simulate the
-        // committed flag the way the commit path stamps it.
+        // Nothing sets `isFinal` any more (the Finalize layer was removed), but
+        // legacy projects carry it; simulate such a persisted final version.
         useProjectStore.setState(state => ({
             spineVersions: {
                 ...state.spineVersions,

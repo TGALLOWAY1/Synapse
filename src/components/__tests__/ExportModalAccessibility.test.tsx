@@ -10,7 +10,6 @@ const checkpointSummary: WorkflowCheckpointSummary = {
     headline: 'Export checkpoint — no generated outputs',
     supportingText: 'The current plan remains the source of truth.',
     detailsLabel: 'Details',
-    planningVerdict: { kind: 'working_plan', label: 'Working plan' },
     counts: {
         totalArtifacts: 0,
         readyArtifacts: 0,
@@ -61,23 +60,21 @@ describe('ExportModal accessibility', () => {
         await waitFor(() => expect(opener).toHaveFocus());
     });
 
-    it('keeps export actions disabled until explicit materiality blockers are finalized', () => {
-        const onResolve = vi.fn();
+    it('never gates export on a plan checkpoint', () => {
+        // The Finalize/materiality gate was removed: export is always
+        // available and there is no "Plan finalized" verdict or blocker alert.
         const { container } = render(
             <ExportModal
                 projectId="missing-project"
                 checkpointSummary={checkpointSummary}
-                buildBlocked
-                blockingPlanningItems={[{ recordId: 'decision-1', title: 'Choose the account boundary' }]}
-                onResolveBuildBlockers={onResolve}
                 onClose={vi.fn()}
             />,
         );
 
-        expect(screen.getByRole('alert')).toHaveTextContent(/Finalize blocking decisions before export/i);
-        expect(screen.getByText(/Choose the account boundary/)).toBeInTheDocument();
-        expect(container.querySelector('fieldset')).toBeDisabled();
-        fireEvent.click(screen.getByRole('button', { name: 'Open Finalize checkpoint' }));
-        expect(onResolve).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: 'Export Project' }).textContent)
+            .not.toMatch(/Finalize|Plan finalized|accepted risk/i);
+        expect(container.querySelector('fieldset')).toBeNull();
+        expect(screen.getByRole('button', { name: /Export Full Bundle/ })).toBeEnabled();
     });
 });

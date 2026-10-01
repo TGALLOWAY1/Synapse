@@ -297,7 +297,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             createdAt: now,
             // New projects owe a setup-stage design selection (shown while the
             // PRD generates). Legacy persisted projects lack the flag and keep
-            // the finalize-edge preset gate as their only prompt.
+            // the generate-outputs preset gate as their only prompt.
             needsDesignSetup: true,
             ...(platform && { platform }),
         };
@@ -446,7 +446,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 projects: {
                     ...state.projects,
                     // A chosen preset settles the setup step no matter which UI
-                    // it came from (setup step, finalize gate, design artifact).
+                    // it came from (setup step, generate-outputs gate, design artifact).
                     [projectId]: { ...project, designSystemPreset: presetId, needsDesignSetup: false, updatedAt: Date.now() },
                 },
             };

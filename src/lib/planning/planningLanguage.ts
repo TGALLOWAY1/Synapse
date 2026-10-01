@@ -10,64 +10,11 @@ import type { DownstreamArtifactUpdateReviewAction } from './downstreamArtifactU
 import type { DownstreamVerificationOutcome } from './downstreamArtifactUpdateVerification';
 import type { DownstreamImpactCertainty, DownstreamUpdateDisposition } from './downstreamUpdatePlan';
 import type { OutputAlignmentState } from './outputAlignment';
-import type { ReadinessReviewCurrentnessReason } from './readinessReview';
 
 export type PlanningLanguageEntry = {
     label: string;
     detail?: string;
 };
-
-export type ProjectCommitmentCondition =
-    | 'working_plan'
-    | 'plan_committed'
-    | 'proceeding_with_accepted_risk'
-    | 'legacy_commitment'
-    | 'needs_fresh_review'
-    | 'changed_since_commitment';
-
-const projectCommitmentLanguage = {
-    working_plan: { label: 'Working plan' },
-    plan_committed: { label: 'Plan committed' },
-    proceeding_with_accepted_risk: {
-        label: 'Proceeding with accepted risk',
-        detail: 'The plan is committed, and the accepted uncertainty remains visible.',
-    },
-    legacy_commitment: {
-        label: 'Committed plan · readiness not recorded',
-        detail: 'This older commitment does not include a durable readiness review.',
-    },
-    needs_fresh_review: {
-        label: 'Needs a fresh review',
-        detail: 'The saved readiness review cannot support the current plan.',
-    },
-    changed_since_commitment: {
-        label: 'Changed since commitment',
-        detail: 'The current working plan no longer matches the committed version.',
-    },
-} satisfies Record<ProjectCommitmentCondition, PlanningLanguageEntry>;
-
-export function projectCommitmentCopy(condition: ProjectCommitmentCondition): PlanningLanguageEntry {
-    return projectCommitmentLanguage[condition];
-}
-
-export type PlanningReadinessCondition =
-    | 'exploring'
-    | 'needs_decisions'
-    | 'ready_to_challenge'
-    | 'needs_alignment'
-    | 'ready_to_build';
-
-const planningReadinessLanguage = {
-    exploring: { label: 'Shaping the working plan' },
-    needs_decisions: { label: 'Needs attention' },
-    ready_to_challenge: { label: 'Ready to challenge' },
-    needs_alignment: { label: 'Needs alignment' },
-    ready_to_build: { label: 'Ready to build' },
-} satisfies Record<PlanningReadinessCondition, PlanningLanguageEntry>;
-
-export function planningReadinessCopy(condition: PlanningReadinessCondition): PlanningLanguageEntry {
-    return planningReadinessLanguage[condition];
-}
 
 export type PlanningRecordDominantCondition =
     | 'needs_decision'
@@ -239,22 +186,6 @@ export function downstreamVerificationCopy(outcome: DownstreamVerificationOutcom
     return downstreamVerificationLanguage[outcome];
 }
 
-const currentnessLanguage = {
-    integrity_mismatch: { label: 'The saved review could not be verified.' },
-    schema_changed: { label: 'Synapse now records readiness differently.' },
-    criteria_changed: { label: 'The readiness criteria changed.' },
-    spine_identity_changed: { label: 'A different plan version is now current.' },
-    spine_content_changed: { label: 'The reviewed plan changed.' },
-    planning_state_changed: { label: 'A decision, assumption, risk, or source changed.' },
-    challenge_changed: { label: 'The plan challenge or its findings changed.' },
-    alignment_changed: { label: 'A reviewed plan update changed.' },
-    downstream_changed: { label: 'An output or its alignment changed.' },
-} satisfies Record<ReadinessReviewCurrentnessReason, PlanningLanguageEntry>;
-
-export function readinessCurrentnessCopy(reason: ReadinessReviewCurrentnessReason): PlanningLanguageEntry {
-    return currentnessLanguage[reason];
-}
-
 const historyEventLanguage = {
     Init: { label: 'Project created' },
     Regenerated: { label: 'Working plan regenerated' },
@@ -268,6 +199,8 @@ const historyEventLanguage = {
     Reverted: { label: 'Earlier version restored' },
     MarkedCurrent: { label: 'Output confirmed up to date' },
     ValidationIssueAccepted: { label: 'Validation issue accepted' },
+    // Legacy: written only by the removed Finalize/readiness checkpoint. Older
+    // projects still carry these events, so they keep a plain timeline label.
     ReadinessReviewed: { label: 'Readiness reviewed' },
     PlanCommitted: { label: 'Plan committed' },
     PlanReopened: { label: 'Plan reopened' },

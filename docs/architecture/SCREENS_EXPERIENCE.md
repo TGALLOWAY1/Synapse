@@ -383,8 +383,8 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   drawer) (the caller supplies the new
   signals; `screenReadiness.ts` must NOT import `screenDownstreamImpact` — that
   would cycle). **No export/finalization hook was added**: there is no
-  Screens-specific export/share/finalize action today (the PRD Mark-as-Final /
-  UpdateAssetsPlan flow is PRD-level, not per-artifact), so the local preflight
+  Screens-specific export/share/finalize action today (Generate outputs and
+  the UpdateAssetsPlan flow are project-level, not per-artifact), so the local preflight
   panel is the Phase 4B decision surface — a safer choice than hooking into an
   unrelated flow. Everything stays **advisory** — nothing gates rendering or
   generation, and legacy artifacts (no review data) show no impact/blocker.

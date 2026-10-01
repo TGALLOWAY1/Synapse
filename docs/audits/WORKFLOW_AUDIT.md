@@ -657,3 +657,11 @@ preserving the authority model described in this document.
 All three roadmap tiers are implemented. The retained `prd` / `review` /
 `workspace` persistence model and append-only user-authority boundaries remain
 unchanged.
+
+> **Status note (2026-10).** The Finalize/commitment layer was later removed:
+> Tier 1.1's ranked attention projection, Tier 1.4's arrival card, Tier 1.7's
+> pre-build card, Tier 3.13's six-step rail, and Tier 3.16's materiality
+> blocking no longer exist. The journey is now **Plan · Decide · Build**, the
+> Plan page carries a one-line planning-state bar, and only the incomplete-PRD
+> and safety gates stand in front of output generation — see
+> `docs/architecture/PLANNING_AND_DECISIONS.md`.

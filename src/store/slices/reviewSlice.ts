@@ -226,8 +226,8 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             // Retention: appending a run is the only moment review history is
             // pruned (see src/lib/collectionRetention.ts). Protect the most
             // recent completed project-scope challenge of the LATEST spine —
-            // it may be the substantive run readiness reviews rely on even if
-            // newer narrow/focus runs pushed it outside the count window.
+            // it may be the substantive run challenge coverage relies on even
+            // if newer narrow/focus runs pushed it outside the count window.
             const latestSpineId = (state.spineVersions[projectId] ?? []).find(item => item.isLatest)?.id;
             const substantiveCandidateId = findProtectedSubstantiveChallengeId(runs, latestSpineId);
             return pruneReviewCollections({

@@ -9,9 +9,10 @@ interface DesignDirectionControlProps {
 }
 
 /**
- * Post-finalization control on the Design System artifact. The visual direction
- * is otherwise only chosen once, on Mark as Final — projects finalized before
- * the preset feature existed have no way to pick or change it. Changing the
+ * Post-generation control on the Design System artifact. The visual direction
+ * is otherwise only chosen once, before the first output run — projects whose
+ * outputs were generated before the preset feature existed have no other way
+ * to pick or change it. Changing the
  * direction chains into the regenerate confirmation (ArtifactWorkspace's
  * handleChooseDirection), so no separate regenerate affordance is needed here.
  *

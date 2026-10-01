@@ -158,8 +158,8 @@ export interface ReviewWorkspaceProps {
     /** Count of still-open planning items. These remain advisory and never
      * disable specialist critique actions. */
     openDecisionCount?: number;
-    /** Jumps to the Explore/Build stage from the Decision Center. */
-    onContinueToExplore?: () => void;
+    /** Jumps to the Build stage from the Decision Center. */
+    onContinueToBuild?: () => void;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -402,8 +402,8 @@ function ReviewSetup({
                             <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 sm:px-5">
                                 <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                                 <span>
-                                    This narrower review remains useful for exploration, but it will not satisfy build-readiness coverage.
-                                    Restore {omittedRecommended.map(option => option.name).join(', ')} for a complete checkpoint challenge.
+                                    This narrower review remains useful for exploration, but it will not count as full challenge coverage of the plan.
+                                    Restore {omittedRecommended.map(option => option.name).join(', ')} for a complete challenge.
                                 </span>
                             </div>
                         )}
@@ -536,8 +536,9 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
     const [recordId, setRecordId] = useState('');
     const selected = ACTIONS.find(a => a.id === action)!;
     const noteRequired = action === 'dismiss' || action === 'defer' || action === 'already_addressed' || action === 'request_revision';
-    // Dismissal/already-addressed dispositions must satisfy the readiness
-    // closure floor here, or the closure gets rejected later at commit time.
+    // Dismissal/already-addressed dispositions must satisfy the closure floor
+    // here (MIN_CLOSURE_REASON_LENGTH), or challenge coverage keeps counting
+    // the finding as unresolved.
     const minReasonLength = action === 'dismiss' || action === 'already_addressed' ? MIN_CLOSURE_REASON_LENGTH : 1;
     const reasonTooShort = noteRequired && note.trim().length < minReasonLength;
     return (
@@ -574,7 +575,7 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
                         <textarea id="action-note" rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder={action === 'already_addressed' ? 'Where is this addressed?' : 'Add context for the project record'} className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:bg-white" />
                         {minReasonLength > 1 && (
                             <p className="mt-1.5 text-xs text-neutral-500">
-                                Readiness review requires a substantive reason (at least {minReasonLength} characters) to close a finding this way.
+                                Closing a finding this way needs a substantive reason (at least {minReasonLength} characters).
                             </p>
                         )}
                     </div>
@@ -870,7 +871,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <span>
-                        This completed review was intentionally exploratory and does not satisfy build-readiness coverage.
+                        This completed review was intentionally exploratory and does not count as full challenge coverage of the plan.
                         Missing required review: {(run.omittedRequiredSpecialistNames ?? []).join(', ')}. Review the current plan with the full panel to close this gap.
                     </span>
                 </div>
@@ -878,13 +879,13 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
             {run.readinessCoverage === 'unverifiable' && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <span>This legacy review did not record its required specialist panel, so it cannot support the current readiness review. Review the current plan again.</span>
+                    <span>This legacy review did not record its required specialist panel, so it cannot count as coverage of the current plan. Review the current plan again.</span>
                 </div>
             )}
             {run.readinessCoverage === 'incomplete' && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <span>This review completed with unsupported or incomplete specialist evidence, so it cannot support readiness. Retry the current review to restore source-grounded coverage.</span>
+                    <span>This review completed with unsupported or incomplete specialist evidence, so it cannot count as coverage of the plan. Retry the current review to restore source-grounded coverage.</span>
                 </div>
             )}
             {run.contextChanged && (
@@ -999,7 +1000,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                                                 Exploratory · omitted {(run.omittedRequiredSpecialistNames ?? []).join(', ')}
                                             </span>
                                         )}
-                                        {run.readinessCoverage === 'unverifiable' && <span className="mt-1 block text-xs font-medium text-amber-700">Readiness coverage not recorded</span>}
+                                        {run.readinessCoverage === 'unverifiable' && <span className="mt-1 block text-xs font-medium text-amber-700">Coverage not recorded</span>}
                                         {run.readinessCoverage === 'incomplete' && <span className="mt-1 block text-xs font-medium text-amber-700">Specialist evidence incomplete</span>}
                                     </span>
                                     <span className={`text-xs font-semibold capitalize ${run.status === 'complete' && run.readinessCoverage === 'complete' ? 'text-emerald-700' : run.status === 'partial' || run.readinessCoverage !== 'complete' ? 'text-amber-700' : 'text-neutral-500'}`}>{run.readinessCoverage === 'exploratory' ? 'exploratory' : run.readinessCoverage === 'incomplete' ? 'incomplete' : run.status}</span>

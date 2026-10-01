@@ -1,4 +1,4 @@
-import type { ArtifactSlotKey, PlanningRecord, ReviewIssue, StructuredPRD } from '../../types';
+import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../types';
 import { alignmentProposalNeedsResolution, alignmentProposalReviews } from './decisionImpact';
 import { projectDecision } from './decisionProjection';
 import { assumptionValidationReadiness } from './assumptionValidation';
@@ -37,17 +37,21 @@ export type PlanningReadiness = {
      */
     openDecisionCount: number;
     assumptionCount: number;
+    /**
+     * Records awaiting the user's answer in the Decision Center — projected
+     * status `open`/`proposed`, every record type. `decisions` counts every
+     * non-assumption record (decisions, questions, conflicts, risks: the
+     * Decision Center's "Needs your decision" set) and `assumptions` the
+     * assumptions still to confirm, so `decisions + assumptions` always equals
+     * the Decision Center's "Needs attention" count. Feeds the Plan-stage
+     * one-line bar and the journey rail's Decide badge.
+     */
+    openItems: { decisions: number; assumptions: number };
     conflictCount: number;
     changedSourceCount: number;
+    /** Advisory projection only: "is the product reasoning sound?". Nothing
+     * gates generation, export, or prompt copying on it. */
     isReadyToBuild: boolean;
-    nextAction: {
-        kind: 'clarify_foundation' | 'resolve_decision' | 'validate_assumption' | 'review_source_change' | 'align_plan' | 'confirm_scope' | 'challenge_plan' | 'align_outputs' | 'commit_plan';
-        label: string;
-        detail: string;
-        planningRecordId?: string;
-        artifactId?: string;
-        nodeId?: ArtifactSlotKey;
-    };
 };
 
 export type PlanningReadinessInput = {
@@ -58,7 +62,6 @@ export type PlanningReadinessInput = {
     blockingReviewIssueCount: number;
     generatedOutputCount: number;
     staleOutputCount: number;
-    isCommitted?: boolean;
     evaluatedAt?: number;
     currentSpineVersionId?: string;
     currentSpineContentHash?: string;
@@ -70,9 +73,10 @@ const meaningful = (value?: string): boolean => !!value && value.trim().length >
 const material = (record: PlanningRecord): boolean =>
     record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
 
-/** Shared conservative resolution boundary for live guidance and durable
- * readiness checkpoints. User acknowledgement is not validation, invalidated
- * choices require a replacement, and incomplete legacy authority fails closed. */
+/** Shared conservative resolution boundary for the advisory readiness
+ * projection and challenge coverage. User acknowledgement is not validation,
+ * invalidated choices require a replacement, and incomplete legacy authority
+ * fails closed. */
 export function planningRecordRequiresResolution(
     record: PlanningRecord,
     allRecords: PlanningRecord[] = [record],
@@ -195,9 +199,6 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
         (record.sourceState === 'changed' || record.sourceState === 'missing') && material(record)
     ));
     const alignmentRecords = input.planningRecords.filter(planningRecordNeedsAlignment);
-    const alignmentRecord = alignmentRecords[0];
-    const nextRecord = conflicts[0]?.record ?? keyDecisions[0]?.record ?? materialRisks[0]?.record;
-    const nextAssumption = materialAssumptions[0]?.record;
 
     const problemClear = meaningful(prd?.coreProblem);
     const userClear = (prd?.targetUsers?.filter(item => meaningful(item)).length ?? 0) > 0 || (prd?.jtbd?.length ?? 0) > 0;
@@ -212,7 +213,6 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     const planAlignmentClear = alignmentRecords.length === 0;
     const challengeClear = input.hasCurrentChallenge && input.blockingReviewIssueCount === 0;
     const updatePlanBlockers = input.downstreamUpdatePlanSummary?.blockingItems ?? [];
-    const updatePlanBlocker = updatePlanBlockers[0];
     const outputAlignmentClear = (input.generatedOutputCount === 0 || input.staleOutputCount === 0)
         && updatePlanBlockers.length === 0;
     const alignmentClear = planAlignmentClear && outputAlignmentClear;
@@ -227,24 +227,6 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
         { id: 'challenge', label: 'Current plan challenged', status: !input.hasCurrentChallenge ? 'not_started' : challengeClear ? 'met' : 'attention', explanation: !input.hasCurrentChallenge ? 'Once open choices are settled and the plan reads coherently, run a challenge to stress-test it.' : challengeClear ? 'The current plan has a completed challenge with no required finding.' : `${input.blockingReviewIssueCount} review finding${input.blockingReviewIssueCount === 1 ? '' : 's'} marked for resolution before build remain.` },
         { id: 'alignment', label: 'Plan and outputs aligned', status: alignmentClear ? (input.generatedOutputCount === 0 ? 'not_started' : 'met') : 'attention', explanation: !planAlignmentClear ? `${alignmentRecords.length} resolved decision${alignmentRecords.length === 1 ? '' : 's'} still ${alignmentRecords.length === 1 ? 'needs' : 'need'} plan alignment review.` : input.generatedOutputCount === 0 ? 'No downstream outputs exist yet; this does not reduce planning readiness.' : outputAlignmentClear ? 'No consequential downstream mismatch remains unresolved.' : updatePlanBlockers.length > 0 ? `${updatePlanBlockers.length} definite downstream update${updatePlanBlockers.length === 1 ? '' : 's'} still ${updatePlanBlockers.length === 1 ? 'needs' : 'need'} planning before build.` : `${input.staleOutputCount} output${input.staleOutputCount === 1 ? '' : 's'} require${input.staleOutputCount === 1 ? 's' : ''} alignment review before build.` },
     ];
-
-    let nextAction: PlanningReadiness['nextAction'];
-    if (!foundationClear) nextAction = { kind: 'clarify_foundation', label: 'Strengthen the foundation', detail: 'Clarify the problem, primary user, and desired outcome in the PRD.' };
-    else if (changedSources.length > 0) nextAction = { kind: 'review_source_change', label: 'Revisit a changed decision', detail: changedSources[0].title, planningRecordId: changedSources[0].id };
-    else if (nextRecord) nextAction = { kind: 'resolve_decision', label: conflicts.length > 0 ? 'Resolve the leading conflict' : 'Resolve the next key decision', detail: nextRecord.title, planningRecordId: nextRecord.id };
-    else if (nextAssumption) nextAction = { kind: 'validate_assumption', label: 'Validate the leading assumption', detail: nextAssumption.title, planningRecordId: nextAssumption.id };
-    else if (alignmentRecord) nextAction = { kind: 'align_plan', label: 'Align the working plan', detail: alignmentRecord.title, planningRecordId: alignmentRecord.id };
-    else if (!scopeConfirmed) nextAction = { kind: 'confirm_scope', label: 'Confirm intentional scope', detail: 'Decide which proposed feature is genuinely necessary for the first release.' };
-    else if (!input.hasCurrentChallenge || input.blockingReviewIssueCount > 0) nextAction = { kind: 'challenge_plan', label: input.hasCurrentChallenge ? 'Address challenge findings' : 'Challenge the working plan', detail: 'Look for weak assumptions, contradictions, unnecessary scope, and feasibility risks.' };
-    else if (!outputAlignmentClear) nextAction = updatePlanBlocker
-        ? {
-            kind: 'align_outputs', label: `Plan the ${updatePlanBlocker.artifactTitle} update`,
-            detail: updatePlanBlocker.recommendation, artifactId: updatePlanBlocker.artifactId, nodeId: updatePlanBlocker.nodeId,
-        }
-        : { kind: 'align_outputs', label: 'Review affected outputs', detail: 'Synapse found consequential downstream alignment that still needs a user decision.' };
-    else nextAction = input.isCommitted
-        ? { kind: 'align_outputs', label: input.generatedOutputCount > 0 ? 'Review the build foundation' : 'Generate the build foundation', detail: 'Use the committed reasoning foundation to create or review implementation outputs.' }
-        : { kind: 'commit_plan', label: 'Commit the plan', detail: 'The current reasoning foundation is ready to become the basis for implementation.' };
 
     const phase: PlanningReadinessPhase = isReadyToBuild
         ? 'ready_to_build'
@@ -262,9 +244,13 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
         ready_to_build: ['Plan is ready to build', 'The core product reasoning is explicit, challenged, and aligned.'],
     };
     return {
-        phase, headline: copy[phase][0], summary: copy[phase][1], criteria, nextAction,
+        phase, headline: copy[phase][0], summary: copy[phase][1], criteria,
         unresolvedCount: new Set([...unresolved, ...needsResolution].map(item => item.record.id).concat(alignmentRecords.map(record => record.id))).size + updatePlanBlockers.length,
         openDecisionCount: openDecisions.length, assumptionCount: assumptions.length,
+        openItems: {
+            decisions: unresolved.filter(({ record }) => record.type !== 'assumption').length,
+            assumptions: assumptions.length,
+        },
         conflictCount: conflicts.length, changedSourceCount: changedSources.length, isReadyToBuild,
     };
 }

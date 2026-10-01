@@ -62,7 +62,7 @@ interface DispatchProps {
     initialDataMemberName?: string;
     initialDataMemberAspect?: PlanningArtifactRegionTarget['dataMemberAspect'];
     initialImplementationTarget?: ImplementationPlanNavigationTarget;
-    /** Exact sub-surface requested by a Final Review blocker action. */
+    /** Exact sub-surface requested by a Final Review check's fix link. */
     initialBuildPacketSection?: BuildPacketArtifactSection;
     initialBuildPacketMilestoneId?: string;
     /** Only consumed by `implementation_plan`: content of the project's legacy
@@ -89,7 +89,7 @@ interface DispatchProps {
      */
     staleness?: DependencyNodeStatus;
     /** Only consumed by `implementation_plan`: build-packet context for the
-     * Final Review decision surface (plan §W7). */
+     * Final Review surface (plan §W7). */
     planFinalReview?: PlanFinalReviewContext;
 }
 

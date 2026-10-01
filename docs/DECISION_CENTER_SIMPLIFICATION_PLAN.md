@@ -2,6 +2,12 @@
 
 Status: approved for Phase 6 implementation on 2026-07-16
 
+> **Status note (2026-10).** The readiness review, commitment, accepted-risk,
+> and Explore-vs-Build pieces of this plan were later removed with the Finalize
+> layer (journey now Plan · Decide · Build; see
+> `docs/architecture/PLANNING_AND_DECISIONS.md`). This document is kept as the
+> Phase 6 design record.
+
 ## Release boundary
 
 - Starting commit: `66df1ed10488224297f2f3a87944652a4a80eb11`

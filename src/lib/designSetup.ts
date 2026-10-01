@@ -12,8 +12,8 @@ import { isShowcaseProjectId } from '../data/demoProject';
  * (`needsDesignSetup`) that haven't chosen a preset yet, once clarification
  * (preflight) is out of the way — i.e. exactly while PRD generation runs in
  * the background, and until the user picks or skips even if the PRD finishes
- * first. It never shows for legacy projects (no flag → finalize-edge gate
- * keeps its original behavior), the demo, blocked spines, or a spine whose
+ * first. It never shows for legacy projects (no flag → the generate-outputs
+ * preset gate keeps its original behavior), the demo, blocked spines, or a spine whose
  * generation failed — fully (generationError) or partially (persisted
  * generationMeta.failedSections) — because the error card / incomplete-PRD
  * banner and their Try Again / Run again affordances must stay reachable.

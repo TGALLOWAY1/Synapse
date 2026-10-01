@@ -3,10 +3,10 @@
 // spine that is safety-blocked, has no structured PRD, or is *incomplete*
 // (one or more required PRD sections failed) must not silently generate
 // downstream artifacts. Incomplete generation is allowed only when the user
-// has explicitly acknowledged the degraded state — surfaced durably by the
-// spine being marked final (finalize requires an explicit acknowledgement
-// step for a partial PRD) or transiently by an `acknowledgeIncomplete` flag
-// passed at the finalize call site.
+// has explicitly acknowledged the degraded state — per run, by the
+// `acknowledgeIncomplete` flag the "Generate anyway" confirmation passes, or
+// (legacy) durably by a spine that was marked final through the removed
+// Finalize flow.
 //
 // Kept framework-free and store-free so it is trivially unit-testable.
 
@@ -50,9 +50,11 @@ export function evaluateSpineGenerationGate(
 
     const incomplete = incompleteSections.length > 0;
     // An incomplete PRD may only generate downstream work when the user has
-    // acknowledged it. `isFinal` is the durable record of that acknowledgement
-    // (a partial PRD only reaches `isFinal` through the explicit finalize
-    // confirmation), so resume/retry after a reload still work.
+    // acknowledged it — the explicit "Generate anyway" confirmation passes
+    // `acknowledgeIncomplete` for that run. `isFinal` is the LEGACY durable
+    // record of the same acknowledgement (a partial PRD only reached `isFinal`
+    // through the removed Finalize confirmation), so older finalized projects
+    // still resume/retry after a reload; nothing sets `isFinal` any more.
     if (incomplete && !options.acknowledgeIncomplete && !spine.isFinal) {
         return { allowed: false, degraded: true, incompleteSections, reason: 'incomplete_unacknowledged' };
     }

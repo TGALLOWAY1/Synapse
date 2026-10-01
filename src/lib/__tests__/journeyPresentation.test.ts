@@ -1,88 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import { deriveJourneyPresentation } from '../journeyPresentation';
 
-describe('journey presentation', () => {
-    it('maps both persisted planning stages to Refine without changing stage keys', () => {
-        for (const currentStage of ['prd', 'review'] as const) {
-            const presentation = deriveJourneyPresentation({
-                currentStage,
-                hasStructuredPlan: true,
-            });
+describe('journey presentation (Plan · Decide · Build)', () => {
+    it('presents exactly three steps — no Finalize, Generate, or Review', () => {
+        const presentation = deriveJourneyPresentation({ currentStage: 'prd', hasStructuredPlan: true });
+        expect(presentation.steps.map(step => step.id)).toEqual(['plan', 'decide', 'build']);
+        expect(presentation.steps.map(step => step.label)).toEqual(['Plan', 'Decide', 'Build']);
+    });
 
-            expect(presentation.activeStep).toBe('refine');
-            expect(presentation.steps.find(step => step.id === 'refine')).toMatchObject({
-                status: 'current',
-                enabled: true,
-            });
+    it('maps both persisted planning stages and the legacy History stage to Plan without changing stage keys', () => {
+        for (const currentStage of ['prd', 'review', 'history'] as const) {
+            const presentation = deriveJourneyPresentation({ currentStage, hasStructuredPlan: true });
+            expect(presentation.activeStep).toBe('plan');
+            expect(presentation.steps.find(step => step.id === 'plan')).toMatchObject({ current: true, enabled: true });
         }
     });
 
-    it('derives Define, Generate, and Review from existing project state', () => {
-        expect(deriveJourneyPresentation({
-            currentStage: 'prd',
-            hasStructuredPlan: false,
-        }).activeStep).toBe('define');
-
-        expect(deriveJourneyPresentation({
-            currentStage: 'workspace',
-            hasStructuredPlan: true,
-            generationActive: true,
-        }).activeStep).toBe('generate');
-
-        expect(deriveJourneyPresentation({
-            currentStage: 'workspace',
-            hasStructuredPlan: true,
-            outputsAvailable: true,
-        }).activeStep).toBe('review');
+    it('maps the outputs stage (and legacy output stages) to Build', () => {
+        for (const currentStage of ['workspace', 'mockups', 'artifacts'] as const) {
+            expect(deriveJourneyPresentation({ currentStage, hasStructuredPlan: true }).activeStep).toBe('build');
+        }
     });
 
-    it('lets checkpoint layers own Finalize and Build presentation', () => {
-        expect(deriveJourneyPresentation({
-            currentStage: 'prd',
-            hasStructuredPlan: true,
-            readinessOpen: true,
-        }).activeStep).toBe('finalize');
-
-        expect(deriveJourneyPresentation({
-            currentStage: 'workspace',
-            hasStructuredPlan: true,
-            outputsAvailable: true,
-            exportOpen: true,
-        }).activeStep).toBe('build');
+    it('presents Decide while the Decision Center is open over any surface', () => {
+        for (const currentStage of ['prd', 'workspace'] as const) {
+            const presentation = deriveJourneyPresentation({
+                currentStage,
+                hasStructuredPlan: true,
+                decisionCenterOpen: true,
+            });
+            expect(presentation.activeStep).toBe('decide');
+            expect(presentation.steps.filter(step => step.current).map(step => step.id)).toEqual(['decide']);
+        }
     });
 
-    it('uses only durable state for completed steps', () => {
-        const presentation = deriveJourneyPresentation({
-            currentStage: 'workspace',
-            hasStructuredPlan: true,
-            outputsAvailable: true,
-            planFinalized: true,
-        });
-        const statuses = Object.fromEntries(
-            presentation.steps.map(step => [step.id, step.status]),
-        );
-
-        expect(statuses).toMatchObject({
-            define: 'complete',
-            refine: 'complete',
-            finalize: 'complete',
-            generate: 'complete',
-            review: 'current',
-            build: 'available',
-        });
+    it('keeps Decide and Build inert without a safe structured plan, and never labels them unavailable', () => {
+        for (const input of [
+            { currentStage: 'prd' as const, hasStructuredPlan: false },
+            { currentStage: 'workspace' as const, hasStructuredPlan: true, safetyBlocked: true },
+        ]) {
+            const presentation = deriveJourneyPresentation(input);
+            expect(presentation.activeStep).toBe('plan');
+            expect(presentation.steps.map(step => step.enabled)).toEqual([true, false, false]);
+            expect(JSON.stringify(presentation)).not.toMatch(/unavailable/i);
+        }
     });
 
-    it('does not allow an explicit unavailable destination to override the safe default', () => {
-        const presentation = deriveJourneyPresentation({
-            currentStage: 'prd',
-            hasStructuredPlan: false,
-            explicitStep: 'review',
-        });
+    it('badges Decide with the open-item count only when something is open', () => {
+        const withItems = deriveJourneyPresentation({ currentStage: 'prd', hasStructuredPlan: true, openItemCount: 4 });
+        expect(withItems.steps.find(step => step.id === 'decide')?.badge).toBe(4);
+        expect(withItems.steps.find(step => step.id === 'plan')?.badge).toBeUndefined();
 
-        expect(presentation.activeStep).toBe('define');
-        expect(presentation.steps.find(step => step.id === 'review')).toMatchObject({
-            enabled: false,
-            status: 'unavailable',
-        });
+        const none = deriveJourneyPresentation({ currentStage: 'prd', hasStructuredPlan: true, openItemCount: 0 });
+        expect(none.steps.find(step => step.id === 'decide')).not.toHaveProperty('badge');
+
+        const noPlan = deriveJourneyPresentation({ currentStage: 'prd', hasStructuredPlan: false, openItemCount: 2 });
+        expect(noPlan.steps.find(step => step.id === 'decide')).not.toHaveProperty('badge');
     });
 });

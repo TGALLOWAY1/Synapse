@@ -6,7 +6,7 @@
 // anchored to the same visual language.
 //
 // The choice is made during project setup (`DesignSetupStep`, shown while the
-// PRD generates in the background) with the Mark-as-Final gate in
+// PRD generates in the background) with the generate-outputs preset gate in
 // `ProjectWorkspace` as the fallback for users who skipped setup and for
 // legacy projects that predate the setup step.
 //

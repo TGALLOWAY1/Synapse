@@ -9,7 +9,7 @@ interface DesignSystemPresetChoiceProps {
     onClose: () => void;
     /**
      * The preset already stored on the project, if any. When set, the matching
-     * card is marked as the current choice — used by the post-finalization
+     * card is marked as the current choice — used by the post-generation
      * "change direction" flow so the user can see what's active.
      */
     currentPresetId?: string;
@@ -20,13 +20,14 @@ interface DesignSystemPresetChoiceProps {
 }
 
 /**
- * "Visual direction" picker — the Mark-as-Final fallback gate. Shown right
- * before visual artifact generation when a project reaches finalize with no
- * preset yet (setup step skipped, or a legacy project), so generation never
- * starts without an explicit visual-direction decision.
+ * "Visual direction" picker — the generate-outputs fallback gate. Shown right
+ * before visual artifact generation when a project starts output generation
+ * ("Generate outputs") with no preset yet (setup step skipped, or a legacy
+ * project), so generation never starts without an explicit visual-direction
+ * decision.
  *
  * It renders the shared `DesignPresetGrid` live preview cards — the same look
- * as the setup-stage `DesignSetupStep` and the post-finalization
+ * as the setup-stage `DesignSetupStep` and the post-generation
  * `ChangeDirectionModal` — so every visual-direction surface is one consistent
  * preview picker rather than a separate text-only list.
  *

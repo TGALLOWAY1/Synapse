@@ -141,10 +141,11 @@ interface ArtifactWorkspaceProps {
     prdContent: string;
     structuredPRD: StructuredPRD;
     projectPlatform?: ProjectPlatform;
-    // One-shot signal that the user just arrived here by finalizing the PRD.
-    // When true, the panel auto-selects the first meaningful non-PRD artifact
-    // and opens the mobile drawer; consumed exactly once via onAutoOpenConsumed
-    // so closing the drawer never triggers a reopen.
+    // One-shot signal that the user just arrived here to generate or review
+    // outputs (the Plan page's "Generate outputs" / "Review outputs"). When
+    // true, the panel auto-selects the first meaningful non-PRD artifact and
+    // opens the mobile drawer; consumed exactly once via onAutoOpenConsumed so
+    // closing the drawer never triggers a reopen.
     autoOpenIntent?: boolean;
     onAutoOpenConsumed?: () => void;
     /** Exact readiness target. Unlike autoOpenIntent, this must not pick a
@@ -159,18 +160,15 @@ interface ArtifactWorkspaceProps {
     onInitialSelectionConsumed?: () => void;
     onOpenPlanningRecord?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
     onNavigatePlanning?: (intent: PlanningNavigationIntent) => void;
-    buildBlocked?: boolean;
-    blockingPlanningItems?: Array<{ recordId: string; title: string }>;
-    onResolveBuildBlockers?: () => void;
     /**
-     * §W6's build-packet evaluation, computed once by `ProjectWorkspace` and
-     * passed down so the Final Review surface (§W7) and the planning state bar
-     * report the SAME packet — never a second evaluation.
+     * §W6's advisory build-packet evaluation, computed once by
+     * `ProjectWorkspace` and passed down so the Final Review surface (§W7)
+     * never runs a second evaluation.
      */
     buildPacket?: BuildPacketReadiness;
     /** The current artifact-version manifest from `useBuildPacketInputs`. */
     buildPacketManifest?: BuildPacketManifestEntry[];
-    /** Routes a build-packet blocker's action target (readiness router + slots). */
+    /** Opens a packet check's fix (an artifact slot or a PRD feature). */
     onNavigateBuildPacketTarget?: (target: BuildPacketActionTarget) => void;
 }
 
@@ -363,8 +361,8 @@ export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
     initialBuildPacketTarget, initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
-    onOpenPlanningRecord, onNavigatePlanning, buildBlocked, blockingPlanningItems,
-    onResolveBuildBlockers, buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
+    onOpenPlanningRecord, onNavigatePlanning,
+    buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
 }: ArtifactWorkspaceProps) {
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
@@ -437,8 +435,9 @@ export function ArtifactWorkspace({
     const [mockupRegenConfirm, setMockupRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
-    // Post-finalization "design direction" flow on the Design System artifact:
-    // the preset picker, and the confirm before regenerating the design system.
+    // "Design direction" flow on the Design System artifact (re-choosing the
+    // preset once outputs exist): the preset picker, and the confirm before
+    // regenerating the design system.
     const [showDirectionPicker, setShowDirectionPicker] = useState(false);
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
@@ -1030,15 +1029,14 @@ export function ArtifactWorkspace({
         return job?.slots[slotKey]?.error;
     };
 
-    // Post-finalization auto-open. Runs once each time the parent arms
-    // autoOpenIntent: pick the first meaningful non-PRD artifact (prefer one
+    // Arrival auto-open. Runs once each time the parent arms autoOpenIntent: pick the first meaningful non-PRD artifact (prefer one
     // that's already done, else generating, else queued, else the first slot
     // in display order) so the user never lands on the PRD again, and open the
     // mobile drawer so the asset list is visible. Consumed immediately so a
     // user who closes the drawer is never re-interrupted.
     useEffect(() => {
         if (!autoOpenIntent) return;
-        // Exclude the always-'done' derived views so a fresh finalize never
+        // Exclude the always-'done' derived views so a fresh generation never
         // auto-lands on the Dependency Graph instead of a real artifact.
         const candidates = slotMetas.map(s => s.key).filter(k => k !== 'prd' && k !== 'dependency_graph');
         const firstWith = (s: GenerationStatus) => candidates.find(k => slotStatusFor(k) === s);
@@ -2022,13 +2020,13 @@ export function ArtifactWorkspace({
                     .filter((label): label is string => Boolean(label));
             })()
             : undefined;
-        // §W7 Final Review: the plan's ONE decision surface. The build-packet
+        // §W7 Final Review: the plan's review surface. The advisory build-packet
         // evaluation and the version manifest both arrive from ProjectWorkspace
         // (one evaluation, one slot→version resolution — `useBuildPacketInputs`),
-        // so the blocker list, the Dependency Graph, and the manifest can never
+        // so the checklist, the Dependency Graph, and the manifest can never
         // describe different versions.
         //
-        // APPROVAL PERSISTENCE: a user overlay on THIS plan version's metadata,
+        // OPTIONAL APPROVAL PERSISTENCE: a user overlay on THIS plan version's metadata,
         // written only through `updateArtifactOverlay` (cross-cutting rule 12) and
         // capability-gated exactly like the plan-progress overlay above. No new
         // persisted collection (rule 6) — `artifactVersions` already travels
@@ -2088,6 +2086,7 @@ export function ArtifactWorkspace({
                                     spineVersionId,
                                     ...(planPrdVersionLabel ? { prdVersionLabel: planPrdVersionLabel } : {}),
                                     acknowledgedWarningIds: (buildPacket?.warnings ?? []).map(w => w.id),
+                                    acknowledgedOpenCheckIds: (buildPacket?.blockers ?? []).map(b => b.id),
                                 }),
                             },
                             { historyDescription: 'Build packet approved' },
@@ -2432,12 +2431,6 @@ export function ArtifactWorkspace({
                     sourceSpineVersionId={spineVersionId}
                     artifactContent={tasksModalSource.content}
                     projectName={getProject(projectId)?.name}
-                    buildBlocked={buildBlocked}
-                    blockingPlanningItems={blockingPlanningItems}
-                    onResolveBuildBlockers={() => {
-                        setTasksModalSource(null);
-                        onResolveBuildBlockers?.();
-                    }}
                     onClose={() => setTasksModalSource(null)}
                 />
             )}

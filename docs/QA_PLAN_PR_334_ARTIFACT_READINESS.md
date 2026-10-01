@@ -6,6 +6,17 @@
 - **Change size:** 99 files, 13,961 additions, 497 deletions
 **Prepared:** 2026-08-01
 
+> **Status note (2026-10, Finalize removal).** Parts of this plan describe
+> behavior that was later removed with the Finalize/commitment layer: the
+> `reasoning_committed` criterion and its fail-closed commitment cases
+> (QA-GATE-026…028), "Review readiness" / committing the product reasoning,
+> the `unavailable` and `resolve_blockers` Final Review CTA states, and the
+> measurement obligation as a blocker. The packet now reports seven advisory
+> checks, the Final Review primary is always the next build step, approval is
+> optional, and nothing gates on readiness. Treat those cases as retired; the
+> current behavior is in `docs/architecture/WORKSPACE_AND_ARTIFACTS.md` and
+> `docs/QA_CHECKLIST.md` §5–6.
+
 ## 1. Purpose and release question
 
 This plan validates the change from a useful planning packet with an overstated

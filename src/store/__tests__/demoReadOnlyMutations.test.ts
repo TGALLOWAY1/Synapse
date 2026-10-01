@@ -83,10 +83,9 @@ beforeEach(() => {
 });
 
 describe('public demo mutation boundary', () => {
-    it('rejects finality and PRD content changes without changing state', () => {
+    it('rejects PRD content changes without changing state', () => {
         const store = useProjectStore.getState();
 
-        expect(() => store.markSpineFinal(projectId, spineId, false)).toThrow('read-only');
         expect(() => store.editSpineStructuredPRD(projectId, spineId, structuredPRD))
             .toThrow('read-only');
         expect(store.getLatestSpine(projectId)?.isFinal).toBe(true);
@@ -183,9 +182,8 @@ describe('public demo mutation boundary', () => {
 
     it('keeps the same representative operations available to ordinary projects', () => {
         const store = useProjectStore.getState();
-        const { projectId: editableId, spineId: editableSpineId } = store.createProject('Editable', 'Idea');
+        const { projectId: editableId } = store.createProject('Editable', 'Idea');
 
-        expect(() => store.markSpineFinal(editableId, editableSpineId, true)).not.toThrow();
         expect(() => store.setProjectDesignSystemPreset(editableId, 'creative_studio')).not.toThrow();
         const { artifactId: editableArtifactId } = store.createArtifact(
             editableId,
@@ -201,9 +199,7 @@ describe('public demo mutation boundary', () => {
             [],
             'prompt',
         )).not.toThrow();
-        // The legacy markSpineFinal(…, true) is deliberately inert for ordinary
-        // projects too: only commitReadinessReview may project a reviewed user
-        // commitment onto isFinal (it exists to reopen old commitments).
+        // Nothing sets a spine final any more (the Finalize layer was removed).
         expect(useProjectStore.getState().getLatestSpine(editableId)?.isFinal).toBe(false);
     });
 });

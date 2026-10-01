@@ -6,6 +6,7 @@ import type { StructuredImplementationPlan } from '../../types';
 import { BUILD_PACKET_APPROVAL_KEY } from '../../lib/planning/buildPacketApproval';
 import type {
     BuildPacketBlocker,
+    BuildPacketCriterion,
     BuildPacketReadiness,
     BuildPacketWarning,
 } from '../../lib/planning/buildPacketReadiness';
@@ -64,15 +65,33 @@ const warning = (id: string): BuildPacketWarning => ({
     owner: 'user',
     impact: `${id} impact`,
     rationale: `${id} rationale`,
-    actionTarget: { kind: 'readiness_commitment' },
+    actionTarget: { kind: 'artifact_slot', nodeId: 'implementation_plan' },
 });
+
+const CRITERIA: BuildPacketCriterion['id'][] = [
+    'artifacts_present', 'sources_current', 'validation_clear', 'requirement_coverage',
+    'api_contract', 'cross_cutting', 'first_slice',
+];
 
 const packet = (blockers: BuildPacketBlocker[], warnings: BuildPacketWarning[] = []): BuildPacketReadiness => ({
     isPacketComplete: blockers.length === 0,
     status: blockers.length === 0 ? 'complete' : 'incomplete',
     headline: blockers.length === 0 ? 'Implementation packet complete' : 'Implementation packet incomplete',
     summary: 'Packet summary sentence.',
-    criteria: [],
+    criteria: CRITERIA.map(id => {
+        const own = blockers.filter(item => item.criterionId === id);
+        return {
+            id,
+            label: `${id} label`,
+            status: own.length > 0 ? 'attention' : 'met',
+            blocking: own.length > 0,
+            explanation: `${id} explanation`,
+            evidence: [{ id: `${id}-evidence`, quality: 'inferred', summary: `${id} evidence`, sourceType: 'plan' }],
+            actionTarget: { kind: 'artifact_slot', nodeId: 'implementation_plan' },
+            blockerIds: own.map(item => item.id),
+            warningIds: warnings.filter(item => item.criterionId === id).map(item => item.id),
+        };
+    }),
     blockers,
     warnings,
     nextBlocker: blockers[0],
@@ -94,8 +113,8 @@ const renderPlan = (context: PlanFinalReviewContext, extra: { onConvertToTasks?:
         />,
     );
 
-describe('Final Review — the CTA state machine on the plan surface', () => {
-    it('promotes "Resolve N blockers" when the packet is incomplete', () => {
+describe('Final Review — one primary, never gated on the packet report', () => {
+    it('promotes the first implementation prompt even while packet checks are open', () => {
         renderPlan({
             packet: packet([
                 blocker('b1', 'artifacts_present', { kind: 'artifact_slot', nodeId: 'data_model' }),
@@ -104,45 +123,45 @@ describe('Final Review — the CTA state machine on the plan surface', () => {
             manifest: MANIFEST,
         });
         const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('data-cta-state', 'resolve_blockers');
-        expect(primary).toHaveTextContent('Resolve 2 blockers');
-        expect(screen.getByText('Packet summary sentence.')).toBeInTheDocument();
-    });
-
-    it('promotes "Approve build packet" when the packet is complete and unapproved', () => {
-        renderPlan({ packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn() });
-        const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('data-cta-state', 'approve');
-        expect(primary).toHaveTextContent('Approve build packet');
-        expect(primary).toBeEnabled();
-    });
-
-    it('promotes the first implementation prompt once approved', () => {
-        renderPlan({
-            packet: packet([]),
-            manifest: MANIFEST,
-            approval: { approvedAt: 1_700_000_000_000, manifest: MANIFEST },
-            canApprove: true,
-            onApprove: vi.fn(),
-        });
-        const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('data-cta-state', 'start_build');
+        expect(primary).toHaveAttribute('data-cta-action', 'start_build');
         expect(primary).toHaveTextContent('Copy first implementation prompt');
-        expect(screen.getByText('Packet approved')).toBeInTheDocument();
+        expect(primary).toBeEnabled();
+        expect(screen.getByRole('region', { name: 'Final Review' }).textContent).not.toMatch(/Resolve \d+ blocker/);
+        expect(screen.getByText(/2 packet checks are still open \(estimated\)/)).toBeInTheDocument();
+    });
+
+    it('copies the prompt from the primary action', () => {
+        renderPlan({ packet: packet([]), manifest: MANIFEST });
+        fireEvent.click(screen.getByTestId('final-review-primary'));
+        expect(navigator.clipboard.writeText).toHaveBeenCalled();
+    });
+
+    it('promotes the same build step when every check passes and when approved', () => {
+        for (const context of [
+            { packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn() },
+            {
+                packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn(),
+                approval: { approvedAt: 1_700_000_000_000, manifest: MANIFEST },
+            },
+        ] satisfies PlanFinalReviewContext[]) {
+            const { unmount } = renderPlan(context);
+            expect(screen.getByTestId('final-review-primary')).toHaveTextContent('Copy first implementation prompt');
+            unmount();
+        }
     });
 
     it('renders exactly one primary-styled action in every state', () => {
         const states: PlanFinalReviewContext[] = [
-            { packet: packet([blocker('b1', 'first_slice', { kind: 'readiness_commitment' })]), manifest: MANIFEST },
+            { packet: packet([blocker('b1', 'first_slice', { kind: 'artifact_slot', nodeId: 'implementation_plan' })]), manifest: MANIFEST },
             { packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn() },
             {
                 packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn(),
                 approval: { approvedAt: 1, manifest: MANIFEST },
             },
+            { manifest: MANIFEST },
         ];
         for (const context of states) {
             const { container, unmount } = renderPlan(context, { onConvertToTasks: vi.fn() });
-            // The indigo-filled button is the visual primary; there must be one.
             const primaries = container.querySelectorAll('button.bg-indigo-600');
             expect(primaries).toHaveLength(1);
             expect(primaries[0]).toBe(screen.getByTestId('final-review-primary'));
@@ -150,18 +169,17 @@ describe('Final Review — the CTA state machine on the plan surface', () => {
         }
     });
 
-    it('keeps copy plan, review prompts and convert to tasks secondary even when ready', () => {
+    it('keeps copy plan, review prompts and convert to tasks secondary and always available', () => {
         const onConvertToTasks = vi.fn();
         const { container } = renderPlan(
-            { packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn() },
+            { packet: packet([blocker('b1', 'sources_current', { kind: 'artifact_slot', nodeId: 'data_model' })]), manifest: MANIFEST },
             { onConvertToTasks },
         );
         for (const id of ['review_prompts', 'convert_tasks', 'copy_plan']) {
             const button = screen.getByTestId(`final-review-secondary-${id}`);
-            expect(button).toBeInTheDocument();
+            expect(button).toBeEnabled();
             expect(button.className).not.toContain('bg-indigo-600');
         }
-        // Copying the plan before approval is possible — from a demoted control.
         fireEvent.click(screen.getByTestId('final-review-secondary-copy_plan'));
         expect(navigator.clipboard.writeText).toHaveBeenCalled();
         fireEvent.click(screen.getByTestId('final-review-secondary-convert_tasks'));
@@ -175,8 +193,6 @@ describe('Final Review — the CTA state machine on the plan surface', () => {
         for (const context of [unapproved, approved]) {
             const { container, unmount } = renderPlan(context);
             fireEvent.click(screen.getByRole('button', { name: /Prompts/ }));
-            // Only Final Review's own primary is indigo-filled — the Prompts tab
-            // and every pack card use the secondary variant in both states.
             expect(container.querySelectorAll('button.bg-indigo-600')).toHaveLength(1);
             expect(screen.getByRole('button', { name: /Copy next prompt/ }).className)
                 .not.toContain('bg-indigo-600');
@@ -196,70 +212,63 @@ describe('Final Review — the CTA state machine on the plan surface', () => {
     });
 });
 
-describe('Final Review — the one blocker list', () => {
+describe('Final Review — the advisory packet checklist', () => {
     const blockers = [
         blocker('b1', 'artifacts_present', { kind: 'artifact_slot', nodeId: 'data_model' }),
         blocker('b2', 'requirement_coverage', { kind: 'feature', featureId: 'f1' }),
-        blocker('b3', 'reasoning_committed', { kind: 'readiness_commitment' }),
+        blocker('b3', 'first_slice', { kind: 'artifact_slot', nodeId: 'implementation_plan', section: 'first_milestone', milestoneId: 'm_setup' }),
     ];
 
-    it('expands the ordered blocker list from the primary action', () => {
+    it('lists every check in criterion order, marked estimated', () => {
         renderPlan({ packet: packet(blockers), manifest: MANIFEST, onNavigateTarget: vi.fn() });
-        expect(screen.queryByTestId('final-review-blockers')).not.toBeInTheDocument();
-        const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('aria-expanded', 'false');
-        fireEvent.click(primary);
-        expect(primary).toHaveAttribute('aria-expanded', 'true');
-        // Rendered in the evaluator's criterion order, unchanged.
-        const rendered = screen.getAllByTestId('final-review-blocker');
-        expect(rendered.map(item => item.getAttribute('data-criterion'))).toEqual([
-            'artifacts_present', 'requirement_coverage', 'reasoning_committed',
-        ]);
+        const checks = screen.getAllByTestId('final-review-check');
+        expect(checks.map(item => item.getAttribute('data-criterion'))).toEqual(CRITERIA);
+        expect(checks.filter(item => item.getAttribute('data-open') === 'true').map(item => item.getAttribute('data-criterion')))
+            .toEqual(['artifacts_present', 'requirement_coverage', 'first_slice']);
+        expect(screen.getByTestId('final-review-status')).toHaveTextContent('4 of 7 checks pass');
+        expect(screen.getByTestId('final-review-status')).toHaveTextContent('estimated');
     });
 
-    it('shows each blocker title, consequence and remedy', () => {
+    it('shows each open check with its title, consequence and fix', () => {
         renderPlan({ packet: packet(blockers), manifest: MANIFEST, onNavigateTarget: vi.fn() });
-        fireEvent.click(screen.getByTestId('final-review-primary'));
         expect(screen.getByText('b1 title')).toBeInTheDocument();
-        expect(screen.getByText('b1 consequence')).toBeInTheDocument();
+        expect(screen.getByText(/b1 consequence/)).toBeInTheDocument();
         expect(screen.getByText(/b1 remedy/)).toBeInTheDocument();
+        // Met checks stay one line.
+        expect(screen.queryByText('validation_clear explanation')).toBeNull();
     });
 
-    it('wires each entry to its own navigable action target', () => {
+    it('wires each fix to its own navigable target — an artifact slot or a PRD feature', () => {
         const onNavigateTarget = vi.fn();
         renderPlan({ packet: packet(blockers), manifest: MANIFEST, onNavigateTarget });
-        fireEvent.click(screen.getByTestId('final-review-primary'));
         const actions = screen.getAllByTestId('final-review-blocker-action');
         expect(actions.map(action => action.textContent?.trim())).toEqual([
-            'Open Data Model', 'Review first-release scope', 'Open Review readiness',
+            'Open Data Model', 'Open this feature', 'Open the first milestone',
         ]);
         fireEvent.click(actions[1]);
         expect(onNavigateTarget).toHaveBeenCalledWith({ kind: 'feature', featureId: 'f1' });
         fireEvent.click(actions[2]);
-        expect(onNavigateTarget).toHaveBeenLastCalledWith({ kind: 'readiness_commitment' });
-    });
-
-    it('labels an artifact-section target by the section it opens', () => {
-        renderPlan({
-            packet: packet([
-                blocker('b1', 'api_contract', { kind: 'artifact_slot', nodeId: 'data_model', section: 'api_contract' }),
-                blocker('b2', 'first_slice', { kind: 'artifact_slot', nodeId: 'implementation_plan', section: 'first_milestone', milestoneId: 'm_setup' }),
-            ]),
-            manifest: MANIFEST,
-            onNavigateTarget: vi.fn(),
+        expect(onNavigateTarget).toHaveBeenLastCalledWith({
+            kind: 'artifact_slot', nodeId: 'implementation_plan', section: 'first_milestone', milestoneId: 'm_setup',
         });
-        fireEvent.click(screen.getByTestId('final-review-primary'));
-        expect(screen.getAllByTestId('final-review-blocker-action').map(a => a.textContent?.trim())).toEqual([
-            'Open the API contract', 'Open the first milestone',
-        ]);
     });
 
-    it('records warnings separately from blockers', () => {
+    it('reads "All checks pass" for a complete packet', () => {
+        renderPlan({ packet: packet([]), manifest: MANIFEST });
+        expect(screen.getByTestId('final-review-status')).toHaveTextContent('All checks pass');
+    });
+
+    it('records warnings separately from open checks', () => {
         renderPlan({ packet: packet([], [warning('w1')]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn() });
-        expect(screen.getByText('Recorded, not blocking')).toBeInTheDocument();
+        expect(screen.getByText('Recorded, not counted')).toBeInTheDocument();
         expect(screen.getByText(/w1 impact/)).toBeInTheDocument();
-        // A warning never becomes a blocker, so the CTA still offers approval.
-        expect(screen.getByTestId('final-review-primary')).toHaveAttribute('data-cta-state', 'approve');
+        expect(screen.getByTestId('final-review-status')).toHaveTextContent('All checks pass');
+    });
+
+    it('renders no checklist when no packet was evaluated, and still offers the build step', () => {
+        renderPlan({ manifest: MANIFEST });
+        expect(screen.queryByTestId('final-review-checks')).toBeNull();
+        expect(screen.getByTestId('final-review-primary')).toBeEnabled();
     });
 });
 
@@ -284,9 +293,10 @@ describe('Final Review — the pinned artifact-version manifest', () => {
         expect(screen.getByTestId('final-review-manifest-row-data_model')).toHaveAttribute('data-drift', 'match');
         expect(screen.getByTestId('final-review-manifest-row-implementation_plan')).toHaveAttribute('data-drift', 'match');
         expect(screen.getByTestId('final-review-manifest')).toHaveTextContent('Version 3');
+        expect(screen.getByText('Packet approved')).toBeInTheDocument();
     });
 
-    it('reports a changed output against the version the approval pinned', () => {
+    it('reports "changed since approval" against the version the approval pinned', () => {
         renderPlan({
             packet: packet([]),
             manifest: [{ ...MANIFEST[0], versionId: 'v-dm-2', versionLabel: 'v2' }, MANIFEST[1]],
@@ -298,33 +308,57 @@ describe('Final Review — the pinned artifact-version manifest', () => {
         expect(row).toHaveAttribute('data-drift', 'changed');
         expect(row).toHaveTextContent('v1');
         expect(row).toHaveTextContent('v2');
-        expect(screen.getByText('Approval superseded')).toBeInTheDocument();
-        expect(screen.getByTestId('final-review-primary')).toHaveTextContent('Re-approve build packet');
+        expect(screen.getAllByText('Changed since approval').length).toBeGreaterThan(0);
+        expect(screen.getByTestId('final-review-approve')).toHaveTextContent('Re-approve build packet');
     });
 });
 
-describe('Final Review — the approval action', () => {
+describe('Final Review — the optional approval', () => {
     it('records the approval through the supplied writer', () => {
         const onApprove = vi.fn();
         renderPlan({ packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove });
-        fireEvent.click(screen.getByTestId('final-review-primary'));
+        const approve = screen.getByTestId('final-review-approve');
+        expect(approve).toHaveTextContent('Approve build packet');
+        expect(approve).toHaveTextContent('(optional)');
+        fireEvent.click(approve);
+        expect(onApprove).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays available while packet checks are open', () => {
+        const onApprove = vi.fn();
+        renderPlan({
+            packet: packet([blocker('b1', 'sources_current', { kind: 'artifact_slot', nodeId: 'data_model' })]),
+            manifest: MANIFEST,
+            canApprove: true,
+            onApprove,
+        });
+        fireEvent.click(screen.getByTestId('final-review-approve'));
         expect(onApprove).toHaveBeenCalledTimes(1);
     });
 
     it('cannot be taken in a read-only project', () => {
         const onApprove = vi.fn();
         renderPlan({ packet: packet([]), manifest: MANIFEST, canApprove: false, onApprove });
-        const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toBeDisabled();
-        expect(primary).toHaveAttribute('data-cta-action', 'approve');
-        fireEvent.click(primary);
+        const approve = screen.getByTestId('final-review-approve');
+        expect(approve).toBeDisabled();
+        fireEvent.click(approve);
         expect(onApprove).not.toHaveBeenCalled();
         expect(screen.getByText(/read-only/)).toBeInTheDocument();
+        // The build step is never disabled by read-only.
+        expect(screen.getByTestId('final-review-primary')).toBeEnabled();
     });
 
     it('cannot be taken when no writer is wired even if the capability reads true', () => {
         renderPlan({ packet: packet([]), manifest: MANIFEST, canApprove: true });
-        expect(screen.getByTestId('final-review-primary')).toBeDisabled();
+        expect(screen.getByTestId('final-review-approve')).toBeDisabled();
+    });
+
+    it('disappears once a current approval covers the versions', () => {
+        renderPlan({
+            packet: packet([]), manifest: MANIFEST, canApprove: true, onApprove: vi.fn(),
+            approval: { approvedAt: 1, manifest: MANIFEST },
+        });
+        expect(screen.queryByTestId('final-review-approve')).toBeNull();
     });
 
     it('never treats prompt review or task conversion as an approval', () => {
@@ -335,8 +369,7 @@ describe('Final Review — the approval action', () => {
         );
         fireEvent.click(screen.getByTestId('final-review-secondary-review_prompts'));
         fireEvent.click(screen.getByTestId('final-review-secondary-convert_tasks'));
-        // Still awaiting the one genuine approval.
-        expect(screen.getByTestId('final-review-primary')).toHaveAttribute('data-cta-state', 'approve');
+        expect(screen.getByTestId('final-review-approve')).toHaveTextContent('Approve build packet');
         expect(screen.getByTestId('final-review-manifest')).toHaveTextContent('nothing approved yet');
     });
 });
@@ -411,7 +444,7 @@ describe('Final Review — folded-in surfaces', () => {
         expect(screen.getByRole('region', { name: 'Final Review' })).toContainElement(card);
     });
 
-    it('states the obligation severity once — blocker list loud, section flag quiet', () => {
+    it('states the obligation severity once — checklist loud, section flag quiet', () => {
         const securityPrivacy = unresolvedSecurityPrivacy();
         renderPlan({
             packet: packet([
@@ -426,17 +459,15 @@ describe('Final Review — folded-in surfaces', () => {
             },
         });
 
-        // 1. The signal is NOT weakened: the packet still reads incomplete and
-        //    the primary action still counts the blocker, without any click.
-        const primary = screen.getByTestId('final-review-primary');
-        expect(primary).toHaveAttribute('data-cta-state', 'resolve_blockers');
-        expect(primary).toHaveTextContent('Resolve 1 blocker');
+        // 1. The signal is NOT weakened: the status still counts the open
+        //    check, and the checklist carries it without any click.
+        expect(screen.getByTestId('final-review-status')).toHaveTextContent('6 of 7 checks pass');
+        expect(screen.getByText(/1 packet check is still open/)).toBeInTheDocument();
 
-        // 2. The blocker list is still the authoritative statement of severity.
-        fireEvent.click(primary);
-        const blockers = screen.getByTestId('final-review-blockers');
-        expect(blockers).toHaveTextContent('cc1 consequence');
-        expect(blockers).toHaveTextContent('cc1 remedy');
+        // 2. The checklist is the authoritative statement of severity.
+        const checks = screen.getByTestId('final-review-checks');
+        expect(checks).toHaveTextContent('cc1 consequence');
+        expect(checks).toHaveTextContent('cc1 remedy');
 
         // 3. The section flag next to it is quiet: a chip, and the consequence
         //    and remedy are not restated in the plan body.

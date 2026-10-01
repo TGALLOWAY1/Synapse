@@ -11,15 +11,16 @@ const ASSET_GEN_MS = 650;
 const allDone = () => TOUR_ASSETS.map(() => 'done' as StepStatus);
 
 /**
- * Screen 6 (hero) — commitment and output generation are separate actions.
- * Downstream workspace outputs generate one at a time, grouped like the Build
- * page groups them (Project Foundation → Experience → Architecture →
- * Development). Each finished asset is clickable and opens a lightweight preview
- * drawer. This is the key onboarding moment.
+ * Screen 6 (hero) — one click generates every build asset straight from the
+ * working plan; there is no separate commit step. Downstream workspace outputs
+ * generate one at a time, grouped like the Build page groups them (Project
+ * Foundation → Experience → Architecture → Development). Each finished asset
+ * is clickable and opens a lightweight preview drawer. This is the key
+ * onboarding moment.
  */
 export default function ScreenAssets({ reducedMotion }: ScreenProps) {
     // The screen remounts fresh each time it becomes active, so the hero moment
-    const [committed, setCommitted] = useState(false);
+    // replays from the top.
     const [generationStarted, setGenerationStarted] = useState(false);
     const [statuses, setStatuses] = useState<StepStatus[]>(() => TOUR_ASSETS.map(() => 'queued'));
     const [openAsset, setOpenAsset] = useState<TourAsset | null>(null);
@@ -51,9 +52,9 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
 
     return (
         <ScreenShell
-            title="Commit the reasoning."
-            accent="Then generate what helps you build."
-            subtitle="A working plan can support exploration. Commitment and output generation remain explicit, separate choices."
+            title="One plan."
+            accent="Every asset you need to build."
+            subtitle="Generate the design system, flows, screens, data model, and implementation plan straight from the working plan — open decisions never block it."
         >
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.3fr)]">
                 {/* PRD card */}
@@ -67,23 +68,15 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
                             <span key={i} className="block h-2 rounded bg-indigo-400/25" style={{ width: `${w * 8}%` }} />
                         ))}
                     </div>
-                    <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300">
-                        <Check size={13} /> Reasoning reviewed
-                    </div>
                     <button
                         type="button"
-                        onClick={() => setCommitted(true)}
-                        disabled={committed}
+                        onClick={generateFoundation}
+                        disabled={generationStarted}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-emerald-600 disabled:opacity-100"
                     >
-                        {committed ? <Check size={16} /> : <Sparkles size={16} />}
-                        {committed ? 'Plan committed' : 'Commit plan'}
+                        {generationStarted ? <Check size={16} /> : <Zap size={16} />}
+                        {generating ? 'Generating outputs…' : generationStarted ? 'Outputs generated' : 'Generate outputs'}
                     </button>
-                    {committed && !generationStarted && (
-                        <button type="button" onClick={generateFoundation} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-400/40 px-4 py-2.5 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/10">
-                            <Zap size={16} /> Generate build foundation
-                        </button>
-                    )}
                 </div>
 
                 {/* Generating orb (decorative, desktop) */}

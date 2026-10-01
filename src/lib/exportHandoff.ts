@@ -20,11 +20,9 @@ export interface HandoffInput {
      * whether anything was stale at export time.
      */
     manifestMarkdown?: string;
-    /** Pre-rendered, current checkpoint summary. When present it replaces the
-     * older blanket exploratory warning with the exact plan/output state. */
+    /** Pre-rendered, current checkpoint summary (critique, validation, and
+     * alignment state at export time). */
     checkpointMarkdown?: string;
-    /** True when the current working plan has not been committed. */
-    exploratory?: boolean;
 }
 
 const PREAMBLE = (projectName: string) =>
@@ -47,14 +45,12 @@ How to use this document:
 export function buildAgentHandoff(input: HandoffInput): string {
     const {
         projectName, prdMarkdown, artifacts, manifestMarkdown,
-        checkpointMarkdown, exploratory,
+        checkpointMarkdown,
     } = input;
     const parts: string[] = [PREAMBLE(projectName || 'This product')];
 
     if (checkpointMarkdown && checkpointMarkdown.trim()) {
         parts.push(checkpointMarkdown.trim(), '\n---\n');
-    } else if (exploratory) {
-        parts.push('> **Exploratory handoff:** This working plan has not been committed as implementation-ready. Validate unresolved assumptions and decisions before building.\n\n---\n');
     }
 
     if (manifestMarkdown && manifestMarkdown.trim()) {

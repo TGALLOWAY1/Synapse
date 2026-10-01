@@ -195,14 +195,15 @@ drive downstream artifact generation. `evaluateSpineGenerationGate(spine, opts)`
 is the code-level guardrail (defense-in-depth alongside the UI, mirroring the
 safety-blocked check): it returns `allowed:false` for a safety-blocked spine, a
 spine with no `structuredPRD`, or an incomplete spine that is neither
-acknowledged (`acknowledgeIncomplete`) nor already `isFinal` (the durable record
-of acknowledgement, so resume/retry after reload still work). `startAll` /
-`regenerateSlots` early-return when the gate disallows. On the finalize edge,
-`ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
-an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
-"Generate anyway" proceeds (passing `acknowledgeIncomplete`). The pre-commitment
-outputs pill runs the same confirmation: `handleGenerateAssets` shows it for any
-non-final spine with `failedSections` before generation can start. Any artifact/mockup
+acknowledged (`acknowledgeIncomplete`) nor a legacy `isFinal` spine (the durable
+acknowledgement recorded by the removed Finalize flow, so older projects still
+resume/retry after reload; nothing sets `isFinal` any more). `startAll` /
+`regenerateSlots` early-return when the gate disallows. Every UI route into
+output generation — the Plan page's top-bar **Generate outputs** and the Build
+stage's banner — goes through `ProjectWorkspace.handleGenerateAssets`, which
+interposes an explicit "Generate assets from an incomplete PRD?" confirmation
+for any non-legacy-final spine with `failedSections`; only "Generate anyway"
+proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
@@ -247,20 +248,15 @@ defeats the store's consecutive-dedupe and floods the history list.
 ### Advisory checkpoint cards
 
 Workflow checkpoints are inline, non-blocking cards rather than modal
-interruptions:
+interruptions. There is no pre-generation interstitial (the advisory
+`PreBuildCheckpointCard` was removed with the Finalize layer) — generation
+starts on the click.
 
-- `PreBuildCheckpointCard` appears below the journey rail at most once per
-  workspace session when generation starts with open planning attention. It
-  names the exact highest-ranked record and offers **Review first**,
-  **Generate outputs**, and **Not now**. Review uses the record's exact
-  `planningNavigation` destination/return context; neither dismissal nor
-  proceeding changes planning authority.
 - `WorkflowCheckpointSummaryCard` aggregates the current output, critique,
   validation, and alignment signals after a generation job observed in the
   current session settles, and again in the export dialog. Each row navigates
-  to the exact artifact or finding. The card displays the current committed
-  Finalize verdict and accepted risks; absent a current commitment it says
-  **Working plan** once.
+  to the exact artifact or finding. It carries no plan verdict — there is no
+  committed / accepted-risk / "Working plan" chip.
 
 #### Checkpoint severity follows the outcome, not the note count
 
@@ -269,18 +265,17 @@ but that tone — **never** branch chrome on "are there rows at all":
 
 | tone | when | chrome |
 |---|---|---|
-| `clean` | no rows, no accepted risks | emerald, check mark |
+| `clean` | no rows | emerald, check mark |
 | `advisory` | `attentionSignals === 0` and rows exist | neutral/white, check mark |
-| `attention` | any attention signal (failed/interrupted slot, blocking validation, build-blocking alignment, blocker/resolve-before-build critique) **or** a verdict carrying accepted planning risks | amber, warning triangle |
+| `attention` | any attention signal (failed/interrupted slot, blocking validation, build-blocking alignment, blocker/resolve-before-build critique) | amber, warning triangle |
 
 A run that produced every output and carries only advisory notes **succeeded**
 and must read like it — a validation note is not a reason to paint the
 workspace amber. The reverse rule is equally load-bearing: an errored slot
-never degrades to advisory, and accepted planning risks never read as clean.
+never degrades to advisory.
 
-The card is **compact by default**: line one is the outcome headline plus the
-plan-verdict chip; supporting text, rationale/containment, accepted risks, and
-the per-row signals sit behind a disclosure labelled from
+The card is **compact by default**: line one is the outcome headline; the
+supporting text and the per-row signals sit behind a disclosure labelled from
 `summary.detailsLabel` ("1 note" / "3 items to review"). The disclosure starts
 **open** for `attention` (a failure is never hidden) and **closed** otherwise;
 once the user toggles it, their choice wins. Rows keep their per-row `Review`
@@ -294,9 +289,10 @@ plain localStorage — deliberately **not** a persisted store collection, which
 would drag in `ALL_PROJECT_COLLECTIONS` / snapshot / sync / demo-cleanup wiring
 (rule 6) for a closed banner. A new run has a new key, so it shows again.
 
-These cards are projections, not new persisted workflow state. Aggregate
-attention gets one global home in the next-action strip and one checkpoint
-echo; local surfaces use exact action labels instead of repeating counts.
+These cards are projections, not new persisted workflow state. The aggregate
+open-item count gets one home — the Plan page's one-line `PlanningStateBar`,
+mirrored by the journey rail's Decide badge — and one checkpoint echo; local
+surfaces use exact action labels instead of repeating counts.
 Cards and modal disclosures must retain keyboard reachability, visible focus,
 dialog labelling, Escape handling, focus restoration, and 44px mobile targets.
 
@@ -311,26 +307,30 @@ states the actual next step.**
   `primary: FinalReviewAction` plus a `secondary: FinalReviewAction[]`, and the
   component only renders what it is handed. That is what makes "exactly one
   primary in every state" a unit test rather than a code review.
-- The label is **derived, never hardcoded per branch**: N in "Resolve N
-  blockers" comes from the evaluator's blocker list, so the count can never
-  disagree with the list underneath it.
+- The label is **derived, never hardcoded per branch**: "Copy first / next
+  implementation prompt" vs "Start first slice" reads off the plan's own
+  next-uncopied prompt pack, and the open-check count in the rationale line
+  comes from the evaluator's blocker list, so it can never disagree with the
+  checklist underneath it.
+- **Advisory checks never change the primary.** Open packet checks change the
+  rationale ("N packet checks are still open (estimated) … nothing here is a
+  gate") and the checklist, never the action; with no evaluator result at all
+  the primary is still the next build step. Do not re-add a "Resolve N
+  blockers" or disabled "unavailable" primary — that turned an estimate into a
+  gate.
 - **Demotion is permanent, not conditional.** Copy plan / Review prompts /
-  Convert to tasks are `kind: 'secondary'` in *all* states, including the ready
-  one, and sit behind a "More actions" disclosure. The prior design styled
-  "Copy next prompt" primary regardless of blockers — a filled CTA inviting a
-  user to start building from an incomplete packet.
-- **A secondary path is still a real path.** Copying a prompt before approval
-  remains possible — from a demoted control. Every prompt-copy button on the
+  Convert to tasks are `kind: 'secondary'` in *all* states and sit behind a
+  "More actions" disclosure. The optional **Approve build packet** sits beside
+  the primary as an outlined button marked "(optional)".
+- **One filled button per surface.** Every other prompt-copy button on the
   surface (`PromptPackCard`, the Prompts tab's "Copy next prompt", "Copy all
   prompt packs", "Copy milestone prompts") is permanently `variant="secondary"`,
-  *including after approval*, so no tab ever shows a second filled button. When
-  the packet is approved the primary in Final Review already offers that copy;
-  a duplicate filled button would just re-state it.
-- **An unavailable state is honest, not empty.** With no evaluator result the
-  primary renders disabled with a stated reason rather than falling back to
-  whichever action happens to be wireable.
-- **Blocking beats history.** A recorded approval never promotes a build action
-  while blockers exist; the approval is reported as *superseded* instead.
+  approved or not, so no tab ever shows a second filled button — the Final
+  Review primary already offers that copy.
+- **History is reported, not enforced.** An approval whose pinned versions no
+  longer match is reported as *superseded* ("Changed since approval") and the
+  optional action becomes **Re-approve build packet**; it never changes the
+  primary.
 - Disclosures that must be driven by tests or lazily mounted use a
   **button + `aria-expanded` + conditional render**, not `<details>` — jsdom
   does not toggle `<details>` on a summary click, and the collapsed content of a
@@ -338,10 +338,11 @@ states the actual next step.**
 
 ### Severity is expressed once; sections carry a flag, not a second verdict
 
-A problem that a readiness evaluator already blocks on has **one** loud home:
-the evaluator's blocker list. The place in the document where the problem lives
-gets a **compact flag** — a small chip naming the thing and its gap count, plus
-one action — and the flag points at the blocker instead of restating it. Two
+A problem that a readiness evaluator already reports as an open check has
+**one** loud home: that evaluator's checklist. The place in the document where
+the problem lives gets a **compact flag** — a small chip naming the thing and
+its gap count, plus one action — and the flag points at the check instead of
+restating it. Two
 full-volume statements of one fact read as two problems, and a page of amber
 panels teaches users to ignore amber.
 
@@ -358,13 +359,16 @@ Plan's §W5 Security & Privacy / Measurement sections:
 
 Rules this pattern holds to:
 
-- **The volume drops, the signal does not.** The obligation still blocks the
-  build packet through §W6; Final Review's status pill, its "Resolve N
-  blockers" primary, and its blocker list all still fire without any click. A
-  user who never opens the flag still learns the packet is incomplete.
+- **The volume drops, the signal does not.** An unresolved Security & Privacy
+  obligation is still an open packet check through §W6 (an unresolved
+  Measurement obligation is a recorded warning); Final Review's status pill
+  ("N of 7 checks pass · estimated"), its rationale line, and its checklist
+  all still show it without any click. A user who never opens the flag still
+  learns the packet has open checks — advisory, never a gate.
 - **The flag never restates the consequence or the remedy** — those are the
-  blocker's fields. Its expanded detail names the gaps and then says
-  *"Counted in the Final Review blockers above"*.
+  check's fields. Its expanded detail names the gaps and then says
+  *"Listed in Final Review above, which says what it costs and how to close
+  it."*
 - **Collapsed by default in every state, including the unresolved one.** This is
   the deliberate exception to the checkpoint-card rule above (where `attention`
   opens the disclosure): a checkpoint card *is* the statement of severity, a
@@ -428,7 +432,7 @@ re-introduce the old shapes.
   click events bubble through the component tree.
 - **One `<main>` per page, never inside an overlay.** The Home page and the
   Plan/History stage of the workspace each expose a single `<main>`; the
-  Explore/Build stage gets its own from `ArtifactWorkspace` (the two never
+  Build stage gets its own from `ArtifactWorkspace` (the two never
   render together). Wrapping the whole workspace area in `<main>` would nest
   `ArtifactWorkspace`'s `<aside>` landmark inside it. Known gaps: the Review
   stage has no `<main>`, and `DecisionCenter` renders its own `<main>` and
@@ -496,8 +500,8 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   preselected for a one-click explicit approval, explicit verdict → impact
   preview → explicit apply; keep its vocabulary in sync with
   `src/components/review/DecisionCenter.tsx`),
-  Versions, Assets (the hero — Mark as Final →
-  sequential asset generation → `ArtifactDrawer` previews), Connections
+  Versions, Assets (the hero — one **Generate outputs** click, no commit
+  step → sequential asset generation → `ArtifactDrawer` previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
   pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,
   `ArtifactDrawer` (mobile bottom-sheet / desktop side-drawer, mirrors
