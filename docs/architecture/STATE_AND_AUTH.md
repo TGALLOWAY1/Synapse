@@ -53,12 +53,36 @@
   every settle path (`updateSpineStructuredPRD` with `generationMeta`,
   `setSpineError`, blocked `setSpineSafetyReview`). New generation entry
   points must stamp it too, or interrupted-run recovery won't see them.
+  **It is also the PRD edit lock.** The pipeline writes the running spine IN
+  PLACE (`onPartial` → `onResult`), so any version appended on top of it forks
+  the run: the new latest freezes the partial PRD while the finished PRD lands
+  on a hidden older version and outputs generate from the truncated one.
+  `isPrdRunInFlight` (`src/lib/prdRunState.ts`, pure) combines `'running'`
+  with the live section grid and the legacy placeholder — `'running'` is the
+  only signal that also covers the final consistency-review pass, which emits
+  no section status. While it holds for the latest spine, `ProjectWorkspace`
+  renders the PRD read-only with "Editing unlocks when generation finishes.",
+  makes the branch rail read-only, hides restore, disables Regenerate Draft
+  ("Regenerate unlocks when generation finishes."), and hides the Generate
+  outputs pill so no output starts from a spine still being rewritten; and
+  `compareAndAppendStructuredPRD` refuses with `reason: 'generation_running'`.
+  The preflight interview is never "running" (`isPreflightClarifying` — the
+  header badge reads **Clarifying…** there, **Generating…** only once a run is
+  in flight).
   **Edits append versions (never overwrite):** all user PRD edits and
   single-section retries go through `editSpineStructuredPRD` (clones the
   current spine, applies the new `structuredPRD`/`responseText`, becomes the
   new `isLatest`, stamps `provenance.changeSource`/`editSummary`, pushes an
   `Edited` history event) — the in-place `updateSpineStructuredPRD`/
   `updateSpineText` are now reserved for **live streaming generation** only.
+  **A no-op edit writes nothing:** a content-identical edit
+  (`isStructuredPrdContentEqual`, `src/lib/structuredPrdEquality.ts` — strings
+  trimmed, undefined keys and key order ignored, array order significant)
+  neither appends nor amends and returns `{ newSpineId: <edited id>,
+  unchanged: true }`; `StructuredPRDView.savePRD` skips the call altogether, so
+  Save with nothing changed just closes the editor. A no-op version would
+  change the latest spine id and flag every output `needs_update`. (An edit
+  carrying `meta` overrides still appends.)
   `revertSpineToVersion` restores a historical spine by appending a new latest
   clone (`changeSource: 'revert'`, `Reverted` event) — old versions are never
   mutated or deleted. `VersionProvenance` (on `SpineVersion` and
@@ -71,6 +95,21 @@
   (`src/lib/branchReplyInFlight.ts`) means the reply was interrupted: the
   branch list says "Reply was interrupted — send again" and restores the
   user's message into the input — never re-sending automatically.
+- `branchSlice` — Branches and their messages. **Open branches follow the
+  latest spine:** every action that appends a spine version
+  (`editSpineStructuredPRD`'s append path, `compareAndAppendStructuredPRD`,
+  `revertSpineToVersion`, `regenerateSpine`, `mergeBranch`,
+  `applyStagedBranchesToSpine`) re-points the project's open branches
+  (`active`, and staged `resolved` with their held replacement) to the new
+  version inside the same `set()` updater, via `repointProjectOpenBranches`
+  (`src/lib/openBranches.ts`, pure — returns the same reference when nothing
+  moves). Merged/rejected branches keep the version they were closed against,
+  so `getBranchesForSpine(latest)` lists exactly the open ones. A new
+  spine-append action must do the same, or every open conversation and staged
+  edit is orphaned on a version the rail no longer lists. An in-place
+  decision-edit amend keeps the id and needs no move. Consolidating a
+  re-pointed branch whose anchor text no longer exists in the latest PRD
+  surfaces ConsolidationModal's existing not-found error.
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
   tracking; source-ref staleness detection against the current spine.
   `revertArtifactToVersion` restores an older version by appending a **cloned**

@@ -120,7 +120,7 @@ Validation: existing PRD/assets/history workflows remain intact; review cost/lat
 - Persist structured findings and bounded evidence, not raw transcripts.
 - Debounce project sync updates to avoid a whole-bundle write for every token or progress tick.
 - Hash and cache extracted source sections; reuse the manifest across specialists.
-- Cap findings and output tokens, and show an estimated review range before start.
+- Cap findings and output tokens, and show an estimated review range before start. The per-specialist findings cap (`MAX_SPECIALIST_FINDINGS`, 12) is stated in the specialist prompt ("at most 12 findings, most material first") and enforced in code after parsing — the first 12 are kept — never as a response-schema `maxItems`: the Gemini API rejects the bounded findings schema with HTTP 400 `INVALID_ARGUMENT`, which failed every specialist call.
 - Preserve validation failures for audit while excluding them from trusted synthesis.
 - Treat developer traces as diagnostics, not the review audit store; traces are not a confidentiality boundary.
 

@@ -170,12 +170,16 @@ const COMPLEX_REASONING_TARGET_PATHS: Record<ComplexTargetKind, readonly string[
     claim: ['$.architecture'],
 };
 
-const complexTargetReasoningSchema = {
+// No `maxItems` on either array: the Gemini API rejects this schema with HTTP
+// 400 INVALID_ARGUMENT while they are bounded (verified on
+// gemini-3.1-pro-preview and gemini-3.8-flash). Both counts are enforced in
+// code instead — parseAndValidate requires exactly one candidate per target
+// (resolveTargets caps targets at 12) and at most 5 questions per candidate.
+export const complexTargetReasoningSchema = {
     type: 'OBJECT',
     properties: {
         candidates: {
             type: 'ARRAY',
-            maxItems: 12,
             items: {
                 type: 'OBJECT',
                 properties: {
@@ -192,7 +196,7 @@ const complexTargetReasoningSchema = {
                     confidence: { type: 'STRING', enum: CONFIDENCES },
                     evidenceCharacter: { type: 'STRING', enum: EVIDENCE_CHARACTERS },
                     ambiguity: { type: 'STRING' },
-                    questions: { type: 'ARRAY', maxItems: 5, items: { type: 'STRING' } },
+                    questions: { type: 'ARRAY', items: { type: 'STRING' } },
                 },
                 required: [
                     'targetId', 'leafRefId', 'currentValueJson', 'causeRefId', 'evidenceRefIds',

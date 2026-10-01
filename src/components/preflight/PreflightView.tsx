@@ -14,6 +14,15 @@ import {
 } from '../../lib/safety';
 import type { PreflightSession, ProjectPlatform } from '../../types';
 
+// One in-flight question request per (project, spine), shared across mounts.
+// React StrictMode (dev) mounts → cleans up → re-runs every effect, and a user
+// can navigate away and back while the request is pending. Neither may issue a
+// second paid call or drop the only in-flight result, so the request is not
+// tied to the mount that started it: it writes its result to the store itself
+// (the store, not this component, owns the session — writing after unmount is
+// safe) and lands exactly once whichever mount is showing.
+const inFlightQuestionRequests = new Set<string>();
+
 interface PreflightViewProps {
     projectId: string;
     spineId: string;
@@ -43,37 +52,44 @@ export function PreflightView({ projectId, spineId, session, platform }: Preflig
     const mode = session.mode === 'deep' ? 'deep' : 'quick';
     const total = session.questions.length;
 
-    // Generate questions once when the session is first opened.
+    // Generate questions once when the session is first opened. No `cancelled`
+    // cleanup flag: under StrictMode the first run's cleanup fires before its
+    // request settles while the re-run bails on the one-shot guard, so a
+    // cancelled flag dropped the only result and the spinner never resolved.
     useEffect(() => {
         if (session.status !== 'awaiting_questions' || generationStarted.current) return;
+        const requestKey = `${projectId}:${spineId}`;
+        if (inFlightQuestionRequests.has(requestKey)) return;
         generationStarted.current = true;
-        let cancelled = false;
-        (async () => {
+        inFlightQuestionRequests.add(requestKey);
+        void (async () => {
             try {
                 const { questions, usedFallback } = await generatePreflightQuestions(
                     session.originalIdea,
                     mode,
                 );
-                if (cancelled) return;
                 setPreflightQuestions(projectId, spineId, questions, usedFallback);
             } catch (e) {
-                if (cancelled) return;
                 if (e instanceof SafetyBlockedError) {
                     // Disallowed idea — stop the flow and show the Safety Review.
-                    setSpineSafetyReview(
-                        projectId,
-                        spineId,
-                        buildBlockedSafetyReview(e.result),
-                        buildSafetyReviewMarkdown(e.result),
-                    );
+                    try {
+                        setSpineSafetyReview(
+                            projectId,
+                            spineId,
+                            buildBlockedSafetyReview(e.result),
+                            buildSafetyReviewMarkdown(e.result),
+                        );
+                    } catch (writeError) {
+                        // The project was removed while the request was in flight.
+                        console.warn('[preflight] could not persist the safety review', writeError);
+                    }
                 } else {
                     console.error('[preflight] unexpected question generation error', e);
                 }
+            } finally {
+                inFlightQuestionRequests.delete(requestKey);
             }
         })();
-        return () => {
-            cancelled = true;
-        };
     }, [session.status, session.originalIdea, mode, projectId, spineId, setPreflightQuestions, setSpineSafetyReview]);
 
     // ---- Loading state: generating questions --------------------------------

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Branch, BranchPendingReply, SpineVersion, HistoryEvent, StructuredPRD } from '../../types';
 import type { ProjectState } from '../types';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
+import { repointOpenBranches } from '../../lib/openBranches';
 
 export type BranchSlice = {
     branches: Record<string, Branch[]>;
@@ -183,7 +184,10 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
             };
 
             return {
-                branches: { ...state.branches, [projectId]: updatedBranches },
+                // The consolidated branch is now merged and keeps the version it
+                // was consolidated against; every other open branch follows the
+                // new latest (openBranches.ts).
+                branches: { ...state.branches, [projectId]: repointOpenBranches(updatedBranches, newSpineId) },
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), mergeEvent] },
             };
@@ -296,7 +300,11 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
             };
 
             return {
-                branches: { ...state.branches, [projectId]: updatedBranches },
+                // Applied branches are now merged and keep the version they
+                // were applied to; every other open branch — including staged
+                // edits that were skipped — follows the new latest
+                // (openBranches.ts), so it stays reachable for a retry.
+                branches: { ...state.branches, [projectId]: repointOpenBranches(updatedBranches, newSpineId) },
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), mergeEvent] },
             };

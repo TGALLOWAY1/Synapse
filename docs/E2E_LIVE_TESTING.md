@@ -48,7 +48,9 @@ still clip.
    screenshots are captured every ~45s while it runs).
 5. `--interactions` only: the canned interactive loop — programmatic PRD text
    selection → the `PRD edit actions` dialog → canned edit instruction →
-   branch conversation (real Gemini call) → **Consolidate to Document** →
+   branch conversation (real Gemini call; the driver waits for the reply to
+   land in the persisted store) → **Consolidate now** (older builds:
+   **Consolidate to Document**) →
    scope choice → generate patch (real Gemini call) → **Commit to New Spine**.
    The commit is best-effort: its exact-substring anchor replace can
    legitimately fail on LLM formatting drift, and the error state is itself
@@ -59,7 +61,9 @@ still clip.
    **Finalize with accepted risk** override: reveal the override section, fill
    the rationale textarea, then **Finalize with N accepted blockers** for an
    exploring-phase working plan) → **FinalizationSuccessModal**
-   → **Generate build foundation** / **Explore outputs** → the one-time
+   → **Generate build foundation** / **Explore outputs** → the advisory
+   pre-build checkpoint card (**Before generating: …**, which a fresh plan's
+   open planning items always trigger) → **Generate outputs** → the one-time
    **Choose your visual direction** preset picker (Modern SaaS). That fires
    `artifactJobController.startAll`, which generates the core-artifact bundle +
    mockup spec (real Gemini calls, dependency-layered). Settle is detected from
@@ -247,8 +251,9 @@ update the script in the same change (treat drift here like docs drift):
 - Selection→branch loop (`--interactions`): the
   `[role="dialog"][aria-label="PRD edit actions"]` dialog and its
   `How should this change?` input + `Branch` submit
-  (`SelectionActionDialog.tsx`), the `Consolidate to Document` bar
-  (`BranchList.tsx`), and the `Generate Local|Global Patch` /
+  (`SelectionActionDialog.tsx`), the `Consolidate now` button (`BranchList.tsx`;
+  matched as `/^Consolidate (now|to Document)$/` so older builds still drive),
+  and the `Generate Local|Global Patch` /
   `Commit to New Spine` buttons (`ConsolidationModal.tsx`).
 - PRD settle signal: `SpineVersion.generationPhase` and the
   `synapse-projects-storage*` persist key prefix (also the `--state`
@@ -276,7 +281,10 @@ update the script in the same change (treat drift here like docs drift):
   risk` / `Finalize with N accepted blockers` buttons and the
   `#readiness-rationale` textarea (`ReadinessCheckpoint.tsx`), the
   `Generate build foundation` / `Explore outputs` button
-  (`FinalizationSuccessModal.tsx`), and the `Choose your visual direction`
+  (`FinalizationSuccessModal.tsx`), the `Generate outputs` button inside
+  `section[aria-labelledby="pre-build-checkpoint-heading"]`
+  (`PreBuildCheckpointCard.tsx` — a guarded no-op on builds without the card),
+  and the `Choose your visual direction`
   preset picker (`DesignSystemPresetChoice.tsx`) — a `DesignPresetGrid` preview
   grid where the run selects the `Modern SaaS` card and confirms via
   `Continue with…`.

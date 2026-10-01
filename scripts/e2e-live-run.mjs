@@ -763,6 +763,32 @@ async function captureViews(page, viewport, wantedViews) {
 // --interactions: the canned interactive loop (live mode only, opt-in).
 // Costs ~2 extra Gemini calls (branch reply + consolidation patch).
 // ---------------------------------------------------------------------------
+// The branch's consolidate action (BranchList.tsx). Its label drifted from
+// "Consolidate to Document" to "Consolidate now"; match either so the harness
+// drives older and current builds. `.first()`: the loop creates one branch.
+const consolidateButton = (page) => page
+    .getByRole('button', { name: /^Consolidate (now|to Document)$/ })
+    .first();
+
+// True once a branch thread holds an AI reply, read from the app's own
+// persisted store (the consolidate action renders as soon as the branch
+// exists, so it no longer signals that the reply landed).
+async function waitForBranchReply(page) {
+    await page.waitForFunction((projectId) => {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k || !k.startsWith('synapse-projects-storage')) continue;
+            try {
+                const json = window.__e2eDecodeBlob(localStorage.getItem(k));
+                if (json === null) continue;
+                const branches = JSON.parse(json).state?.branches?.[projectId] ?? [];
+                if (branches.some((b) => b.messages?.some((m) => m.role === 'assistant'))) return true;
+            } catch { /* keep polling */ }
+        }
+        return false;
+    }, report.projectId, { timeout: 180_000, polling: 1000 });
+}
+
 async function runPrdEditInteraction(page) {
     await step('interaction: select PRD text → edit dialog', async () => {
         await gotoStage(page, 'prd');
@@ -803,14 +829,16 @@ async function runPrdEditInteraction(page) {
     }, { optional: true });
 
     await step('interaction: branch conversation (live Gemini call)', async () => {
-        // The "Consolidate to Document" bar appears once the AI reply lands.
-        await page.getByRole('button', { name: 'Consolidate to Document' }).waitFor({ timeout: 180_000 });
+        // The branch (and its consolidate action) appears immediately; the
+        // thread is worth capturing once the AI reply has landed.
+        await consolidateButton(page).waitFor({ timeout: 30_000 });
+        await waitForBranchReply(page);
         await settle(800);
         await fullShot(page, 'interaction-branch-conversation');
     }, { optional: true });
 
     await step('interaction: consolidate branch into PRD (live Gemini call)', async () => {
-        await page.getByRole('button', { name: 'Consolidate to Document' }).click({ timeout: 5000 });
+        await consolidateButton(page).click({ timeout: 5000 });
         await settle(800);
         await fullShot(page, 'interaction-consolidation-scope');
         await page.getByRole('button', { name: /^Generate (Local|Global) Patch/ }).click({ timeout: 5000 });
@@ -1228,6 +1256,21 @@ try {
 
                 await step('trigger asset generation ("Generate build foundation")', async () => {
                     await finalizeModalButton().click({ timeout: 8000 });
+                    // Current builds interpose the advisory pre-build checkpoint
+                    // card (PreBuildCheckpointCard: "Before generating: …" with
+                    // Not now / Review first / Generate outputs) whenever planning
+                    // items are still open — which a freshly drafted plan always
+                    // has — and nothing generates until it is answered. Proceed
+                    // through it; builds without the card skip this. waitFor, not
+                    // isVisible: isVisible's `timeout` is ignored and returns at once.
+                    const preBuildGenerate = page
+                        .locator('section[aria-labelledby="pre-build-checkpoint-heading"]')
+                        .getByRole('button', { name: /^Generate outputs$/ });
+                    if (await preBuildGenerate.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) {
+                        await fullShot(page, 'pre-build-checkpoint');
+                        await preBuildGenerate.click({ timeout: 5000 });
+                        await settle(500);
+                    }
                     // The one-time visual-direction picker gates the first bundle. Note
                     // the app opens it WITHOUT closing the finalize modal, so the
                     // finalize card sits on top of the picker and intercepts clicks —

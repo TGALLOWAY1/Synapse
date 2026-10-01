@@ -346,7 +346,11 @@ rationale and detail.
 11. **Every version-creating path stamps `provenance.changeSource`**, and
     revert/restore always **appends** a new version — history is never mutated
     or deleted. Never parse a version number out of an id; labels derive from
-    array position. → VERSIONING_AND_EXPORT.md, STATE_AND_AUTH.md
+    array position. Every spine append also re-points open branches to the new
+    version inside the same updater (`repointProjectOpenBranches`,
+    `src/lib/openBranches.ts`), and nothing may append on top of a spine whose
+    PRD run is still in flight (`isPrdRunInFlight`, `src/lib/prdRunState.ts`).
+    → VERSIONING_AND_EXPORT.md, STATE_AND_AUTH.md
 12. **User edits are overlays, and overlays are versioned:** screen/plan/
     approval edits live in `ArtifactVersion.metadata` overlays (key list in
     `src/lib/artifactOverlays.ts`), never rewrites of `content`; overlay
@@ -374,5 +378,6 @@ rationale and detail.
     `compareAndAppendStructuredPRD` is the authoritative version-bound path for
     applying decision impacts and section retries — it compares the latest
     spine/hash/decision event inside one transaction and appends atomically; a
-    stale preview writes nothing. Never mutate the spine around it.
+    stale preview — or a latest spine whose PRD run is still in flight —
+    writes nothing. Never mutate the spine around it.
     → PLANNING_AND_DECISIONS.md
