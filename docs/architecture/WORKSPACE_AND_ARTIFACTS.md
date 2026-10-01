@@ -1,8 +1,8 @@
 # Build Workspace, Artifact Groups & Implementation Plan
 
-> Extracted from CLAUDE.md. Post-finalization flow, hidden/retired artifact subtypes, the consolidated Implementation Plan, the Artifact Dependency Graph (Project Map), and implementation tasks.
+> Extracted from CLAUDE.md. Reaching the Build stage, hidden/retired artifact subtypes, the consolidated Implementation Plan, the Artifact Dependency Graph (Project Map), and implementation tasks.
 
-### Post-commitment transition (Commit Plan → Build)
+### Reaching the Build stage (Generate outputs)
 
 The artifact sidebar is organized into four workflow-named sections —
 **Project Foundation** (PRD **and** Design System — the design system sits
@@ -21,8 +21,8 @@ per-artifact model overrides keep working.
 subtype that still *generates* but is surfaced nowhere. It drives: (1)
 `buildSlotMetas` drops it so it renders no sidebar/mobile-header/auto-open row;
 (2) `ProjectWorkspace.assetsReady` excludes it (via `visibleCoreSubtypes()`) so a
-hidden slot erroring can't strand the finalize success modal on "assets are being
-created" — the user has no row to see/retry it; (3) `ExportModal` drops it from
+hidden slot erroring can't hold the header outputs CTA short of "Review outputs"
+— the user has no row to see/retry it; (3) `ExportModal` drops it from
 the export list; (4) `artifactDependencyGraph.isVisibleSubtype` excludes it as a
 node (dependents inherit its dependencies transitively, and
 `expandWithHiddenDependencyClosure` re-adds it to graph-driven batches); (5)
@@ -88,13 +88,20 @@ separate generation-status panel on the right — per-slot status lives
 inline on each sidebar row (the `StatusDot` next to the title) and in
 the mobile header beside the selected artifact name.
 
-Committing a spine records implementation intent but does not start artifact
-generation. `ProjectWorkspace.handleToggleFinal` first presents categorical
-planning readiness and any incomplete-source acknowledgement, then shows
-`FinalizationSuccessModal`. The modal makes **Generate build foundation** an
-explicit second action. Existing-output projects can instead **Review outputs**;
-that action switches `currentStage` to `workspace` and arms a one-shot
-`finalizeAutoOpen` flag passed to `ArtifactWorkspace`. `ArtifactWorkspace` consumes it once
+Output generation is an explicit user action with **no commitment step in
+front of it** (the Finalize flow — readiness review, commit, finalize success
+modal, pre-build card — was removed; see PLANNING_AND_DECISIONS.md). It starts
+from the Plan page's top-bar **Generate outputs**
+(`ProjectWorkspace.handleGenerateAssets`) or from the Build stage's own
+**Generate outputs** banner (`showBuildGenerateBanner`: shown on the Build stage
+while no visible output is ready and no run is building, gated on
+`capabilities.canGenerateArtifacts`, hidden while the PRD run is in flight or an
+old version is viewed). Both go through the same handler: the incomplete-PRD
+confirmation when needed, then the one-time visual-direction picker when no
+preset is set, then `artifactJobController.startAll`. Starting generation,
+**Review outputs**, and the journey rail's Build step (when outputs exist or
+are building) switch `currentStage` to `workspace` and arm a one-shot
+`outputsAutoOpen` flag passed to `ArtifactWorkspace`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
 `ARTIFACT_GROUPS` order (design_system → user_flows → screens → … →
@@ -103,23 +110,35 @@ never reopens after the user closes it; desktop keeps the persistent side rail).
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
 
-**The route to outputs is never gated on decisions or commitment.** The header
-assets pill (`ProjectWorkspace.showAssetsPill`) shows whenever the latest
-version has a safe structured PRD — labeled **Explore outputs** until
-`planningReadiness.isReadyToBuild`, then **Build outputs** — so commitment is
-an act of intent, not a prerequisite for reaching assets (do not re-add a
-commitment condition to the pill). Because the pill is reachable before the
-finalize flow, `handleGenerateAssets` interposes the explicit incomplete-PRD
-confirmation ("Generate assets from an incomplete PRD?") whenever a non-final
-spine has `generationMeta.failedSections` — `startAssetGeneration`'s
-`acknowledgeIncomplete` flag may only ever carry a real user acknowledgement.
-When output generation starts while planning items are still open,
-`handleGenerateAssets` then offers the inline advisory
-`PreBuildCheckpointCard` once per workspace session below the journey rail. It
-names one exact, ranked planning item and offers Review first / Generate
-outputs / Not now. Generating always proceeds; the hard generation gate stays
-safety/PRD-only plus the incomplete-PRD acknowledgement
-(`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+**The route to outputs is never gated on decisions, readiness, or
+commitment.** The header outputs pill (`ProjectWorkspace.showAssetsPill`) shows
+whenever the latest version has a safe structured PRD and its run has settled.
+Its label states the action only — **Generate outputs**, **Review outputs**, or
+**Building outputs…** — never a readiness claim; the outputs stage is always
+labelled **Build** (there is no Explore-vs-Build split). Once outputs exist,
+the pill's hover copy adds the advisory build-packet state ("estimated"). Do
+not re-add a readiness or commitment condition to the pill or the banner.
+`handleGenerateAssets` interposes the explicit incomplete-PRD confirmation
+("Generate assets from an incomplete PRD?") whenever the spine has
+`generationMeta.failedSections` and is not yet acknowledged — confirming it
+records `incompleteAcknowledgedAt` on that spine version, so it is asked once
+per version (a legacy `isFinal` spine counts as acknowledged) —
+`startAssetGeneration`'s `acknowledgeIncomplete` flag may only ever carry a
+real user acknowledgement. Sync outputs offers the same confirmation inline
+for an unacknowledged version (see UI_PATTERNS.md). There is no pre-generation
+interstitial: generating always proceeds, and the hard generation gate stays
+safety/PRD-only (safe, latest, structured PRD) plus the incomplete-PRD
+acknowledgement (`artifactGenerationGate.ts`).
+
+**The Build stage only ever works on the latest PRD.** While a historical
+spine is selected (History Mode), the journey's Build step is inert, an output
+stage presents the read-only historical Plan instead of `ArtifactWorkspace`
+(whose retry/regenerate actions would otherwise pass the old spine id to the
+job controller), and navigating to an output stage leaves History Mode first.
+Behind the UI, `evaluateSpineGenerationGate` refuses a non-latest spine
+(`not_latest`) for `startAll` / `regenerateSlots` /
+`ensureDesignSystemForSpine`, and `retrySlot` refuses one too
+(`isHistoricalSpine`).
 
 After a job observed active in the current session settles,
 `WorkflowCheckpointSummaryCard` presents one non-persisted completion summary:
@@ -385,56 +404,66 @@ Convert-to-Tasks all keep working). See
   persisted state for the consolidated view.
 
 
-### Final Review — one blocker list, one CTA (plan §W7)
+### Final Review — an advisory checklist, one CTA (plan §W7)
 
 `renderers/implementationPlan/FinalReviewCard.tsx` is the Implementation
-Plan's **decision surface**. It replaced the old executive header, which
-rendered **four competing actions** with "Copy next prompt" styled primary
-regardless of blockers, while plan integrity was summarized in four places
-(workspace status, Dependency Graph, Coverage tab, readiness) with no single
-authority.
+Plan's review surface. It replaced the old executive header, which rendered
+**four competing actions** with "Copy next prompt" styled primary, while plan
+integrity was summarized in four places (workspace status, Dependency Graph,
+Coverage tab, readiness) with no single home.
 
-- **Exactly one primary action, always.** The pure, unit-tested state machine
-  `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`) returns one
-  `primary` plus a `secondary` list, in four states:
-
-  | State | Primary label | Source of the label |
-  |---|---|---|
-  | `resolve_blockers` (`!packet.isPacketComplete`) | **Resolve N blockers** | `N = packet.blockers.length` from §W6's `deriveBuildPacketReadiness` |
-  | `approve` (complete, no covering approval) | **Approve build packet** / **Re-approve build packet** | fixed copy; "Re-" when a recorded approval no longer covers the current versions |
-  | `start_build` (complete + covering approval) | **Copy first / next implementation prompt**, else **Start first slice** | the plan's own next-uncopied prompt pack (`findNextPromptPack`) |
-  | `unavailable` (no `packet` — isolated renders only) | **Check build readiness**, disabled | fixed copy |
-
-  **Blockers dominate:** a packet that regressed after approval returns to
-  `resolve_blockers`, and a prior approval never promotes a build action.
-  `resolve_blockers` toggles the ordered blocker list open; each entry shows
-  `title`, `consequence`, `remedy` and a navigable action target.
-- **Copy plan / Review prompts / Convert to tasks are secondary at ALL times**,
-  including when the packet is ready — they live in a demoted "More actions"
-  menu. Copying a prompt before approval stays possible, only never as the
-  primary: every prompt-copy button on the surface (`PromptPackCard`, the
-  Prompts tab's copy-next/copy-all, "Copy milestone prompts") is permanently
-  `variant="secondary"` — approved or not — so `FinalReviewCard` holds the only
-  filled button on any tab. **Prompt review and task conversion are not
-  approvals** — do not wire either to the approval state.
-- **The blocker list and the Dependency Graph can never disagree.** Both derive
+- **Advisory, not a gate.** The card lists §W6's seven packet checks
+  (`packet.criteria`, in `BUILD_PACKET_CRITERION_ORDER`) as a checklist
+  labelled **estimated, advisory**, with a status chip ("N of 7 checks pass ·
+  estimated"). Each open check shows its explanation and every blocker's
+  `title`, `consequence`, `remedy`, and a navigable fix
+  (`buildPacketActionLabel` — e.g. "Open the API contract", "Open this
+  feature"). Warnings render under "Recorded, not counted". Nothing — copying
+  prompts, exporting, converting to tasks — waits on any check.
+- **Exactly one primary action, always the next build step.** The pure,
+  unit-tested `deriveFinalReviewCta` (`src/lib/planning/buildPacketApproval.ts`)
+  returns `primary` (`start_build`: **Copy first / next implementation
+  prompt**, else **Start first slice**, from the plan's own next-uncopied
+  prompt pack, `findNextPromptPack`), a `secondary` list, a `rationale`, the
+  `openCheckCount`, and the `approvalState`
+  (`not_approved` / `approved` / `superseded`). The primary never changes with
+  the checks or the approval.
+- **Approval is an optional sign-off.** **Approve build packet** (or
+  **Re-approve build packet** once a recorded approval no longer covers the
+  current versions) renders beside the primary, marked "(optional)", and is
+  disabled with a stated reason in a read-only project. Approving with open
+  checks is allowed; the overlay records the open check ids it was approved
+  with (`acknowledgedOpenCheckIds`). Once approved the button disappears and a
+  "Packet approved" chip shows; when an output moves the chip reads "Changed
+  since approval".
+- **Review prompts / Convert to tasks (Manage tasks (N)) / Copy plan are
+  secondary at ALL times** — they live in a demoted "More actions" menu. Every
+  prompt-copy button on the surface (`PromptPackCard`, the Prompts tab's
+  copy-next/copy-all, "Copy milestone prompts") is permanently
+  `variant="secondary"`, so `FinalReviewCard` holds the only filled button on
+  any tab. **Prompt review and task conversion are not approvals** — do not
+  wire either to the approval state.
+- **The checklist and the Dependency Graph can never disagree.** Both derive
   from the same engines: §W6 consumes `evaluateProjectFreshness` (rule 9) and
   the graph *is* that engine's output. §W7 introduces no third integrity
   source, and the Dependency Graph stays a **diagnostics** view.
-- **Navigation reuses the readiness router.** `BuildPacketActionTarget` is
-  `ReadinessActionTarget` plus `artifact_slot` and `readiness_commitment`.
-  `isReadinessActionTarget` / `buildPacketNavigationDestination` /
-  `buildPacketActionLabel` (`components/planning/readinessCheckpointView.ts`)
-  split them, and `ProjectWorkspace.navigateBuildPacketTarget` **delegates every
-  shared kind to `navigateReadinessTarget`**. Do not add a second router.
+- **One router.** `BuildPacketActionTarget` has exactly two kinds: an
+  `artifact_slot` (optionally narrowed to `api_contract` / `coverage` /
+  `first_milestone`, or a milestone) and a `feature` in the PRD's Features
+  view. `ProjectWorkspace.navigateBuildPacketTarget` handles both: a slot
+  target opens the Build stage on that slot (threaded through
+  `initialBuildPacketTarget`), a feature target switches the PRD to the
+  Features view on that feature with a "Back to Build" return target. Do not
+  add a second router.
 - **The pinned artifact-version manifest.** `useBuildPacketInputs` returns a
   `manifest: BuildPacketManifestEntry[]` built in the **same** slot → artifact →
-  preferred-version loop as the evaluator's per-slot state, so the gate's
+  preferred-version loop as the evaluator's per-slot state, so the checklist's
   evidence and the manifest the user signs can never describe different
-  versions. `reconcileBuildPacketManifest` compares the pinned versions against
+  versions. The card shows it as the "Artifact versions an approval covers"
+  disclosure. `reconcileBuildPacketManifest` compares the pinned versions against
   the current ones and labels each row `match` / `changed` / `added` /
   `removed` / `unpinned`; any drift marks the approval **superseded** and the
-  CTA asks to re-approve. The approval is never rewritten to "catch up" — that
+  card offers **Re-approve build packet** (still optional). The approval is never rewritten to "catch up" — that
   would silently re-sign work the user never saw. **One row is exempt from
   version comparison:** the slot hosting the overlay
   (`BUILD_PACKET_APPROVAL_HOST_SLOT` = `implementation_plan`). Recording the
@@ -452,11 +481,12 @@ authority.
   `patchDestroysOverlayWork`, so it **appends** and the earlier sign-off stays
   restorable. Because `artifactVersions` is already a persisted collection, the
   approval travels through snapshots, sync, and the recovery bundle for free —
-  **no `ALL_PROJECT_COLLECTIONS` entry** (rule 6). It is deliberately **not**
-  the readiness commitment (`readinessCommitment.ts`), which approves the
-  product *reasoning*: reusing that would conflate the two evaluators §W6 keeps
-  apart, and it cannot pin artifact versions. Regenerating the plan starts a
-  fresh version with no approval — correct, since that is a different packet.
+  **no `ALL_PROJECT_COLLECTIONS` entry** (rule 6). It is deliberately about the
+  *packet* only — it says nothing about the product reasoning, so the two
+  evaluators §W6 keeps apart stay apart (the old reasoning commitment it was
+  once contrasted with was removed with the Finalize layer). Regenerating the
+  plan starts a fresh version with no approval — correct, since that is a
+  different packet.
 - **Capability.** The approval respects one policy: `ArtifactWorkspace` gates
   `onApprove` on `capabilities.canPersistWorkflowState`
   (`useProjectCapabilities`), the store action re-checks through
@@ -464,12 +494,12 @@ authority.
   in a read-only project. No raw demo-id check (rule 5).
 - **§W5's cross-cutting obligations card lives here**, passed in as
   `obligations`, instead of floating above the plan as a sibling in
-  `ArtifactWorkspace` — next to the `cross_cutting` blocker it corresponds to,
+  `ArtifactWorkspace` — next to the `cross_cutting` check it corresponds to,
   so plan integrity has one home. Consequence, accepted: the **legacy markdown
   fallback** (content `buildConsolidatedPlan` cannot parse) no longer shows the
   obligations card, since it renders no Final Review. Stating a cross-cutting
   verdict over content Synapse could not read as a plan would be a guess; the
-  §W6 gate still blocks on it either way.
+  §W6 check still reports it as open either way.
 
 ### Artifact Dependency Graph (Project Map) — read-side integrity view
 
@@ -556,7 +586,7 @@ stale and why, and the safe update order. See
   reusing the same graph-driven `executeJob` path — instead of saving a
   downstream result built from invalid dependency state. Routes only when no run
   is active; an all-healthy plan falls through to the plain single-slot retry.
-- **Workspace wiring rules.** The selection is excluded from the finalize
+- **Workspace wiring rules.** The selection is excluded from the outputs
   auto-open candidates and renders no `StatusDot` (`slotStatusFor` returns a
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/
   `mockup` into the Screens view since neither has its own sidebar row.
@@ -568,14 +598,14 @@ unit-tested) is the artifact-side readiness evaluator from
 [docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md)
 §W6. It answers **"is the implementation packet complete and current?"** — a
 *different* question from `derivePlanningReadiness`'s "is the product reasoning
-sound?". The authority model, the eight criteria, and the never-conflate rule
+sound?". Both are advisory. The seven checks and the never-conflate rule
 live in [PLANNING_AND_DECISIONS.md](PLANNING_AND_DECISIONS.md); what matters
 here is how it sits on the workspace:
 
 - **Required slots are `buildPacketRequiredSlots()` = `visibleCoreSubtypes()` +
-  `mockup`** — deliberately the same set `ProjectWorkspace.assetsReady` gates on,
-  so unhiding/hiding a subtype moves both signals together and the gate can
-  never demand an output the pipeline does not produce. A slot is *present* when
+  `mockup`** — deliberately the same set `ProjectWorkspace.assetsReady` reads,
+  so unhiding/hiding a subtype moves both signals together and the checklist
+  can never demand an output the pipeline does not produce. A slot is *present* when
   it has a preferred version and is neither errored nor still generating;
   presence unions the caller's slot state with the freshness engine's
   `missing` / `error` / `generating` statuses, so a disagreement fails closed.
@@ -593,22 +623,18 @@ here is how it sits on the workspace:
   as a non-blocking warning. Endpoint completeness comes from
   `apiContractCompleteness` and blocks only for endpoints reachable from the
   **first milestone**; a later-slice gap is a warning.
-- **Nothing about it gates rendering or generation.** It is a derived,
-  never-persisted read-side layer (rule 10) that *reports*. Exploratory output
-  generation stays available exactly as before.
-- **Workspace consumers.** The header outputs CTA no longer labels itself
-  "Build outputs" from the planning-readiness projection (the audited false
-  claim); it reads off the recorded commitment
-  (`displaysCurrentCommitment`), and its hover copy states the packet state
-  separately. `PlanningStateBar` renders an "Implementation packet" block with
-  its own "Packet checks" disclosure next to the "Product-reasoning checks"
-  one. The Implementation Plan page's **Final Review** surface (plan §W7 — see
-  "Final Review" above) is the plan-side authority: `ProjectWorkspace` computes
-  the packet **once** and passes it to both `PlanningStateBar` and
-  `ArtifactWorkspace` (`buildPacket` / `buildPacketManifest` /
-  `onNavigateBuildPacketTarget`), so the two surfaces never evaluate
-  independently. `PlanningStateBar` stays the *plan-stage* summary; Final Review
-  owns the CTA and the blocker list, and the Dependency Graph stays diagnostics.
+- **Nothing gates on it** — not rendering, generation, export, task
+  conversion, or prompt copying. It is a derived, never-persisted read-side
+  layer (rule 10) that *reports*.
+- **Workspace consumers.** The header outputs CTA labels the action only
+  ("Generate outputs" / "Review outputs" / "Building outputs…" — never "Build
+  outputs" from the planning-readiness projection, the audited false claim);
+  its hover copy states the packet state separately, labelled estimated. The
+  Implementation Plan page's **Final Review** card (plan §W7 — see "Final
+  Review" above) is the only checklist: `ProjectWorkspace` computes the packet
+  **once** and passes it to `ArtifactWorkspace` (`buildPacket` /
+  `buildPacketManifest` / `onNavigateBuildPacketTarget`). The Plan page shows
+  no packet block, and the Dependency Graph stays diagnostics.
 
 ### Implementation tasks (plan → tracked checklist)
 

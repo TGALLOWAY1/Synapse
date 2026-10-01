@@ -9,8 +9,8 @@
 //   a project id, and a config, they return pruned maps. All store reads happen
 //   in the calling slice's `set((state) => …)` updater, never from a stale
 //   `get()` snapshot.
-// - Pruning is invoked when a new root record (review run / readiness review /
-//   downstream update plan) is appended, plus ONE sweep right after the store
+// - Pruning is invoked when a new root record (review run / downstream update
+//   plan) is appended, plus ONE sweep right after the store
 //   rehydrates from localStorage (`sweepRetentionCollections`, wired in
 //   projectStore's `onRehydrateStorage`) so state that grew past the caps
 //   before the caps existed — or while persistence was failing on quota — can
@@ -24,9 +24,12 @@
 //   issues, plans, proposals, review events, applications, verifications, and
 //   verification events is preserved.
 // - USER AUTHORITY IS NEVER PRUNED. `planningRecords` (the append-only
-//   PlanningRecord/DecisionEvent aggregate) and `readinessCommitmentEvents`
-//   (user commit/reopen authority) have no retention cap at all — they are
-//   user-rate-bounded and load-bearing for the authority model.
+//   PlanningRecord/DecisionEvent aggregate) and the legacy
+//   `readinessCommitmentEvents` (commit/reopen authority recorded by the
+//   removed Finalize checkpoint) have no retention cap at all.
+// - LEGACY READINESS REVIEWS. Nothing appends `readinessReviews` any more (the
+//   Finalize checkpoint was removed); they are capped only by the rehydrate
+//   sweep, keeping every review a legacy commitment event references.
 // - Caps err generous: this is growth-bounding, not aggressive cleanup.
 
 import type {
@@ -151,12 +154,13 @@ export interface ReadinessRetentionCollections {
 }
 
 /**
- * Cap the derived readiness-review checkpoints for one project. Keeps the most
- * recent `limit` reviews (append order) PLUS every review referenced by any
- * commitment event — authorize/commit/reopen events dereference their review by
- * id and validate its integrity, so a committed (or ever-committed) review must
- * stay resident forever. `readinessCommitmentEvents` themselves are user
- * authority and are NEVER pruned; only the reviews map is returned.
+ * Cap the LEGACY readiness-review checkpoints for one project (only the
+ * rehydrate sweep calls this now — nothing appends readiness reviews since the
+ * Finalize checkpoint was removed). Keeps the most recent `limit` reviews
+ * (append order) PLUS every review referenced by any legacy commitment event,
+ * so an old project's commitment history stays internally consistent.
+ * `readinessCommitmentEvents` themselves are NEVER pruned; only the reviews
+ * map is returned.
  */
 export function pruneReadinessReviews(
     collections: ReadinessRetentionCollections,
@@ -266,8 +270,8 @@ export function pruneDownstreamCollections(
 }
 
 /**
- * The review run readiness reviews rely on as the "substantive challenge" of
- * the latest spine: the most recent COMPLETED project-scope run whose manifest
+ * The review run challenge coverage relies on as the "substantive challenge"
+ * of the latest spine: the most recent COMPLETED project-scope run whose manifest
  * targets `latestSpineId`. It is always protected from pruning, even when
  * newer narrow/focus runs push it outside the count window. Shared by the
  * write-time path (`createReviewRun`) and the rehydrate-time sweep so both

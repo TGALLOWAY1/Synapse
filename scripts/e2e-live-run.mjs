@@ -15,7 +15,7 @@
 //
 // MODES
 //   --live   Full flow: home → idea → "Draft a working plan" → real PRD
-//            generation → commit through the readiness gate → asset bundle →
+//            generation → top-bar "Generate outputs" → asset bundle →
 //            full view/tab inventory walk. Requires a Gemini API key in the
 //            SYNAPSE_E2E_GEMINI_KEY or GEMINI_API_KEY env var. The key is
 //            seeded into the browser's localStorage only (same place the app
@@ -165,7 +165,8 @@ const GENERATION_TIMEOUT_MS = (args.timeoutMin || 12) * 60_000;
 const PROGRESS_SHOT_EVERY_MS = 45_000;
 // Downstream asset generation (six active core artifacts + mockup spec) is a
 // much larger token spend than the PRD alone, so it's opt-outable. Default: on
-// in live mode. It requires committing the plan through the readiness gate.
+// in live mode. It starts from the top-bar "Generate outputs" action — there is
+// no commitment step in front of it.
 const GENERATE_ASSETS = args.assets ?? true;
 const INTERACTIONS = args.interactions && MODE === 'live';
 // Every required output a fresh bundle produces. `component_inventory` is a
@@ -497,20 +498,17 @@ const redact = (s) => (GEMINI_KEY ? String(s).replaceAll(GEMINI_KEY, '<gemini-ke
 // Navigation helpers (see the Maintenance list in docs/E2E_LIVE_TESTING.md —
 // selector drift here should be fixed alongside the UI change that caused it)
 //
-// The old 4-stage PipelineStageBar ("Plan:/Challenge:/Explore:/History:") was
-// replaced by the 6-step JourneyRail (nav[aria-label="Product journey"]).
-// Journey buttons' accessible names concatenate "<n> · <status> <label>
-// <description>", and some labels collide with description words ("Review"
-// appears in Finalize's description), so steps are matched by a unique
-// snippet of their sr-only description (source: src/lib/journeyPresentation.ts).
+// The journey rail (nav[aria-label="Product journey"]) is Plan · Decide ·
+// Build. Journey buttons' accessible names concatenate "<n>. <label> [<badge>
+// open items] <description>", and label words recur in other steps'
+// descriptions ("Generate" in Build's, "decisions" in Decide's), so steps are
+// matched by a unique snippet of their sr-only description (source:
+// src/lib/journeyPresentation.ts). Decide opens the Decision Center slide-over.
 // ---------------------------------------------------------------------------
 const JOURNEY_STEP_PATTERNS = {
-    define: /Describe the product/,
-    refine: /challenge its reasoning/,
-    finalize: /record the plan checkpoint/,
-    generate: /implementation outputs/,
-    review: /Inspect generated outputs/,
-    build: /Export the reviewed handoff/,
+    plan: /Shape the working plan/,
+    decide: /Answer open decisions/,
+    build: /Generate, review, and export/,
 };
 
 async function gotoJourneyStep(page, step) {
@@ -521,26 +519,23 @@ async function gotoJourneyStep(page, step) {
 }
 
 // Map the harness's historical stage vocabulary onto the journey rail:
-//   prd → Define (always lands on the Plan surface)
-//   review (Challenge) → Define, then PlanningStateBar's "Challenge this plan"
-//   workspace → Review (enabled once outputs exist; the walk runs post-assets)
+//   prd → Plan (always lands on the PRD surface)
+//   review (Challenge) → Plan, then the one-line PlanningStateBar's
+//     "Challenge this plan" (scoped to the bar: the overflow menu has the
+//     same entry)
+//   workspace → Build (enabled once the plan is a safe structured PRD)
 // History is a slide-over panel now — see the history step below.
 async function gotoStage(page, stage) {
-    if (stage === 'prd') return gotoJourneyStep(page, 'define');
+    if (stage === 'prd') return gotoJourneyStep(page, 'plan');
     if (stage === 'review') {
-        await gotoJourneyStep(page, 'define');
-        // "Challenge this plan" lives inside the PlanningStateBar's collapsed
-        // "Review details and planning tools" <details> — expand it first.
-        const challenge = page.getByRole('button', { name: 'Challenge this plan' });
-        if (!(await challenge.isVisible().catch(() => false))) {
-            await page.getByText('Review details and planning tools').click({ timeout: 6000 });
-            await settle(400);
-        }
-        await challenge.click({ timeout: 6000 });
+        await gotoJourneyStep(page, 'plan');
+        await page.getByRole('region', { name: 'Planning status' })
+            .getByRole('button', { name: 'Challenge this plan' })
+            .click({ timeout: 6000 });
         await settle(800);
         return;
     }
-    if (stage === 'workspace') return gotoJourneyStep(page, 'review');
+    if (stage === 'workspace') return gotoJourneyStep(page, 'build');
     throw new Error(`unknown stage: ${stage}`);
 }
 
@@ -645,7 +640,7 @@ async function captureViews(page, viewport, wantedViews) {
         }, { optional: true });
     }
 
-    // --- Build/Explore workspace artifacts ---------------------------------
+    // --- Build workspace artifacts -------------------------------------------
     const anyArtifact = ['design-system', 'user-flows', 'screens', 'data-model', 'implementation-plan', 'dependency-graph']
         .some((slug) => want(slug));
     if (anyArtifact) {
@@ -1186,14 +1181,14 @@ try {
             // On current builds the visual-direction picker renders INLINE on
             // the Plan stage as soon as the working plan drafts (covering the
             // PRD) — capture it and confirm the recommended preset so the PRD
-            // becomes visible. Older builds only show the picker as a modal
-            // during the commit flow (still handled below), so this is a
+            // becomes visible. Builds that only show the picker as a modal when
+            // outputs are first generated are handled below, so this is a
             // guarded no-op there.
             await step('design preset (inline picker after draft)', async () => {
                 await settle(2500);
                 const picker = page.getByText('Choose your visual direction');
                 if (!(await picker.isVisible().catch(() => false))) {
-                    throw new Error('inline preset picker not shown (older commit-flow-modal build)');
+                    throw new Error('inline preset picker not shown (modal-at-generation build)');
                 }
                 await fullShot(page, 'design-preset-choice');
                 await page.getByRole('button', { name: /^Continue with/ }).click({ timeout: 6000 });
@@ -1205,89 +1200,40 @@ try {
                 await fullShot(page, 'prd-generated');
             });
 
-            // Canned PRD-edit loop BEFORE committing, so it exercises the same
-            // working-plan editing surface a user sees first.
+            // Canned PRD-edit loop BEFORE generating outputs, so it exercises
+            // the same working-plan editing surface a user sees first.
             if (INTERACTIONS) await runPrdEditInteraction(page);
 
             // --- Downstream asset generation -------------------------------------
-            // Committing a plan and generating its build assets (the core-artifact
-            // bundle + mockup spec). This is the expensive tail; --skip-assets stops
-            // after the PRD. The path: top-bar "Review readiness" → ReadinessCheckpoint
-            // (Commit plan, or Proceed-with-accepted-risk for an exploring-phase
-            // working plan) → FinalizationSuccessModal → DesignSystemPresetChoice →
-            // artifactJobController.startAll runs the bundle.
-            const finalizeModalButton = () => page
-                .locator('[aria-labelledby="finalize-success-title"]')
-                .getByRole('button', { name: /Generate build foundation|Explore outputs/ });
+            // Generating the build assets (the core-artifact bundle + mockup
+            // spec). This is the expensive tail; --skip-assets stops after the
+            // PRD. The path: top-bar "Generate outputs" → (the incomplete-PRD
+            // confirmation, only when a PRD section failed) → the one-time
+            // DesignSystemPresetChoice when no visual direction is set yet →
+            // artifactJobController.startAll runs the bundle. There is no
+            // commitment step in front of it.
             let assetsTriggered = false;
             if (GENERATE_ASSETS) {
-                await step('commit plan (readiness checkpoint)', async () => {
-                    // Scoped to the top-bar banner: the journey rail's Finalize
-                    // step also carries "Review readiness" in its accessible
-                    // name (via its description), so an unscoped match is a
-                    // strict-mode violation.
-                    await page.getByRole('banner').getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
-                    await settle(1200);
-                    await fullShot(page, 'readiness-checkpoint');
-                    // "Finalize plan" appears only when the plan is ready-to-build; an
-                    // immediately-generated working plan is in the exploring phase, so
-                    // it takes the "Finalize with accepted risk" override (reveal the
-                    // override section, then rationale + confirm).
-                    const commitReady = page.getByRole('button', { name: 'Finalize plan' });
-                    if (await commitReady.isVisible().catch(() => false)) {
-                        await commitReady.click();
-                    } else {
-                        await page.getByRole('button', { name: 'Finalize with accepted risk' }).click({ timeout: 6000 });
-                        await settle(500);
-                        await page.locator('#readiness-rationale').fill(
-                            'Automated E2E run: committing to exercise the full downstream asset-generation ' +
-                            'flow for visual assessment. Remaining open items are acceptable for this test build.',
-                        );
-                        await fullShot(page, 'readiness-override');
-                        await page.getByRole('button', { name: /^Finalize with \d+ accepted blocker/ }).click({ timeout: 6000 });
-                    }
-                    // Scope to the finalize dialog: once the plan is committed, the
-                    // top-bar green pill ALSO reads "Explore outputs", so an unscoped
-                    // match is a strict-mode violation.
-                    await finalizeModalButton().waitFor({ timeout: 12_000 });
-                    await settle(500);
-                    await fullShot(page, 'finalize-success');
-                }, { optional: true });
-
-                await step('trigger asset generation ("Generate build foundation")', async () => {
-                    await finalizeModalButton().click({ timeout: 8000 });
-                    // Current builds interpose the advisory pre-build checkpoint
-                    // card (PreBuildCheckpointCard: "Before generating: …" with
-                    // Not now / Review first / Generate outputs) whenever planning
-                    // items are still open — which a freshly drafted plan always
-                    // has — and nothing generates until it is answered. Proceed
-                    // through it; builds without the card skip this. waitFor, not
-                    // isVisible: isVisible's `timeout` is ignored and returns at once.
-                    const preBuildGenerate = page
-                        .locator('section[aria-labelledby="pre-build-checkpoint-heading"]')
-                        .getByRole('button', { name: /^Generate outputs$/ });
-                    if (await preBuildGenerate.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) {
-                        await fullShot(page, 'pre-build-checkpoint');
-                        await preBuildGenerate.click({ timeout: 5000 });
+                await step('trigger asset generation ("Generate outputs")', async () => {
+                    // Scoped to the top-bar banner: the Build stage renders its
+                    // own "Generate outputs" banner, and the journey rail's
+                    // Build step mentions "Generate" in its description.
+                    await page.getByRole('banner').getByRole('button', { name: 'Generate outputs' }).click({ timeout: 8000 });
+                    await settle(800);
+                    // The incomplete-PRD gate asks for an explicit acknowledgement
+                    // when a PRD section failed; a clean draft skips it.
+                    const generateAnyway = page.getByRole('button', { name: 'Generate anyway' });
+                    if (await generateAnyway.isVisible().catch(() => false)) {
+                        await fullShot(page, 'incomplete-prd-confirm');
+                        await generateAnyway.click({ timeout: 5000 });
                         await settle(500);
                     }
-                    // The one-time visual-direction picker gates the first bundle. Note
-                    // the app opens it WITHOUT closing the finalize modal, so the
-                    // finalize card sits on top of the picker and intercepts clicks —
-                    // capture that state, then — only if the finalize modal is still
-                    // stacked on top (legacy behavior) — dismiss it so the picker is
-                    // reachable. The app now closes it automatically when the picker
-                    // opens, so this is a guarded no-op on current builds.
+                    // The one-time visual-direction picker gates the first bundle
+                    // when the inline picker above was not confirmed.
                     const preset = page.getByText('Choose your visual direction');
                     if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
                         await fullShot(page, 'design-preset-choice');
-                        const stackedFinalize = page.locator('[aria-labelledby="finalize-success-title"]')
-                            .getByRole('button', { name: 'Keep reviewing the plan' });
-                        if (await stackedFinalize.isVisible().catch(() => false)) {
-                            await stackedFinalize.click().catch(() => {});
-                            await settle(400);
-                        }
-                        // The picker is now a preview grid: click the Modern SaaS card
+                        // The picker is a preview grid: click the Modern SaaS card
                         // to select it (accessible name starts with the label — the
                         // "Continue with…" button starts with "Continue", so the
                         // anchored patterns don't collide), then confirm.

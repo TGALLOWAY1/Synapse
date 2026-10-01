@@ -42,7 +42,7 @@ include the view):
 | Changed under | Affected views |
 |---|---|
 | `src/components/prd/`, `StructuredPRDView`, `SelectionActionDialog`, `BranchList`, `ConsolidationModal` | `prd` |
-| `src/components/review/`, `src/components/planning/` | `challenge` |
+| `src/components/review/`, `src/components/planning/` | `challenge`, plus `prd` for `PlanningStateBar` (the Plan page's one-line bar) |
 | `src/components/experience/`, `src/components/mockups/`, `screen*` libs | `screens` |
 | `src/components/renderers/userFlows/` | `user-flows` |
 | `src/components/renderers/dataModel/`, `DataModelRenderer` | `data-model` |
@@ -69,8 +69,8 @@ npm run e2e:smoke            # no key: boot + form + start-dialog only
   never ask them to paste it into chat or commit it).
 - Auth is the dev-only local bypass (`VITE_DEV_SKIP_AUTH=true`) — no real
   account is involved and nothing syncs to the server.
-- The default live run walks the **whole arc**: idea → PRD → commit through
-  the readiness gate → asset bundle → the full view/tab inventory (PRD
+- The default live run walks the **whole arc**: idea → PRD → top-bar
+  **Generate outputs** (no commitment step) → asset bundle → the full view/tab inventory (PRD
   Overview+Features, Challenge surface findings/history + Decision Center slide-over, every
   artifact including Implementation Plan's four section tabs, Screens
   list→detail Overview/Flow/Mockups, per-flow User Flows shots, History) →

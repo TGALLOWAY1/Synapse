@@ -44,12 +44,26 @@ request…").
   *config* errors (api key / auth / billing / permissions) are re-thrown to the
   normal error path.
 - **UI / downstream gating keys off `SpineVersion.safetyReview.status === 'blocked'`:**
-  `ProjectWorkspace` renders `SafetyReviewView` instead of the PRD,
-  `handleToggleFinal` no-ops, the workspace render guard excludes it, and
-  `artifactJobController.startAll` early-returns — so a blocked spine can never
+  `ProjectWorkspace` renders `SafetyReviewView` instead of the PRD, the
+  outputs CTA is hidden and the journey rail's Decide/Build steps stay inert
+  (`deriveJourneyPresentation`'s `safetyBlocked`), the workspace render guard
+  excludes it (so the Build stage's "Generate outputs" banner never renders),
+  and `artifactJobController.startAll` early-returns — so a blocked spine can never
   drive workspace/screens/architecture/implementation artifacts. Domain types
   (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
   live in `src/types`; the safety module re-exports them.
+- **The incomplete-PRD gate shares that chokepoint**
+  (`evaluateSpineGenerationGate`, `src/lib/artifactGenerationGate.ts`; full
+  detail in UI_PATTERNS.md). After the safety and latest-spine checks, a spine
+  with `generationMeta.failedSections` generates only with an explicit user
+  acknowledgement: the per-run `acknowledgeIncomplete` flag, or the durable
+  `SpineVersion.incompleteAcknowledgedAt` that the same "Generate anyway"
+  confirmation records (`acknowledgeIncompleteSpine`), or a legacy `isFinal`.
+  The durable record is what keeps `resumeIfNeeded`, `regenerateSlots` (Sync
+  outputs, dependency-graph updates) and the design-system early run working
+  for that version after the first run. It is bound to the version and never
+  inherited by a later one, and no acknowledgement can override the safety,
+  latest-spine, or structured-PRD checks.
 
 ### Artifact validation: blocking vs advisory (`src/lib/artifactBlockingValidation.ts`)
 
@@ -123,10 +137,11 @@ API Contract review section's chip in `DataModelRenderer` (which segments the
 data model into Schema → API Contract → Privacy & Security review sections).
 Nothing here gates rendering, generation, or validation, and
 `artifactBlockingValidation.ts` is deliberately untouched (its data_model
-check remains the coarse "has an API surface at all" blocker). **Blocking
-arrives with W6**: the build-packet readiness evaluator will consume this
-module for endpoints reachable from the first slice — it must reuse this
-module's field set rather than re-deriving its own.
+check remains the coarse "has an API surface at all" blocker). The W6
+build-packet readiness evaluator consumes this module for endpoints reachable
+from the first slice and reports an incomplete one as an open, advisory packet
+check (it gates nothing) — it reuses this module's field set rather than
+re-deriving its own.
 
 **Automatic traceability repair — never surface a "no traceability" blocker
 before attempting repair** (`src/lib/artifactTraceabilityRepair.ts`, pure).

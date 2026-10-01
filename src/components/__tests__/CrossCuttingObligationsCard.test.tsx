@@ -138,7 +138,7 @@ describe('CrossCuttingObligationsCard — the compact flag', () => {
         expect(screen.getByText(/PRD requirement: "Must be GDPR compliant"/)).toBeTruthy();
         // Severity is expressed once — the detail points at the blocker list
         // rather than restating the consequence and the remedy.
-        expect(screen.getByText(/Counted in the Final Review blockers above/)).toBeTruthy();
+        expect(screen.getByText(/Listed in Final Review above/)).toBeTruthy();
         expect(screen.queryByText(/Synapse does not fill these in for you/)).toBeNull();
     });
 

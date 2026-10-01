@@ -58,14 +58,15 @@ const ICON_CLASS: Record<ObligationState, string> = {
  *     Decision Center. The named gaps and the trigger evidence stay reachable
  *     behind the same disclosure.
  *
- * SEVERITY IS EXPRESSED ONCE. An unresolved obligation is a build-packet
- * blocker, and §W6's blocker list inside Final Review is the single
- * authoritative statement of that — it carries the consequence, the remedy, and
- * the count that drives the "Resolve N blockers" primary action. This card is a
- * quiet pointer to it, not a second full-volume statement of the same fact: the
- * row stays collapsed by default and the detail says where the severity lives
- * instead of restating it. Nothing here blocks generation or rendering; the
- * gate that blocks reads the same `deriveCrossCuttingObligations` report.
+ * SEVERITY IS EXPRESSED ONCE. An unresolved Security & Privacy obligation is
+ * an open build-packet check (an unresolved Measurement obligation is a
+ * recorded warning — the check is never stricter than the generator), and
+ * Final Review's checklist is the single statement of that: it carries the
+ * consequence, the fix, and the navigable link. This card is a quiet pointer
+ * to it, not a second full-volume statement of the same fact: the row stays
+ * collapsed by default and the detail says where the severity lives instead
+ * of restating it. Nothing here — or in the advisory checklist, which reads
+ * the same `deriveCrossCuttingObligations` report — blocks anything.
  */
 export function CrossCuttingObligationsCard({
     report,
@@ -219,8 +220,8 @@ function ObligationFlag({
                     <p className="text-xs text-neutral-600">{status.reason}</p>
 
                     {/* State 3: the named gaps — a plain list, not a nested panel.
-                        Their severity is stated once, in Final Review's blocker
-                        list; this only says where to find it. */}
+                        Their severity is stated once, in Final Review's
+                        checklist; this only says where to find it. */}
                     {unresolved && status.missing.length > 0 && (
                         <div>
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
@@ -230,8 +231,8 @@ function ObligationFlag({
                                 {status.missing.map((item, i) => <li key={i}>{item}</li>)}
                             </ul>
                             <p className="mt-1.5 text-[11px] text-neutral-500">
-                                Counted in the Final Review blockers above, which state what it
-                                costs and how to close it.
+                                Listed in Final Review above, which says what it costs and how
+                                to close it.
                             </p>
                         </div>
                     )}

@@ -13,10 +13,8 @@ export type WorkflowCheckpointSeverity = 'attention' | 'advisory';
  *                 deferrable critique). Presented as success, not caution.
  * - `attention` — something actually needs the user: a failed/interrupted
  *                 generation slot, a blocking validation issue, an alignment
- *                 state that blocks build readiness, a critique issue to
- *                 resolve before build — or a planning verdict the user
- *                 committed with accepted risks (a knowingly-carried caution
- *                 that must never read as clean).
+ *                 state that blocks build readiness, or a critique issue to
+ *                 resolve before build.
  */
 export type WorkflowCheckpointTone = 'clean' | 'advisory' | 'attention';
 export type WorkflowCheckpointSignalKind =
@@ -63,14 +61,6 @@ export type WorkflowCheckpointCritiqueInput = {
     destination: PlanningDestination;
 };
 
-export type WorkflowCheckpointPlanningVerdict = {
-    kind: 'finalized' | 'working_plan';
-    label: string;
-    acceptedRisks?: string[];
-    rationale?: string;
-    containment?: string;
-};
-
 export type WorkflowCheckpointRow = {
     id: string;
     label: string;
@@ -86,7 +76,6 @@ export type WorkflowCheckpointSummary = {
     supportingText: string;
     /** Label for the collapsed details disclosure, e.g. "1 note". */
     detailsLabel: string;
-    planningVerdict: WorkflowCheckpointPlanningVerdict;
     rows: WorkflowCheckpointRow[];
     counts: {
         totalArtifacts: number;
@@ -99,7 +88,6 @@ export type WorkflowCheckpointSummary = {
 
 export type WorkflowCheckpointSummaryInput = {
     context: WorkflowCheckpointContext;
-    planningVerdict: WorkflowCheckpointPlanningVerdict;
     artifacts: WorkflowCheckpointArtifactInput[];
     critiqueIssues: WorkflowCheckpointCritiqueInput[];
 };
@@ -316,7 +304,7 @@ export function deriveWorkflowCheckpointSummary(
     // reserved for something the user actually has to act on; a run whose only
     // signals are advisory is a success and must read like one.
     const tone: WorkflowCheckpointTone =
-        counts.attentionSignals > 0 || nonEmptyStrings(input.planningVerdict.acceptedRisks).length > 0
+        counts.attentionSignals > 0
             ? 'attention'
             : counts.rowCount > 0
                 ? 'advisory'
@@ -324,7 +312,6 @@ export function deriveWorkflowCheckpointSummary(
     return {
         context: input.context,
         tone,
-        planningVerdict: input.planningVerdict,
         rows,
         counts,
         ...checkpointCopy(input.context, counts),
@@ -337,21 +324,8 @@ export function renderWorkflowCheckpointSummaryMarkdown(
     const lines = [
         '## Workflow Checkpoint',
         '',
-        `**Plan status:** ${summary.planningVerdict.label}`,
-        '',
         summary.supportingText,
     ];
-    if (summary.planningVerdict.rationale) {
-        lines.push('', `**Rationale:** ${summary.planningVerdict.rationale}`);
-    }
-    if (summary.planningVerdict.containment) {
-        lines.push('', `**Containment:** ${summary.planningVerdict.containment}`);
-    }
-    const acceptedRisks = nonEmptyStrings(summary.planningVerdict.acceptedRisks);
-    if (acceptedRisks.length > 0) {
-        lines.push('', '### Accepted planning risks');
-        for (const risk of acceptedRisks) lines.push('', `- ${risk}`);
-    }
     for (const row of summary.rows) {
         lines.push('', `- **${row.label}:** ${row.signals.map(signal => (
             signal.detail ? `${signal.label} — ${signal.detail}` : signal.label

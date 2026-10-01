@@ -9,7 +9,6 @@ const summary: WorkflowCheckpointSummary = {
     headline: 'Generation complete — 1 item to review',
     supportingText: 'Review the combined notes below.',
     detailsLabel: '1 item to review',
-    planningVerdict: { kind: 'working_plan', label: 'Working plan' },
     counts: {
         totalArtifacts: 1,
         readyArtifacts: 0,
@@ -76,7 +75,9 @@ describe('WorkflowCheckpointSummaryCard', () => {
         render(<WorkflowCheckpointSummaryCard summary={summary} onOpen={onOpen} />);
 
         expect(screen.getByRole('region', { name: 'Generation checkpoint' })).toBeTruthy();
-        expect(screen.getByRole('region', { name: 'Generation checkpoint' }).textContent?.match(/Working plan/g)).toHaveLength(1);
+        // No plan verdict chip: the Finalize/commitment layer was removed.
+        expect(screen.getByRole('region', { name: 'Generation checkpoint' }).textContent)
+            .not.toMatch(/Working plan|Plan finalized|accepted risk/i);
         expect(screen.getByText('Validation issue')).toBeTruthy();
         expect(screen.getByText('Validation note')).toBeTruthy();
         fireEvent.click(screen.getByRole('button', { name: 'Review Data Model' }));
@@ -88,57 +89,6 @@ describe('WorkflowCheckpointSummaryCard', () => {
         render(<WorkflowCheckpointSummaryCard summary={summary} onDismiss={onDismiss} />);
         fireEvent.click(screen.getByRole('button', { name: 'Dismiss checkpoint summary' }));
         expect(onDismiss).toHaveBeenCalledTimes(1);
-    });
-
-    it('shows accepted planning risks without describing them as passed validation', () => {
-        render(
-            <WorkflowCheckpointSummaryCard
-                summary={{
-                    ...summary,
-                    planningVerdict: {
-                        kind: 'finalized',
-                        label: 'Proceeding with accepted risk',
-                        acceptedRisks: ['Guest checkout remains deferred.'],
-                        rationale: 'The first release can proceed without it.',
-                        containment: 'Keep account creation reversible.',
-                    },
-                }}
-            />,
-        );
-
-        expect(screen.getByText('Accepted planning risks')).toBeTruthy();
-        expect(screen.getByText('Guest checkout remains deferred.')).toBeTruthy();
-        expect(screen.getByText('The first release can proceed without it.')).toBeTruthy();
-        expect(screen.getByText('Keep account creation reversible.')).toBeTruthy();
-        expect(screen.queryByText(/passed validation/i)).toBeNull();
-    });
-
-    it('does not style an accepted-risk verdict as a clean checkpoint', () => {
-        render(
-            <WorkflowCheckpointSummaryCard
-                summary={{
-                    ...summary,
-                    tone: 'attention',
-                    headline: 'Ready to export',
-                    rows: [],
-                    counts: {
-                        totalArtifacts: 1,
-                        readyArtifacts: 1,
-                        rowCount: 0,
-                        attentionSignals: 0,
-                        advisorySignals: 0,
-                    },
-                    planningVerdict: {
-                        kind: 'finalized',
-                        label: 'Proceeding with accepted risk',
-                        acceptedRisks: ['Guest checkout remains deferred.'],
-                    },
-                }}
-            />,
-        );
-
-        expect(screen.getByRole('region', { name: 'Generation checkpoint' }).className)
-            .toContain('border-amber-200');
     });
 
     it('renders a successful advisory-only run as success, compact, with notes collapsed', () => {

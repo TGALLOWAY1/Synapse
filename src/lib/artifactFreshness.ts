@@ -51,8 +51,8 @@ export interface FreshnessStateSlice {
 export interface FreshnessBuildOptions {
     /**
      * Evaluate as-of a specific spine id instead of the project's `isLatest`
-     * spine. The re-finalize / Update-Assets-plan path uses this to evaluate
-     * against the spine being finalized (which may not yet be the latest).
+     * spine, for a caller that must evaluate against a specific spine (which
+     * may not yet be the latest).
      */
     asOfSpineId?: string;
     /**

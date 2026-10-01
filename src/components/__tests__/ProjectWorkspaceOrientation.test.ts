@@ -13,10 +13,20 @@ const artifactWorkspaceSource = readFileSync(
 
 describe('ProjectWorkspace orientation', () => {
     it('does not render the retired global next-action strip', () => {
-        // The Plan-stage PlanningStateBar ("Working Plan / Your draft is
-        // ready") now owns the next-action guidance, so the redundant
-        // workspace-wide strip was removed.
         expect(workspace).not.toContain('GlobalNextActionStrip');
+    });
+
+    it('has no Finalize / readiness-commitment layer left in the workspace', () => {
+        // Removed: the readiness review modal, commit/authorize/reopen, the
+        // materiality gate, the finalize success modal, the pre-build card,
+        // the assumption arrival card and the sharpen flow.
+        for (const retired of [
+            'ReadinessCheckpoint', 'FinalizationSuccessModal', 'PreBuildCheckpointCard',
+            'AssumptionArrivalCard', 'SharpenPlanFlow', 'createReadinessReview',
+            'commitReadinessReview', 'reopenReadinessCommitment', 'authorizeReadinessCommitment',
+            'deriveMaterialityGateSnapshot', 'handleToggleFinal', 'markSpineFinal',
+            'Review readiness', 'Reopen plan', 'Finalize', 'Explore outputs',
+        ]) expect(workspace).not.toContain(retired);
     });
 
     // `structuredPRD` is truthy after the first streamed section, so the
@@ -44,31 +54,49 @@ describe('ProjectWorkspace orientation', () => {
         expect(handler.slice(0, handler.indexOf('regenerateInFlight.current = true'))).toContain('isPrdEditLocked) return;');
     });
 
-    // Plan §W6: the outputs CTA used to read "Build outputs" off
-    // `planningReadiness.isReadyToBuild`, which answers whether the product
-    // REASONING is sound — never whether the implementation packet is complete.
-    it('never labels the outputs CTA from the planning-readiness projection', () => {
-        const start = workspace.indexOf('{showAssetsPill && (');
-        const cta = workspace.slice(start, workspace.indexOf('</button>', start));
+    // Plan §W6: the outputs CTA states the action only. It never claims build
+    // readiness from the planning projection or the advisory packet report.
+    it('labels the outputs CTA by action — Generate, Review, or Building', () => {
+        const start = workspace.indexOf('const assetsOutputsCtaLabel');
+        const label = workspace.slice(start, workspace.indexOf(';', start));
+        expect(label).toContain("'Building outputs…'");
+        expect(label).toContain("'Review outputs'");
+        expect(label).toContain("'Generate outputs'");
 
-        expect(cta).not.toContain('planningReadiness.isReadyToBuild');
-        expect(cta).toContain("displaysCurrentCommitment ? 'Build outputs' : 'Explore outputs'");
+        const pillStart = workspace.indexOf('{showAssetsPill && (');
+        const pill = workspace.slice(pillStart, workspace.indexOf('</button>', pillStart));
+        expect(pill).not.toContain('planningReadiness.isReadyToBuild');
+        expect(pill).toContain('aria-label={assetsOutputsCtaLabel}');
     });
 
-    it('sources the build-packet gate from the committed checkpoint, not the projection', () => {
+    it('evaluates the advisory build packet from the plan and outputs alone', () => {
         const start = workspace.indexOf('const buildPacketReadiness = deriveBuildPacketReadiness(');
-        const call = workspace.slice(start, workspace.indexOf('});', start));
+        expect(start).toBeGreaterThan(-1);
+        // Only the argument object: the function name itself says "Readiness".
+        const argsStart = workspace.indexOf('({', start);
+        const args = workspace.slice(argsStart, workspace.indexOf('});', argsStart));
 
-        expect(call).toContain('committedReadiness: currentCommittedReadiness');
-        expect(call).toContain('commitmentUnverifiable: isCommitmentUnverifiable');
-        // The live projection is passed ONLY so blocker copy can say whether a
-        // commit action is on offer; the evaluator never treats it as approval.
-        expect(call).toContain('planningProjectionReadyToBuild: planningReadiness.isReadyToBuild');
+        expect(args).toContain('...buildPacketInputs');
+        expect(args).not.toMatch(/commit|readiness|planningProjection|currentSpineVersionId/i);
+    });
+
+    it('offers output generation on the Build stage itself', () => {
+        const bannerStart = workspace.indexOf('{showBuildGenerateBanner && (');
+        const artifactStart = workspace.indexOf('<ArtifactWorkspace');
+        expect(bannerStart).toBeGreaterThan(-1);
+        expect(bannerStart).toBeLessThan(artifactStart);
+        const banner = workspace.slice(bannerStart, artifactStart);
+        expect(banner).toContain('onClick={handleGenerateAssets}');
+        expect(banner).toContain('Generate outputs');
+        const gateStart = workspace.indexOf('const showBuildGenerateBanner');
+        const gate = workspace.slice(gateStart, workspace.indexOf(';', gateStart));
+        expect(gate).toContain('capabilities.canGenerateArtifacts');
+        expect(gate).toContain('!isPrdEditLocked');
     });
 
     it('preserves exact Final Review artifact targets through the workspace renderer', () => {
         const handlerStart = workspace.indexOf('const navigateBuildPacketTarget');
-        const handler = workspace.slice(handlerStart, workspace.indexOf('const handleReadinessConcern', handlerStart));
+        const handler = workspace.slice(handlerStart, workspace.indexOf('const planReturnTarget', handlerStart));
         const artifactStart = workspace.indexOf('<ArtifactWorkspace');
         const artifactProps = workspace.slice(artifactStart, workspace.indexOf('/>', artifactStart));
 
@@ -78,22 +106,70 @@ describe('ProjectWorkspace orientation', () => {
         expect(artifactWorkspaceSource).toContain("initiallyOpen={buildPacketArtifactTarget?.nodeId === 'component_inventory'}");
     });
 
-    it('does not pass global primary props into PlanningStateBar', () => {
+    it('feeds the one-line PlanningStateBar from the planning readiness open items only', () => {
         const start = workspace.indexOf('<PlanningStateBar');
         const props = workspace.slice(start, workspace.indexOf('/>', start));
 
-        expect(props).not.toContain('attention=');
-        expect(props).not.toContain('onOpenAttention=');
-        expect(props).not.toContain('onNextAction=');
+        expect(props).toContain('openItems={planningReadiness.openItems}');
+        expect(props).toContain('onOpenDecisions=');
+        expect(props).not.toMatch(/buildPacket|committed|onReviewReadiness|onStartSharpen|readiness=/);
     });
 
-    it('routes global items through the direct commit-aware dispatcher', () => {
-        const start = workspace.indexOf('const openPlanningAttention');
-        const handler = workspace.slice(start, workspace.indexOf('const handleExport', start));
+    it('presents the journey as Plan · Decide · Build with the open-item badge', () => {
+        const start = workspace.indexOf('const journeyPresentation = deriveJourneyPresentation(');
+        const call = workspace.slice(start, workspace.indexOf('});', start));
+        expect(call).toContain('decisionCenterOpen');
+        expect(call).toContain('openItemCount');
+        expect(call).not.toMatch(/planFinalized|canFinalize|readinessOpen/);
 
-        expect(handler).toContain('dispatchPlanningAttentionItem');
-        expect(handler).toContain('onCommit: handleToggleFinal');
-        expect(handler).toContain('onNavigate:');
+        const handlerStart = workspace.indexOf('const handleJourneyStepChange');
+        const handler = workspace.slice(handlerStart, workspace.indexOf('const headerPlanStatus', handlerStart));
+        expect(handler).toContain("step === 'decide'");
+        expect(handler).toContain('openDecisionCenter()');
+        expect(handler).toContain("setPipelineStage('workspace')");
+    });
+
+    // History Mode selects an old PRD version. The Build stage's retry and
+    // regenerate actions would generate outputs from that old PRD and make
+    // them current, so Build is never presented against a historical spine.
+    it('never presents the Build stage against a historical spine', () => {
+        const journeyStart = workspace.indexOf('const journeyPresentation = deriveJourneyPresentation(');
+        const journeyCall = workspace.slice(journeyStart, workspace.indexOf('});', journeyStart));
+        expect(journeyCall).toContain('viewingHistoricalVersion: isOldVersion');
+
+        const stageStart = workspace.indexOf('const pipelineStage: PipelineStage =');
+        expect(stageStart).toBeGreaterThan(-1);
+        const stage = workspace.slice(stageStart, workspace.indexOf(';', stageStart));
+        expect(stage).toContain('isOldVersion && isOutputPipelineStage(requestedStage)');
+        expect(stage).toContain("? 'prd'");
+
+        // Navigating to an output stage leaves History Mode first.
+        const setterStart = workspace.indexOf('const applyPresentationStage = useCallback(');
+        const setter = workspace.slice(setterStart, workspace.indexOf('}, [', setterStart));
+        expect(setter).toContain('if (isOutputPipelineStage(stage)) setViewedSpineId(null);');
+
+        // The header CTA and the Build-stage banner stay hidden there too.
+        for (const gate of ['const showAssetsPill =', 'const showBuildGenerateBanner =']) {
+            const gateStart = workspace.indexOf(gate);
+            expect(workspace.slice(gateStart, workspace.indexOf(';', gateStart))).toContain('!isOldVersion');
+        }
+    });
+
+    // "Generate anyway" is the durable incomplete-PRD acknowledgement now that
+    // Finalize (and its `isFinal`) is gone: recorded on the spine version,
+    // asked once per version, and offered inline wherever Sync outputs needs it.
+    it('records the incomplete-PRD acknowledgement on the spine version and offers it in Sync outputs', () => {
+        const confirmStart = workspace.indexOf('confirmLabel="Generate anyway"');
+        expect(confirmStart).toBeGreaterThan(-1);
+        const confirm = workspace.slice(confirmStart, workspace.indexOf('</ConfirmDialog>', confirmStart));
+        expect(confirm).toContain('acknowledgeIncompleteSpine(projectId, activeSpine.id)');
+
+        const handlerStart = workspace.indexOf('const handleGenerateAssets');
+        const handler = workspace.slice(handlerStart, workspace.indexOf('const openDecisionCenter', handlerStart));
+        expect(handler).toContain('!isIncompleteAcknowledged(activeSpine)');
+
+        expect(artifactWorkspaceSource).toContain('onAcknowledge: () => acknowledgeIncompleteSpine(projectId, latestSpineId)');
+        expect(artifactWorkspaceSource).not.toContain('Acknowledge the incomplete PRD before regenerating outputs.');
     });
 
     it('keeps critique in Refine while decisions open in the universal slide-over', () => {
@@ -129,24 +205,6 @@ describe('ProjectWorkspace orientation', () => {
         expect(effect).not.toContain('Verification');
     });
 
-    it('shows the advisory pre-build checkpoint inline below the stage rail', () => {
-        const rail = workspace.indexOf('<JourneyRail');
-        const checkpoint = workspace.indexOf('<PreBuildCheckpointCard');
-        const main = workspace.indexOf('{/* Main Workspace Area');
-        const rankingStart = workspace.indexOf('const preBuildAttentionItem');
-        const ranking = workspace.slice(
-            rankingStart,
-            workspace.indexOf('const readinessAuthorization', rankingStart),
-        );
-
-        expect(checkpoint).toBeGreaterThan(rail);
-        expect(checkpoint).toBeLessThan(main);
-        expect(workspace).not.toContain('PreBuildCheckModal');
-        expect(ranking).toContain('planningAttention.primary');
-        expect(ranking).toContain("item.destination.kind !== 'planning_record'");
-        expect(workspace).toContain('openPlanningAttention(preBuildAttentionItem)');
-    });
-
     it('only announces a generation checkpoint after an observed active-to-settled transition', () => {
         const effectStart = workspace.indexOf('const previousAssetJobRef');
         const effectEnd = workspace.indexOf('// Incomplete-PRD generation gate', effectStart);
@@ -167,33 +225,26 @@ describe('ProjectWorkspace orientation', () => {
         expect(workspace).toContain('generationCheckpointDismissal.dismiss(assetJobKey)');
     });
 
-    it('passes one current checkpoint to export without a planning-ready shortcut', () => {
+    it('passes one current checkpoint to export with no gate', () => {
         const start = workspace.indexOf('<ExportModal');
         const modal = workspace.slice(start, workspace.indexOf('/>', start));
 
         expect(modal).toContain('checkpointSummary={exportCheckpointSummary}');
         expect(modal).toContain('onNavigateCheckpoint={openCheckpointDestination}');
-        expect(modal).toContain('buildBlocked={!buildMaterialityGate.canProceed}');
-        expect(modal).not.toContain('planningReady');
+        expect(modal).not.toMatch(/buildBlocked|blockingPlanningItems|planningReady/);
     });
 
-    it('uses only the current trusted commitment and current substantive critique', () => {
-        const verdictStart = workspace.indexOf('const checkpointCommittedReadiness');
-        const verdict = workspace.slice(
-            verdictStart,
-            workspace.indexOf('const checkpointArtifacts', verdictStart),
-        );
+    it('lists only the latest plan\'s current substantive critique in the checkpoint', () => {
+        const start = workspace.indexOf('const checkpointChallenge = planningSourceSpine');
+        const block = workspace.slice(start, workspace.indexOf('const checkpointArtifacts', start));
 
-        expect(verdict).toContain('compareReadinessReviewCurrentness');
-        expect(verdict).toContain('checkpointReadinessReviewInput');
-        expect(verdict).toContain('item.review.spineVersionId === planningSourceSpine?.id');
-        expect(verdict).toContain('checkpointCommittedReadiness?.commitment.activeCommit');
-        expect(verdict).toContain('checkpointCommittedReadiness?.commitment.authorization');
-        expect(verdict).toContain("label: 'Working plan'");
-        expect(verdict).toContain('checkpointStrictChallenge?.substantive?.id');
-        expect(verdict).toContain('checkpointStrictChallenge?.untriagedFindings');
-        expect(verdict).toContain('findingId: finding.id');
-        expect(verdict).toContain('issue.reviewId === currentSubstantiveReviewId');
+        expect(block).toContain('deriveChallengeCoverage');
+        expect(block).toContain('versionId: planningSourceSpine.id');
+        expect(block).toContain('checkpointChallenge?.substantive?.id');
+        expect(block).toContain('checkpointChallenge?.untriagedFindings');
+        expect(block).toContain('findingId: finding.id');
+        expect(block).toContain('issue.reviewId === currentSubstantiveReviewId');
+        expect(block).not.toMatch(/planningVerdict|commitment/);
     });
 
     it('keys session-only workflow state to the project route', () => {
@@ -202,20 +253,10 @@ describe('ProjectWorkspace orientation', () => {
         );
     });
 
-    it('binds an assumption arrival and batch result to the exact latest spine', () => {
-        const summaryStart = workspace.indexOf('const assumptionArrivalSummary');
-        const summary = workspace.slice(
-            summaryStart,
-            workspace.indexOf('// Keep immutable Careful-sync snapshots', summaryStart),
-        );
+    it('still imports PRD assumptions for the latest spine, with no arrival card state', () => {
         const importStart = workspace.indexOf('.importPlanningAssumptions');
-        const importEffect = workspace.slice(
-            workspace.lastIndexOf('useEffect(() =>', importStart),
-            summaryStart,
-        );
-
-        expect(summary).toContain('assumptionArrival.spineVersionId === planningSourceSpine?.id');
-        expect(importEffect).toContain('if (imported.importedAssumptionIds.length)');
-        expect(importEffect).toContain('clearAssumptionBatchResult()');
+        const effect = workspace.slice(workspace.lastIndexOf('useEffect(() =>', importStart), workspace.indexOf(']);', importStart));
+        expect(effect).toContain('planningSourceSpine.id');
+        expect(workspace).not.toContain('setAssumptionArrival');
     });
 });

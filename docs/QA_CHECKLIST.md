@@ -121,6 +121,12 @@ On the **Features** tab:
 
 - [ ] A first-time reader can find the primary user, the core workflow, the
       feature list and the open decisions **without reading the whole page**.
+- [ ] Above the plan sits **one line** of planning state — *N open decisions ·
+      M assumptions to confirm* (or *No open decisions or assumptions*) with
+      **Open Decision Center** and *Challenge this plan* — and nothing else: no
+      readiness card, check lists, or implementation-packet block. Its count
+      matches the journey rail's **Decide** badge and the Decision Center's
+      *Needs attention* tab.
 
 *If a section renders empty:* `src/components/StructuredPRDView.tsx` and the
 section prompts in `src/lib/prompts/prdSectionPrompts.ts`.
@@ -180,30 +186,32 @@ tests** — problems here will only be caught by this section.
 
 ---
 
-## 5. Finalize
+## 5. The journey — Plan · Decide · Build
 
-- [ ] The header **Review readiness** opens the readiness checkpoint.
-- [ ] It lists what is outstanding, and blocking items are distinguishable from
-      advisory ones.
-- [ ] With blockers open, **Finalize with accepted risk** requires a rationale
-      before **Finalize with N accepted blockers** is available.
-- [ ] Finalizing shows the success modal: **one** primary button plus the
-      secondary **Keep reviewing the plan**. The primary button's label depends
-      on the state you finalized from — **Generate build foundation** when the
-      plan was ready to build, **Explore outputs** when you finalized with
-      accepted risk, **Review outputs** if outputs already exist or are
-      building. Only one of the three appears; that is correct, not a missing
-      control.
-- [ ] Finalization is a checkpoint, not a lock — you can still edit the plan
-      afterwards.
-- [ ] It is clear what finalizing actually changed.
+- [ ] The journey rail shows exactly three steps, **Plan · Decide · Build**. No
+      step is labelled "unavailable"; before a plan exists, Decide and Build are
+      simply inert.
+- [ ] **Decide** opens the Decision Center over the current page and carries a
+      badge with the open-item count; closing it returns you where you were.
+- [ ] There is **no** Finalize, *Review readiness*, or *Commit plan* button
+      anywhere, and the header never shows *Plan finalized*, *accepted risk*,
+      or *unverifiable* states. The outputs stage is always called **Build**.
 
 ---
 
 ## 6. Generate outputs
 
-- [ ] **Generate build foundation** → the visual direction picker appears →
-      choose a preset → **Continue with …**.
+- [ ] The top-bar **Generate outputs** (or the **Generate outputs** banner on
+      the Build stage) starts generation straight away — nothing asks you to
+      finalize or commit first, and open decisions do not block it. If no
+      visual direction was chosen yet, the picker appears → choose a preset →
+      **Continue with …**. A plan with a failed section first asks
+      *Generate assets from an incomplete PRD?*. Confirming it is remembered
+      for that version: a reload mid-run resumes, and **Sync outputs** can
+      regenerate without asking again. An unconfirmed incomplete version shows
+      the same confirmation inside **Sync outputs** instead of a dead end, and
+      editing, restoring, or re-running a section asks again while sections
+      are still failed.
 - [ ] All five workspace destinations populate: **Design System**, **User
       Flows**, **Screens**, **Data Model**, **Implementation Plan**. Under the
       hood this means all six active core outputs — including **Component
@@ -234,26 +242,30 @@ Then check each output is usable:
 - [ ] **Implementation Plan** — the **Final Review** card renders above the tab
       strip with **exactly one** primary action, and the three tabs **Build
       Brief / Roadmap / Prompts** all render with content.
-- [ ] **Final Review's** primary action matches the state: *Resolve N blockers*
-      (expands the ordered blocker list, each entry navigating somewhere real),
-      *Approve build packet*, or *Copy first implementation prompt* once
-      approved. Copy plan / Review prompts / Convert to tasks stay inside
-      **More actions** in all three states.
-- [ ] The eight build-packet criteria appear in order and agree with their
-      evidence: **Required outputs generated**, **Packet inputs current**,
-      **Output validation clear**, **In-scope requirements covered**,
-      **First-slice API contracts complete**, **Cross-cutting obligations
-      discharged**, **First slice is executable**, **Product reasoning
-      committed**.
-- [ ] Every blocker action lands on the named destination, including **API
-      Contract**, the expanded **Traceability matrix**, the requested first
-      milestone, and the hosted **Components** section.
-- [ ] A project with privacy/safety or success-metric triggers requires the
-      matching **Security & Privacy** or **Measurement** obligation; a project
-      with no trigger omits it without inventing a blocker.
-- [ ] **Artifact versions this approval covers** lists every output; after
-      regenerating one, that row reads *Changed since approval* and the CTA asks
-      to re-approve.
+- [ ] **Final Review's** primary action is always the next build step —
+      *Copy first implementation prompt* (then *Copy next…*), or *Start first
+      slice* — whatever the checks say. **Approve build packet** sits beside it
+      marked *(optional)* and works with checks still open. Copy plan / Review
+      prompts / Convert to tasks stay inside **More actions**.
+- [ ] The seven packet checks appear in order, labelled *estimated, advisory*,
+      and agree with their evidence: **Required outputs generated**, **Packet
+      inputs current**, **Output validation clear**, **In-scope requirements
+      covered**, **First-slice API contracts complete**, **Cross-cutting
+      obligations discharged**, **First slice is executable**. There is no
+      *Product reasoning committed* check, and nothing (copying, export,
+      Convert to tasks) waits on an open one.
+- [ ] Every open check's fix link lands on the named destination, including
+      **API Contract**, the expanded **Traceability matrix**, the requested
+      first milestone, the hosted **Components** section, and a requirement in
+      the PRD **Features** view (with *Back to Build*).
+- [ ] A project with privacy/safety triggers lists an open **Security &
+      Privacy** check; a success-metric trigger with no **Measurement** section
+      shows up under *Recorded, not counted*; a project with no trigger omits
+      both without inventing a check.
+- [ ] **Artifact versions an approval covers** lists every output; after
+      approving and then regenerating one, that row reads *Changed since
+      approval* and the card offers *Re-approve build packet* (still
+      optional).
 - [ ] **Traceability matrix** (inside Final Review) actually links work back to
       features and screens; it is not empty.
 - [ ] Tasks state objective completion conditions. Flag vague ones — *"improve
@@ -294,6 +306,12 @@ engine), `src/components/downstream/`.
 - [ ] Restoring an earlier version **appends** a new version — the history is
       not rewound and nothing is deleted.
 - [ ] Work done after the restored point is still reachable in history.
+- [ ] Viewing an older version (Plan → **Timeline** → a past version) is
+      read-only: the journey's **Build** step is inert, and anything that opens
+      the outputs (e.g. **Continue to Build**) returns to the latest version
+      first — no output can be regenerated from the old PRD.
+- [ ] After restoring, an update plan for an affected output reads
+      *Confirmed source change*, not *provisional*.
 - [ ] Overflow menu → **Project History** shows the event timeline.
 
 Interrupt a generation (reload the page mid-run):
@@ -329,9 +347,9 @@ the real reload, which those tests simulate.
 
 ## 9. Handoff
 
-- [ ] With a blocking decision still open, **Export** shows *"Finalize blocking
-      decisions before export"* and points at the checkpoint.
-- [ ] Resolve it; export unblocks.
+- [ ] With decisions still open, **Export** is fully available — no plan
+      checkpoint, and no *Plan finalized* / *Working plan* status line; the
+      checkpoint summary lists notes only.
 - [ ] **Export Full Bundle** downloads and the markdown is complete and
       readable.
 - [ ] **Export Structured JSON** downloads and parses.

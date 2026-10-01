@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Copy, Files,
-    History, Package, ShieldCheck, XCircle,
+    AlertTriangle, ArrowRight, Check, CheckCircle2, ChevronDown, Circle, Copy, Files,
+    History, Package, ShieldCheck,
 } from 'lucide-react';
 import type { ConsolidatedImplementationPlan } from '../../../types';
 import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
@@ -12,9 +12,10 @@ import {
     buildCoverageMatrix,
     type OrderedPromptPack,
 } from '../../../lib/services/implementationPlanInsights';
-import type {
-    BuildPacketActionTarget,
-    BuildPacketReadiness,
+import {
+    buildPacketActionLabel,
+    type BuildPacketActionTarget,
+    type BuildPacketReadiness,
 } from '../../../lib/planning/buildPacketReadiness';
 import {
     reconcileBuildPacketManifest,
@@ -29,7 +30,6 @@ import type {
     CrossCuttingObligationsReport,
 } from '../../../lib/planning/crossCuttingObligations';
 import type { FlagPlanningConcernResult } from '../../../lib/planning/flagToPlan';
-import { buildPacketActionLabel } from '../../planning/readinessCheckpointView';
 import { CrossCuttingObligationsCard } from '../../artifacts/CrossCuttingObligationsCard';
 import { CoverageTab } from './CoverageTab';
 
@@ -39,7 +39,7 @@ import { CoverageTab } from './CoverageTab';
  * the renderer chain does not grow eight parameters.
  */
 export interface PlanFinalReviewContext {
-    /** §W6's build-packet evaluation. Absent → the `unavailable` CTA state. */
+    /** §W6's advisory build-packet evaluation. Absent → no checklist. */
     packet?: BuildPacketReadiness;
     /** The CURRENT artifact-version manifest, from `useBuildPacketInputs`. */
     manifest?: BuildPacketManifestEntry[];
@@ -47,9 +47,9 @@ export interface PlanFinalReviewContext {
     approval?: BuildPacketApprovalOverlay | null;
     /** Capability-gated (`canPersistWorkflowState`); false in a demo project. */
     canApprove?: boolean;
-    /** Records the approval. Omitted when the project cannot persist. */
+    /** Records the optional sign-off. Omitted when the project cannot persist. */
     onApprove?: () => void;
-    /** Routes a blocker's action target through the existing readiness router. */
+    /** Opens the fix for a packet check (an artifact slot or a PRD feature). */
     onNavigateTarget?: (target: BuildPacketActionTarget) => void;
     /** §W5's cross-cutting obligations report, folded in here (see below). */
     obligations?: CrossCuttingObligationsReport;
@@ -72,8 +72,7 @@ interface Props {
     /**
      * The resolved CTA. Derived ONCE by `ConsolidatedPlanView` (via
      * `deriveFinalReviewCta`) and passed in, so the plan surface's prompt-copy
-     * emphasis and this card's primary action can never disagree about whether
-     * the packet is approved.
+     * emphasis and this card's primary action can never disagree.
      */
     cta: FinalReviewCta;
     /** "Version 2" — the PRD version this plan was generated from. */
@@ -93,11 +92,6 @@ interface Props {
     initialSection?: 'coverage';
 }
 
-const STATUS_STYLE = {
-    complete: { icon: CheckCircle2, cls: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
-    incomplete: { icon: XCircle, cls: 'bg-amber-50 border-amber-200 text-amber-800' },
-} as const;
-
 const DRIFT_CHIP: Record<BuildPacketManifestRow['drift'], { label: string; cls: string }> = {
     unpinned: { label: 'Not approved yet', cls: 'bg-neutral-50 text-neutral-500 border-neutral-200' },
     match: { label: 'Approved', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -107,28 +101,23 @@ const DRIFT_CHIP: Record<BuildPacketManifestRow['drift'], { label: string; cls: 
 };
 
 /**
- * FINAL REVIEW — the Implementation Plan's decision surface (plan §W7).
+ * FINAL REVIEW — the Implementation Plan's review surface (plan §W7).
  *
- * Replaces the old executive header's FOUR competing actions (Copy next prompt
- * styled primary regardless of blockers, Review prompts, Convert to tasks, Copy
- * plan) with a state machine that promotes EXACTLY ONE primary action:
+ * ADVISORY, NOT A GATE. The build-packet checks (§W6) are an estimated,
+ * derived report: the card lists them as a checklist with a navigable fix per
+ * open check, and nothing — copying prompts, exporting, converting to tasks —
+ * waits on them. Exactly one primary action, always the next build step
+ * (copy the next implementation prompt). "Approve build packet" is an
+ * OPTIONAL sign-off that pins the current artifact versions and reports
+ * "changed since approval" when an output moves; it is never required.
  *
- *   not ready  → "Resolve N blockers"  (N from §W6's blocker list)
- *   ready      → "Approve build packet" (the ONE genuine approval)
- *   approved   → "Copy first implementation prompt" / "Start first slice"
- *
- * Copy plan, Review prompts and Convert to tasks are secondary at ALL times,
- * including when the packet is ready — copying a prompt before approval stays
- * possible, but only from the clearly-demoted "More actions" menu.
- *
- * ONE SOURCE FOR INTEGRITY. The blocker list is §W6's `packet.blockers`
- * verbatim, in its criterion order, and §W6 consumes `evaluateProjectFreshness`
- * — the same engine the Dependency Graph reads — so the two can never disagree.
- * The Coverage tab's gap summary is folded in below and its full traceability
- * matrix survives as an expandable detail; the Dependency Graph stays as
- * diagnostics. §W5's cross-cutting obligations card renders here too, next to
- * the blocker its `cross_cutting` criterion raises, instead of floating above
- * the plan as a sibling card.
+ * ONE SOURCE FOR INTEGRITY. The checklist is §W6's `packet.criteria` /
+ * `packet.blockers` verbatim, in criterion order, and §W6 consumes
+ * `evaluateProjectFreshness` — the same engine the Dependency Graph reads — so
+ * the two can never disagree. The Coverage tab's gap summary is folded in
+ * below and its full traceability matrix survives as an expandable detail.
+ * §W5's cross-cutting obligations card renders here too, next to the
+ * `cross_cutting` check it corresponds to.
  */
 export function FinalReviewCard({
     plan,
@@ -146,22 +135,19 @@ export function FinalReviewCard({
     onOpenRoadmap,
     initialSection,
 }: Props) {
-    const [blockersOpen, setBlockersOpen] = useState(false);
     const [copied, setCopied] = useState(false);
     const packet = context?.packet;
     const manifestEntries = context?.manifest ?? [];
     const approval = context?.approval ?? null;
 
     const reconciliation = reconcileBuildPacketManifest(approval, manifestEntries);
-    const status = packet ? STATUS_STYLE[packet.status] : undefined;
-    const StatusIcon = status?.icon;
     const isStale = isStaleStatus(staleness);
+    const passingCount = packet?.criteria.filter(criterion => !criterion.blocking).length ?? 0;
+    const approveAction = cta.secondary.find(action => action.id === 'approve');
+    const menuActions = cta.secondary.filter(action => action.id !== 'approve');
 
     const runPrimary = () => {
         if (cta.primary.disabled) return;
-        if (cta.primary.id === 'resolve_blockers') return setBlockersOpen(open => !open);
-        if (cta.primary.id === 'approve') return context?.onApprove?.();
-        if (cta.primary.id !== 'start_build') return;
         if (!nextPack) return onOpenRoadmap();
         void copyToClipboard(promptPackToClipboardText(nextPack.pack)).then(ok => {
             if (!ok) return;
@@ -172,12 +158,12 @@ export function FinalReviewCard({
     };
 
     const runSecondary = (action: FinalReviewAction) => {
+        if (action.disabled) return;
+        if (action.id === 'approve') return context?.onApprove?.();
         if (action.id === 'review_prompts') return onOpenPrompts();
         if (action.id === 'convert_tasks') return onConvertToTasks?.();
         if (action.id === 'copy_plan') void copyToClipboard(planMarkdown);
     };
-
-    const primaryCopied = copied && cta.primary.id === 'start_build';
 
     return (
         <section
@@ -191,24 +177,35 @@ export function FinalReviewCard({
                         Final Review
                     </h2>
                     <p className="text-[11px] text-neutral-500 mt-1">
-                        The last check before this packet is handed to a build.
+                        A last look before this packet goes to a build. The checks are estimated and advisory.
                         {prdVersionLabel && <span> Generated from PRD {prdVersionLabel}.</span>}
                     </p>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
-                    {packet && status && StatusIcon && (
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${status.cls}`}>
-                            <StatusIcon size={11} /> {packet.headline}
+                    {packet && (
+                        <span
+                            data-testid="final-review-status"
+                            className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                                packet.isPacketComplete
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                    : 'bg-neutral-50 border-neutral-200 text-neutral-700'
+                            }`}
+                        >
+                            {packet.isPacketComplete ? <CheckCircle2 size={11} aria-hidden="true" /> : <Circle size={11} aria-hidden="true" />}
+                            {packet.isPacketComplete
+                                ? 'All checks pass'
+                                : `${passingCount} of ${packet.criteria.length} checks pass`}
+                            <span className="font-normal opacity-75">· estimated</span>
                         </span>
                     )}
-                    {approval && !cta.supersededApproval && (
+                    {cta.approvalState === 'approved' && (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-800">
                             <Check size={11} /> Packet approved
                         </span>
                     )}
-                    {cta.supersededApproval && (
+                    {cta.approvalState === 'superseded' && (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-800">
-                            <History size={11} /> Approval superseded
+                            <History size={11} /> Changed since approval
                         </span>
                     )}
                     {isStale && (
@@ -219,7 +216,7 @@ export function FinalReviewCard({
                 </div>
             </div>
 
-            {/* --- The ONE primary action, plus the demoted menu -------------- */}
+            {/* --- The ONE primary action, the optional sign-off, the menu ---- */}
             <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 space-y-2">
                 <p className="flex items-start gap-1.5 text-xs text-indigo-900">
                     <ArrowRight size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -229,24 +226,36 @@ export function FinalReviewCard({
                     <button
                         type="button"
                         data-testid="final-review-primary"
-                        data-cta-state={cta.state}
                         data-cta-action={cta.primary.id}
                         onClick={runPrimary}
                         disabled={cta.primary.disabled}
-                        aria-expanded={cta.primary.id === 'resolve_blockers' ? blockersOpen : undefined}
                         title={cta.primary.disabledReason}
                         className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-neutral-300 disabled:text-neutral-600"
                     >
-                        {cta.primary.id === 'start_build' && (primaryCopied ? <Check size={14} /> : <Copy size={14} />)}
-                        {primaryCopied ? 'Copied' : cta.primary.label}
+                        {nextPack && (copied ? <Check size={14} /> : <Copy size={14} />)}
+                        {copied ? 'Copied' : cta.primary.label}
                     </button>
+                    {approveAction && (
+                        <button
+                            type="button"
+                            data-testid="final-review-approve"
+                            onClick={() => runSecondary(approveAction)}
+                            disabled={approveAction.disabled}
+                            title={approveAction.disabledReason}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+                        >
+                            <Check size={13} aria-hidden="true" />
+                            {approveAction.label}
+                            <span className="font-normal text-indigo-700/70">(optional)</span>
+                        </button>
+                    )}
                     <details className="group relative">
                         <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50">
                             <ChevronDown size={13} className="transition group-open:rotate-180" aria-hidden="true" />
                             More actions
                         </summary>
                         <div className="mt-2 flex flex-wrap gap-2">
-                            {cta.secondary.map(action => (
+                            {menuActions.map(action => (
                                 <button
                                     key={action.id}
                                     type="button"
@@ -260,11 +269,11 @@ export function FinalReviewCard({
                             ))}
                         </div>
                     </details>
-                    {cta.primary.disabledReason && (
-                        <p className="text-[11px] text-neutral-600">{cta.primary.disabledReason}</p>
+                    {approveAction?.disabledReason && (
+                        <p className="text-[11px] text-neutral-600">{approveAction.disabledReason}</p>
                     )}
                 </div>
-                {approval && !cta.supersededApproval && (
+                {approval && cta.approvalState === 'approved' && (
                     <p className="text-[11px] text-indigo-900/70">
                         Approved {new Date(approval.approvedAt).toLocaleString()} · covers{' '}
                         {reconciliation.rows.filter(row => row.approvedVersionId).length} artifact
@@ -273,46 +282,68 @@ export function FinalReviewCard({
                 )}
             </div>
 
-            {/* --- The one blocker list (§W6, in criterion order) ------------- */}
-            {packet && !packet.isPacketComplete && blockersOpen && (
-                <ol data-testid="final-review-blockers" className="space-y-2">
-                    {packet.blockers.map((blocker, index) => (
-                        <li
-                            key={blocker.id}
-                            data-testid="final-review-blocker"
-                            data-criterion={blocker.criterionId}
-                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5"
-                        >
-                            <p className="flex items-start gap-1.5 text-sm font-semibold text-amber-950">
-                                <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-300 bg-white text-[10px] font-bold text-amber-800">
-                                    {index + 1}
-                                </span>
-                                {blocker.title}
-                            </p>
-                            <p className="mt-1 text-xs leading-5 text-amber-900">{blocker.consequence}</p>
-                            <p className="mt-1 text-xs leading-5 text-amber-900">
-                                <span className="font-semibold">Next: </span>{blocker.remedy}
-                            </p>
-                            {context?.onNavigateTarget && (
-                                <button
-                                    type="button"
-                                    data-testid="final-review-blocker-action"
-                                    onClick={() => context.onNavigateTarget?.(blocker.actionTarget)}
-                                    className="mt-1.5 inline-flex min-h-9 items-center gap-1 text-xs font-semibold text-amber-900 underline decoration-amber-400 underline-offset-4 hover:decoration-amber-700"
+            {/* --- The packet checklist (§W6, in criterion order) ------------- */}
+            {packet && (
+                <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
+                        Packet checks <span className="font-normal normal-case tracking-normal">· estimated, advisory</span>
+                    </p>
+                    <ol data-testid="final-review-checks" className="mt-1.5 space-y-1.5">
+                        {packet.criteria.map(criterion => {
+                            const open = criterion.blocking;
+                            const criterionBlockers = packet.blockers.filter(blocker => blocker.criterionId === criterion.id);
+                            return (
+                                <li
+                                    key={criterion.id}
+                                    data-testid="final-review-check"
+                                    data-criterion={criterion.id}
+                                    data-open={open ? 'true' : 'false'}
+                                    className={`rounded-lg border px-3 py-2 ${open ? 'border-amber-200 bg-amber-50/60' : 'border-neutral-200'}`}
                                 >
-                                    {buildPacketActionLabel(blocker.actionTarget)} <ArrowRight size={12} aria-hidden="true" />
-                                </button>
-                            )}
-                        </li>
-                    ))}
-                </ol>
+                                    <p className="flex items-start gap-1.5 text-sm font-medium text-neutral-900">
+                                        {open
+                                            ? <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
+                                            : criterion.status === 'met'
+                                                ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden="true" />
+                                                : <Circle size={14} className="mt-0.5 shrink-0 text-neutral-400" aria-hidden="true" />}
+                                        <span className="min-w-0">{criterion.label}</span>
+                                    </p>
+                                    {open && (
+                                        <>
+                                            <p className="mt-0.5 pl-5 text-xs leading-5 text-neutral-700">{criterion.explanation}</p>
+                                            <ul className="mt-1 space-y-1.5 pl-5">
+                                                {criterionBlockers.map(blocker => (
+                                                    <li key={blocker.id} data-testid="final-review-blocker" className="text-xs leading-5 text-neutral-800">
+                                                        <span className="font-semibold">{blocker.title}</span>
+                                                        <span className="text-neutral-600"> — {blocker.consequence}</span>
+                                                        <span className="block text-neutral-600"><span className="font-semibold">Fix: </span>{blocker.remedy}</span>
+                                                        {context?.onNavigateTarget && (
+                                                            <button
+                                                                type="button"
+                                                                data-testid="final-review-blocker-action"
+                                                                onClick={() => context.onNavigateTarget?.(blocker.actionTarget)}
+                                                                className="mt-0.5 inline-flex min-h-9 items-center gap-1 font-semibold text-amber-900 underline decoration-amber-400 underline-offset-4 hover:decoration-amber-700"
+                                                            >
+                                                                {buildPacketActionLabel(blocker.actionTarget)} <ArrowRight size={12} aria-hidden="true" />
+                                                            </button>
+                                                        )}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ol>
+                </div>
             )}
 
-            {/* Warnings are recorded, never counted as blockers (§W6). */}
+            {/* Warnings are recorded, never counted as open checks (§W6). */}
             {packet && packet.warnings.length > 0 && (
                 <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
-                        Recorded, not blocking
+                        Recorded, not counted
                     </p>
                     <ul className="mt-1 space-y-1">
                         {packet.warnings.map(warning => (
@@ -330,7 +361,7 @@ export function FinalReviewCard({
                 <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 text-sm font-semibold text-neutral-800">
                     <ChevronDown size={15} className="transition group-open:rotate-180" aria-hidden="true" />
                     <Package size={14} className="shrink-0 text-neutral-400" aria-hidden="true" />
-                    Artifact versions this approval covers
+                    Artifact versions an approval covers
                     {reconciliation.unpinned ? (
                         <span className="text-xs font-medium text-neutral-500">(nothing approved yet)</span>
                     ) : reconciliation.driftCount > 0 ? (
@@ -382,16 +413,16 @@ export function FinalReviewCard({
                         </ul>
                     )}
                     <p className="mt-2 text-[11px] text-neutral-500">
-                        An approval pins these exact versions. Regenerating an output does not move the
-                        approval forward — it is reported as changed, and the packet needs re-approving.
+                        Approving is optional. It pins these exact versions; regenerating an output does not move
+                        the approval forward — it is reported as changed since approval.
                     </p>
                 </div>
             </details>
 
             {/* --- §W5's conditional cross-cutting obligations ----------------
-                A COMPACT FLAG, not a second blocker panel: the blocker list
-                above is the one authoritative statement of severity, and the
-                flag points at it. See CrossCuttingObligationsCard. */}
+                A COMPACT FLAG, not a second panel: the checklist above is the
+                one statement of severity, and the flag points at it. See
+                CrossCuttingObligationsCard. */}
             {context?.obligations && (
                 <CrossCuttingObligationsCard
                     report={context.obligations}

@@ -58,23 +58,15 @@ export interface HeaderPlanStatusInput {
     clarifying: boolean;
     /** A PRD run is in flight — see isPrdRunInFlight. */
     generating: boolean;
-    commitmentUnverifiable: boolean;
-    displaysCurrentCommitment: boolean;
-    legacyCommitted: boolean;
-    /** The current commitment was recorded for a `not_ready` review. */
-    acceptedRisk: boolean;
 }
 
-/** The workspace header badge's plan status ("Version N · <status>"). */
+/** The workspace header badge's plan status ("Version N · <status>"). There
+ * is no committed/finalized state: the plan is always a working plan, and
+ * outputs are generated from it directly. */
 export function deriveHeaderPlanStatus(input: HeaderPlanStatusInput): string {
     if (input.blocked) return 'Blocked';
     if (input.generationFailed) return 'Generation failed';
     if (input.clarifying) return 'Clarifying…';
     if (input.generating) return 'Generating…';
-    if (input.commitmentUnverifiable) return 'Readiness unavailable';
-    if (input.displaysCurrentCommitment) {
-        if (input.legacyCommitted) return 'Legacy commitment · readiness not recorded';
-        return input.acceptedRisk ? 'Proceeding with accepted risk' : 'Plan committed';
-    }
     return 'Working plan';
 }

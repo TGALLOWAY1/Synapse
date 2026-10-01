@@ -46,7 +46,7 @@ interface Props {
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
-    /** Exact review segment requested by a Final Review blocker. */
+    /** Exact review segment requested by a Final Review check's fix link. */
     initialSection?: 'api_contract';
 }
 

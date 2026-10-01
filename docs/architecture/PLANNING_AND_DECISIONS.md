@@ -4,10 +4,18 @@
 
 ### Uncertainty-first planning, adversarial review, and Decision Center
 
-The user-facing workspace progression is **Define → Refine → Finalize →
-Generate → Review → Build**. This is a presentation projection over the
-existing persisted stage keys: Plan and Challenge both belong to Refine,
-Finalize is the readiness checkpoint, and project history opens as a panel.
+The user-facing workspace journey is **Plan · Decide · Build**
+(`src/lib/journeyPresentation.ts`, rendered by `JourneyRail`). It is a
+presentation projection over the existing persisted stage keys: the PRD
+(`prd`) and the Challenge stage (`review`) both present as **Plan**; **Decide**
+opens the Decision Center slide-over and carries the open-item badge
+(`planningReadiness.openItems` — open decisions plus assumptions to confirm);
+the outputs stage (`workspace`) is always **Build**. There is no Finalize /
+commitment step and no "unavailable" state: a step with nothing to show yet
+(Decide and Build before a safe structured plan exists) is simply inert, and
+Build is also inert while a historical PRD version is selected (History Mode
+is a read-only Plan view; see VERSIONING_AND_EXPORT.md). Project history opens
+as a panel.
 The **Decision Center is a universal slide-over** that preserves the originating
 surface and exact return context; it is also available from the workspace
 overflow menu. The Refine review surface opens on a **tab-free specialist
@@ -23,9 +31,9 @@ are open. Those surfaces show one quiet advisory — “N open items; critiquing
 may re-raise them” — rather than disabling the action or bulk-deferring records.
 The Decision Center layer, critique history, and completed runs stay visible
 throughout.
-A completed critique's findings still promote into new planning records. When
-open decisions remain, the global attention action opens the exact Decision
-Center record without changing the underlying stage.
+A completed critique's findings still promote into new planning records. The
+Decide step and the Plan page's **Open Decision Center** open the Decision
+Center over the current surface without changing the underlying stage.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
@@ -46,72 +54,74 @@ impact previews / the write-barrier apply path in
   planning readiness. **It answers "is the product reasoning sound?" and
   nothing else** — do not widen it to look at artifacts; that is the separate
   build-packet evaluator's job (see "Two readiness evaluators" below).
-- `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
-  current readiness category, supporting criteria, and the three planning tools
-  as an always-visible, ordered set — Decision Center (settle open choices /
-  confirm scope) → Challenge this plan (stress-test once coherent) → Review
-  readiness (final check before build) — each carrying a plain-language
-  "when to use" cue so the order of operations is legible rather than three
-  equal buried links. The unconfirmed `scope` criterion links directly to the
-  Features view (`onOpenFeatures` → `?prdView=features`); the 7-criterion
-  breakdown stays behind a collapsed "Readiness checks" disclosure.
-- The Plan-stage `PlanningStateBar` owns next-action guidance; there is no
-  separate workspace-wide strip. (A `GlobalNextActionStrip` previously echoed
-  the top ranked attention item below the stage rail, but it duplicated what
-  `PlanningStateBar` already surfaces through its ordered tool cards and
-  readiness checks, so it was removed.) `derivePlanningAttention` still ranks
-  one primary and a small secondary set — every item carries an exact
-  destination plus return target — but it now feeds only the internal
-  `PreBuildCheckpointCard` gate (`preBuildAttentionItem`) and
-  `dispatchPlanningAttentionItem`, not a persistent banner. Do not re-add a
-  standalone aggregate open-item counter surface.
-  - **Presentation is invitation-first, never default-alarm**
-    (`planningOverviewPresentation.ts`, pure). Every fresh PRD lands in
-    `needs_decisions` (imported assumptions open + scope unconfirmed), so that
-    phase alone renders as a **calm** "Your draft is ready" card; the amber
-    caution treatment is reserved for genuine regressions (`conflictCount > 0`
-    or changed sources). This is presentation only — readiness authority,
-    phases, and persisted enums are untouched. Do not re-add amber as the
-    default first-run state, problem-counter stat tiles, or a
-    "no news" downstream tile (the Downstream alignment tile renders only when
-    the alignment criterion has a real signal).
-  - **The guided sharpen flow** (`SharpenPlanFlow.tsx` +
-    `deriveAnswerableAssumptionRecords` in `planningAttention.ts`) is the calm
-    card's dominant action when open material assumptions exist: one
-    plain-language question per assumption ("Synapse assumed … Does this match
-    your reality?") with Sounds right / Not quite — correct it / Not sure yet
-    chips. Verdicts flow through `useDecisionImpactActions.handleDecisionAction`
-    — the exact append-only, user-only DecisionEvent path the Decision Center
-    uses (confirm = statement as recorded answer, correction = premise_rejected,
-    Not sure = deferred). No new persisted state; the queue is frozen at open so
-    answering never reshuffles remaining questions. Elicitation vocabulary rule:
-    on the Plan overview, never use "validate", "unresolved", "assumption", or
-    "downstream alignment" in primary text — that vocabulary stays inside the
-    Decision Center, where the attention item's action label is now "Answer
-    this question".
+- `PlanningStateBar` is the Plan stage's **one line** of planning state:
+  "N open decisions · M assumptions to confirm" (or "No open decisions or
+  assumptions"), read from `derivePlanningReadiness(...).openItems` — the same
+  set the Decision Center lists under "Needs attention", so the bar, the Decide
+  badge, and the queue always agree — plus **Open Decision Center** and a quiet
+  **Challenge this plan**. It is deliberately not a card: no readiness verdict,
+  no criterion breakdown or "checks" disclosures, no implementation-packet
+  block, so the PRD content starts right under it. Do not re-add a verdict,
+  tool cards, or check lists to it.
+- There is no workspace-wide next-action strip and no ranked attention model.
+  (A `GlobalNextActionStrip`, and later `derivePlanningAttention` feeding a
+  pre-generation `PreBuildCheckpointCard`, the calm/caution overview card, and
+  the guided "sharpen" question flow, were all removed with the Finalize
+  layer.) The open-item count lives on the one-line bar and the Decide badge;
+  the items themselves are answered in the Decision Center. Do not re-add a
+  standalone aggregate open-item surface or a pre-generation interstitial.
 - PRD assumptions are imported idempotently as soon as the latest structured
-  PRD exists; visiting Challenge is not a prerequisite for planning state. The
-  exact ids imported for a new spine drive a session-only arrival card on the
-  Plan surface: **Accept defaults / Review each / Later**. Accept/Later expands
-  to one guarded, append-only user `DecisionEvent` per record; there is no
-  aggregate authority event and no persisted card state.
+  PRD exists; visiting Challenge is not a prerequisite for planning state.
+  Newly imported assumptions surface as the Decide badge / the one-line bar's
+  count and in the Decision Center queue — the former session-only arrival
+  card (Accept defaults / Review each / Later) folded into that badge. Each
+  answer is the Decision Center's ordinary guarded, append-only user
+  `DecisionEvent` for that record.
 - Generated assumptions distinguish **confidence** (plausibility) from
   **materiality** (consequence if wrong) and may identify affected PRD
   sections. Ranking is materiality-first.
-- `isFinal` now reads as a committed plan version, not proof that every output
-  exists. Commitment and `artifactJobController.startAll` are separate user
-  actions. Before commitment, Build is available as an explicitly exploratory
-  surface and must never imply implementation readiness.
-- A commitment binds to the reviewed spine, not to the readiness snapshot:
-  post-commit Build activity (outputs, alignment, challenge, or planning-state
-  drift) makes the readiness review historical without revoking the
-  commitment. Commitment display goes through
-  `commitmentRemainsCurrent(currentness)` (`readinessReview.ts`) — only an
-  integrity failure or a changed reviewed spine (identity/content) ends the
-  committed state; never re-add a raw `currentness.current` check for
-  commitment UI. Closing a finding as dismissed/already-addressed requires a
-  rationale of `MIN_CLOSURE_REASON_LENGTH` characters — entry surfaces must
-  enforce the same floor the readiness predicate checks.
+- **There is no commitment layer.** The Finalize flow — the readiness review
+  modal, commit/authorize/reopen, the materiality hard stop, the finalize
+  success modal, the pre-build card, the committed / accepted-risk /
+  unverifiable header states, and the Explore-vs-Build label split — was
+  removed. Output generation (`artifactJobController.startAll`) is reached
+  directly from the Plan page's top-bar **Generate outputs** and from the Build
+  stage; only the incomplete-PRD gate and the safety gate stand in front of it.
+  Do not re-introduce a commitment, readiness, or decision-count gate on
+  generation, export, task conversion, or prompt copying.
+- **Legacy commitment data stays readable; nothing writes it.**
+  `SpineVersion.isFinal`, `readinessReviews`, and `readinessCommitmentEvents`
+  remain in the types (marked legacy) and in `ALL_PROJECT_COLLECTIONS`,
+  snapshots, sync, and retention so old projects round-trip; `readinessSlice`
+  now only declares the two empty collections. A legacy `isFinal` spine still
+  counts as a durable incomplete-PRD acknowledgement
+  (`artifactGenerationGate.ts`; newer spines record the explicit "Generate
+  anyway" as `incompleteAcknowledgedAt` instead) and still confirms a
+  downstream update plan's source change. `HistoryView` renders old checkpoint/commitment events as
+  plain, neutral entries.
+- **Downstream source-change confirmation comes from the surviving authority**
+  (`isSourceChangeConfirmed`, `downstreamUpdatePlanGeneration.ts`), not from a
+  commitment. A plan's source change (the latest spine) is confirmed when it is
+  user-authored — `provenance.changeSource` is `user_edit` (inline edits, and
+  decision-impact applies through `compareAndAppendStructuredPRD`),
+  `decision_edit`, `branch_merge` (consolidation / staged apply), `revert`
+  (restore), or `ai_section_retry` (a section re-run the user triggered) — or
+  when a confirmed/resolved planning record produced it, or (legacy) the spine
+  is `isFinal`. Only a fresh model draft with no user decision behind its
+  content (`ai_generation`, `ai_regeneration` from Regenerate Draft) or a
+  legacy spine with no provenance stays provisional; the review says "no edit
+  or decision has confirmed it yet", and the next user-authored change
+  confirms it. A confirmed change lets the bounded planners propose definite
+  removals of obsolete downstream elements; a provisional one keeps them
+  review items. Keep the distinction: do not confirm wholesale model churn.
+- **Challenge coverage** (`challengeCoverage.ts`, `deriveChallengeCoverage`) is
+  the pure projection of "has the exact current plan been substantively
+  challenged, and which consequential findings are still unresolved?". It feeds
+  `derivePlanningReadiness`'s `challenge` criterion and the generation/export
+  checkpoint's critique rows; it gates nothing. Closing a finding as
+  dismissed/already-addressed requires a rationale of
+  `MIN_CLOSURE_REASON_LENGTH` characters — entry surfaces must enforce the
+  same floor the coverage projection checks.
 
 - `PlanningRecord` is the shared durable aggregate for decisions, assumptions,
   risks, open questions, and semantic inconsistencies. Do not add a parallel
@@ -223,9 +233,8 @@ impact previews / the write-barrier apply path in
     and the statement carries the derived reason plus every named gap
     untruncated;
   - materiality is **`'normal'`, never `'blocking'`**. §W6 is the single
-    authority on this obligation's severity; a `'blocking'` record would also
-    arm the Finalize materiality hard stop off a one-click UI action, giving one
-    fact two independent gates.
+    authority on this obligation's severity; a one-click flag must not mint a
+    second, independent `'blocking'` severity for the same fact.
 
   Nothing is created by rendering the plan — the write happens only in the
   click handler, and the action is offered only when the capability policy
@@ -236,26 +245,18 @@ impact previews / the write-barrier apply path in
   the region keys. They travel together or not at all, and
   `ArtifactWorkspace`'s region banner hides its "Return to update plan" action
   when there is no plan.
-- **Ordinary open decisions never block Refine, Generate, or Review.** The Decision
-  Center keeps its "Continue to Explore" action (`onContinueToExplore`, threaded
-  from `ProjectWorkspace`). At output generation, one inline
-  `PreBuildCheckpointCard` appears below the stage rail at most once per
-  workspace session, naming the highest-ranked exact planning record and
-  offering Review first / Generate outputs / Not now. It is advisory and never
-  replaces the safety, structured-PRD, incomplete-PRD, or design-preset gates.
-  Do not re-introduce a decision-count or readiness gate on Challenge,
-  `workspace`, or artifact generation (`artifactGenerationGate.ts` stays
-  safety/PRD-only).
-- **Only explicit `materiality: 'blocking'` records are decision-driven hard
-  stops.** `deriveMaterialityGateSnapshot` follows authoritative verdicts and
-  supersession, binds the exact sorted blocker fingerprints to the current
-  spine, and ignores high/normal/low or missing materiality. Finalize may record
-  a v2 append-only acceptance for that exact snapshot with a meaningful
-  rationale. Build bundle export and external task export require the same
-  current acceptance; resolving or changing a blocker invalidates the old
-  snapshot. Advisory concerns remain visible but never acquire hard-stop
-  authority. Valid current v1 commitments remain readable under the stricter
-  policy that originally authorized them.
+- **Open decisions never block anything.** The Decision Center's "Continue to
+  Build" action (`onContinueToBuild`, threaded from `ProjectWorkspace`) goes
+  straight to the Build stage, and output generation starts without a
+  pre-generation interstitial. Do not re-introduce a decision-count or
+  readiness gate on Challenge, `workspace`, or artifact generation
+  (`artifactGenerationGate.ts` stays safety/PRD-only: safe, latest,
+  structured, and acknowledged-if-incomplete).
+- **No planning record is a hard stop.** The materiality gate
+  (`deriveMaterialityGateSnapshot`, which made explicit `materiality:
+  'blocking'` records hard stops on Finalize, build-bundle export, and task
+  export) was removed with the Finalize layer. `materiality` still ranks
+  records (materiality-first); it never gates.
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
   which tracks the last-applied serialized intent **plus its validated
@@ -264,10 +265,12 @@ impact previews / the write-barrier apply path in
   stage they navigated away from, while a deep link whose target loads late
   (initially validated down to the PRD fallback) still re-applies once the
   target exists. Do not remove that guard. Every jump that starts from the Plan stage
-  (state bar, attention items, PRD decision surfaces) carries a
+  (the state bar, PRD decision surfaces) carries a
   `returnTo: { kind: 'prd' }` target so the Decision Center can close back to
   the exact originating surface, and it offers the next unresolved item
-  immediately after an answer is recorded.
+  immediately after an answer is recorded. (The `readiness` destination kind
+  was removed with the readiness review modal; a legacy URL carrying one no
+  longer parses and is ignored.)
 - Decision impact previews are bound to a PRD version and deterministic content
   hash (`decisionImpact.ts`). The first implementation safely patches imported
   PRD assumptions. Source-less or ambiguous records require a later
@@ -294,28 +297,23 @@ impact previews / the write-barrier apply path in
   10–40s retry call would be silently reverted by the appended PRD. Any new
   barrier call site whose input was built from a PRD snapshot must pass the
   hash too.
-- Readiness snapshot/current-signature hashes are derived from **durable state
-  only**: `buildReadinessReviewInputFromState` deliberately omits the live job
-  from its output-alignment derivation, because folding transient slot
-  statuses in made each concurrently-settling artifact slot change the hash —
-  a checkpoint created mid-generation was always rejected `'stale'` at commit.
-  Don't re-add the live job to that input.
 - Planning records already travel inside project bundles, server sync,
   recovery exports, and snapshots. Keep review/planning collections in
   `userScope.MERGEABLE_COLLECTIONS`, demo cleanup, and the explicit
   `PERSISTENT_STORE_ACTIONS` write guard.
-- **Retention:** the machine-generated run/checkpoint history (review runs and
-  their specialist runs/findings/issues, readiness reviews, downstream update
-  plans and their proposal/application/verification chains) is capped at write
-  time through `src/lib/collectionRetention.ts` (see the "Retention caps"
-  section in STATE_AND_AUTH.md for limits and the cascade/protection rules).
-  **`planningRecords` and `readinessCommitmentEvents` are exempt** — they are
-  the append-only user-authority aggregates and are never pruned; do not add a
-  cap to them, and never let a retention pass touch `DecisionEvent[]` or
-  assumption-validation events. Runs with open/deferred issues, commitment-
-  referenced readiness reviews, and the current substantive challenge are
-  protected from pruning so nothing readiness/commitment currently relies on
-  disappears.
+- **Retention:** the machine-generated run history (review runs and their
+  specialist runs/findings/issues, downstream update plans and their
+  proposal/application/verification chains) is capped at write time through
+  `src/lib/collectionRetention.ts`; the legacy readiness reviews (nothing
+  appends them any more) are capped only by the rehydrate sweep (see the
+  "Retention caps" section in STATE_AND_AUTH.md for limits and the
+  cascade/protection rules). **`planningRecords` and the legacy
+  `readinessCommitmentEvents` are exempt** — they are append-only user
+  authority and are never pruned; do not add a cap to them, and never let a
+  retention pass touch `DecisionEvent[]` or assumption-validation events. Runs
+  with open/deferred issues, readiness reviews a legacy commitment event
+  references, and the current substantive challenge are protected from
+  pruning.
 
 ### Derived requirement & criterion identity (read-side, advisory)
 
@@ -356,27 +354,36 @@ identity instead of label-matching heuristics.
 ### Two readiness evaluators: reasoning vs. packet (never conflate them)
 
 There are **two** readiness evaluators, answering **two different questions**.
-They are independently reportable, and the copy at every surface must keep them
-apart (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W6 — the audit's central
-finding was a truth-in-signalling defect, where the reasoning projection was
-presented as build readiness):
+Both are **advisory** — neither gates generation, export, task conversion, or
+prompt copying. They are independently reportable, and the copy at every
+surface must keep them apart (docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md §W6 —
+the audit's central finding was a truth-in-signalling defect, where the
+reasoning projection was presented as build readiness):
 
 | Evaluator | Question | Reads |
 |---|---|---|
 | `derivePlanningReadiness` (`planningReadiness.ts`) | *is the product **reasoning** sound?* | PRD foundation, scope, decisions, challenge, alignment |
-| `deriveBuildPacketReadiness` (`buildPacketReadiness.ts`) | *is the implementation **packet** complete and current?* | artifact slots, freshness, validation, coverage, API contracts, plan shape, the committed checkpoint |
+| `deriveBuildPacketReadiness` (`buildPacketReadiness.ts`) | *is the implementation **packet** complete and current?* | artifact slots, freshness, validation, coverage, API contracts, obligations, plan shape |
 
 - **Do not widen `derivePlanningReadiness`** to cover artifacts, and do not add
   an `isReadyToBuild`-style field to the packet evaluator — it deliberately
   exports `isPacketComplete` so the two can never be swapped by autocomplete.
-- **Eight blocking criteria** (`BUILD_PACKET_CRITERION_ORDER`), each with
-  evidence and a navigable action target: required outputs exist and are
-  non-errored · no required source stale **or** missing · zero unresolved
-  blocking validation issues · every in-scope requirement maps to a task and a
-  verification criterion · every endpoint reachable from the first slice has a
-  complete contract · conditional security/privacy + measurement obligations
-  discharged · the first milestone is an executable slice with no unresolved
-  dependency · the product reasoning is **committed**.
+- **Seven packet checks** (`BUILD_PACKET_CRITERION_ORDER`), each with
+  evidence and a navigable action target (an artifact slot, optionally narrowed
+  to its `api_contract` / `coverage` / `first_milestone` sub-surface, or a PRD
+  feature): required outputs exist and are non-errored · no required source
+  stale **or** missing · zero unresolved blocking validation issues · every
+  in-scope requirement maps to a task and a verification criterion · every
+  endpoint reachable from the first slice has a complete contract · the
+  conditional security/privacy obligation is discharged · the first milestone
+  is an executable slice with no unresolved dependency. An unresolved
+  **measurement** obligation is a warning owned by the user, not an open check
+  (the generator is not reliably prompted to produce it). "Blocker" in the code
+  means an unmet check with a navigable fix — never a lock.
+- **There is no commitment criterion.** `reasoning_committed`, its commitment
+  evidence, the rationale/accepted-risk logic, and the `readiness_commitment`
+  action target were removed with the Finalize layer. The packet evaluator
+  never reads the planning projection or any commitment record.
 - **Sources are consumed, never re-derived.** Staleness comes from the one
   freshness engine (`evaluateProjectFreshness` / `useProjectFreshness`, rule 9)
   and is read through **both `status` and `impactedBy`** — a MISSING or ERRORED
@@ -389,43 +396,46 @@ presented as build readiness):
 - **In-scope requirement** = `tier === 'mvp'` **or** `priority === 'must'`, with
   a feature declaring **neither** field counted in scope, and the same
   empty-set fallback `derivePlanningReadiness`'s `scopeCandidates` applies (no
-  match → every feature is in scope), so the gate and the planning scope
-  criterion never disagree and "no in-scope requirement" can never become a
+  match → every feature is in scope), so the packet check and the planning
+  scope criterion never disagree and "no in-scope requirement" can never become a
   vacuous pass. `should` / `could` / `v1` / `later` coverage is reported as a
   **non-blocking warning**.
-- **Approval authority is the committed checkpoint, not the projection.** The
-  committed criterion requires a **current committed `ReadinessReview`** — the
-  caller's `commitmentRemainsCurrent(...)` + `activeCommit` filter
-  (`currentCommittedReadiness` in `ProjectWorkspace`). It **fails closed** on
-  `isCommitmentUnverifiable`, on a commitment bound to a different spine
-  version, and on a `not_ready` commitment with no recorded rationale.
-  `planningReadiness.isReadyToBuild` is passed in **only** so the blocker copy
-  can say whether a commit action is currently on offer — it can never satisfy
-  the criterion. A `not_ready` commitment **with** the authorizing event's
-  rationale is reported as an accepted-risk warning.
+- **Approval is an optional sign-off, not authority.** "Approve build packet"
+  (`buildPacketApproval.ts`) pins the current artifact versions as a
+  versioned overlay on the plan version (written through
+  `updateArtifactOverlay`, rule 12) and records any still-open check ids it
+  was approved with (`acknowledgedOpenCheckIds`); afterwards the Final Review
+  reports "changed since approval" when an output moves. It is never required —
+  approving with open checks is allowed, and nothing waits on an approval.
 - **Warnings are earned.** A non-blocking warning is permitted only when
   `owner`, `impact`, and `rationale` are all recorded (the type requires all
   three); anything that cannot state them is a blocker. There is **no composite
   score** (rule 13) and nothing auto-rewrites an artifact.
-- **Derived, never persisted** (rule 10) and **advisory transport**: the
-  evaluator reports; it never blocks rendering or generation on its own.
+- **Derived, never persisted** (rule 10) and **advisory**: the evaluator
+  reports; nothing — rendering, generation, export, task conversion, prompt
+  copying — gates on it.
   `src/hooks/useBuildPacketInputs.ts` assembles the store-derived half of its
   input (slot states, freshness, resolved data model/endpoints, consolidated
   plan) and is the only React binding — it resolves the Data Model through the
   same `resolveDataModelForTrace` the advisory obligations card uses, so the
-  gate and that card can never disagree about which obligations are owed.
-- **The gate must never be stricter than the generator** (plan §7). Every
-  blocking criterion ships with a test proving a freshly generated, well-formed
+  checklist and that card can never disagree about which obligations are owed.
+- **A check must never be stricter than the generator** (plan §7). Every
+  criterion ships with a test proving a freshly generated, well-formed
   project satisfies it (`buildPacketReadiness.test.ts`). Anything the generator
   is not prompted to produce — verbatim PRD-criterion restatements in the plan,
   a vertical (UI + data) first milestone, supplementary endpoint fields — is a
   warning, not a blocker.
 
-Consumers today: `ProjectWorkspace` (the outputs CTA no longer claims build
-readiness from the reasoning projection; its label reads off the recorded
-commitment) and `PlanningStateBar` (an "Implementation packet" block with its
-own "Packet checks" disclosure, beside the "Product-reasoning checks" one). The
-single-CTA Final Review surface is plan §W7 and is not built yet.
+Consumers today: `derivePlanningReadiness` feeds the one-line
+`PlanningStateBar` and the Decide badge (`openItems`) — its criteria are no
+longer shown on the Plan page. `deriveBuildPacketReadiness` feeds only the
+Implementation Plan's **Final Review** card (§W7, see WORKSPACE_AND_ARTIFACTS.md):
+an advisory checklist with "estimated" labels and a navigable fix per open
+check (`ProjectWorkspace` evaluates the packet once and passes it down). The
+header outputs CTA's label states the action only ("Generate outputs" /
+"Review outputs" / "Building outputs…"); once outputs exist its hover copy adds
+the packet state, labelled estimated and advisory. Neither evaluator changes
+what the CTA does.
 
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence

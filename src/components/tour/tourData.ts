@@ -332,7 +332,7 @@ export interface TourAsset {
 }
 
 /**
- * The assets Synapse generates from a finalized PRD, in the same order and
+ * The assets Synapse generates from the plan, in the same order and
  * grouping the workspace Assets page shows them. This list is deliberately
  * limited to artifacts that are actually surfaced to the user — the hidden
  * `component_inventory` (mockups consume it but it has no sidebar row) and the
@@ -415,17 +415,14 @@ export const TOUR_PROJECT = {
 };
 
 /**
- * The workspace's planning progression, mirroring the production
- * `JourneyRail` (src/components/JourneyRail.tsx): Define → Refine → Finalize →
- * Generate → Review → Build. Persisted stage keys remain an implementation
- * detail, and project history opens as a panel instead of occupying a step.
+ * The workspace's journey, mirroring the production `JourneyRail`
+ * (src/components/JourneyRail.tsx): Plan → Decide → Build. Persisted stage
+ * keys remain an implementation detail, and project history opens as a panel
+ * instead of occupying a step.
  */
 export const WORKSPACE_NAV = [
-    'Define',
-    'Refine',
-    'Finalize',
-    'Generate',
-    'Review',
+    'Plan',
+    'Decide',
     'Build',
 ];
 

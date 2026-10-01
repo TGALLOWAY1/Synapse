@@ -1,6 +1,6 @@
 # Version History, Revert & Export
 
-> Extracted from CLAUDE.md. Export modal + manifest, version history/compare/revert components, change-aware staleness, provenance, and the re-finalize Update Assets plan.
+> Extracted from CLAUDE.md. Export modal + manifest, version history/compare/revert components, change-aware staleness, provenance, and the Sync outputs (Update Assets) plan.
 
 ### Export (`ExportModal.tsx`)
 
@@ -43,14 +43,16 @@ the top of the full markdown bundle, a `manifest` field in the structured JSON,
 and (via `HandoffInput.manifestMarkdown`) between the preamble and the PRD in
 the agent handoff. Every project-level bundle (structured JSON, full Markdown,
 and coding-agent handoff) also receives the current
-`WorkflowCheckpointSummary`: the exact current Finalize verdict (or
-**Working plan** when no current commitment exists), accepted planning risks
-with their rationale/containment, and current critique, validation, generation,
-and alignment notes. The same summary is visible in `ExportModal`, so export
+`WorkflowCheckpointSummary`: current critique, validation, generation, and
+alignment notes. It carries no plan verdict — the "Plan finalized" / "Working
+plan" status and the accepted-risk record went away with the Finalize layer.
+The same summary is visible in `ExportModal`, so export
 does not invent a fresh warning vocabulary or repeat separate "exploratory"
 and stale-output banners. The cloud-at-risk warning remains separate because
-it concerns persistence, not plan quality. Exports are never blocked — the
-manifest and checkpoint make the handoff honest. Keep both in sync if export
+it concerns persistence, not plan quality. Exports are never blocked — not by
+open decisions, packet checks, or any plan checkpoint (the former materiality
+hard stop on build-bundle export was removed) — the manifest and checkpoint
+make the handoff honest. Keep both in sync if export
 composition changes.
 
 ### Version history & revert (`src/components/versions/`)
@@ -72,7 +74,13 @@ Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts
 (pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
 nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 **Version History** overflow-menu item) and adds **Compare with current** /
-**Restore this version** to the read-only historical-version banner;
+**Restore this version** to the read-only historical-version banner (History
+Mode — a historical spine picked from the Plan stage's Timeline). History Mode
+is a Plan-only view: the journey's Build step is inert, an output stage
+presents the historical Plan instead of `ArtifactWorkspace`, navigating to an
+output stage leaves History Mode first (`applyPresentationStage`), and the
+generation gate refuses any non-latest spine (`not_latest`), so no output can
+be regenerated from an old PRD and become current;
 `ArtifactWorkspace` shows a **Version history** button + a "Generated from PRD
 Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
 generated artifact. Restores route
@@ -188,8 +196,8 @@ background when drift is detected, and applying one immediately derives its
 verification result; manual Verify remains only for genuinely external,
 manual, or legacy changes.
 
-This Sync flow is deliberately independent from Finalize. Finalization records
-implementation intent; it does not silently regenerate existing outputs or
-open a second update ritual. Do not reintroduce blind full regeneration on
-re-finalize, partial dependency rebases, or a Sync button whose current plan
-has no actionable rows.
+This Sync flow is the one post-change correction path: generating outputs
+from the Plan page never silently regenerates existing outputs or opens a
+second update ritual. Do not reintroduce blind full regeneration, partial
+dependency rebases, or a Sync button whose current plan has no actionable
+rows.

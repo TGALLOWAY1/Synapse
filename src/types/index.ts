@@ -721,7 +721,22 @@ export type SpineVersion = {
     // predates it.
     updatedAt?: number;
     isLatest: boolean;
+    /** Legacy: true only on spines committed through the removed Finalize
+     * checkpoint — new spines are created `false` and nothing sets it now.
+     * Still honoured where older data carries it (the incomplete-PRD gate
+     * reads it as a recorded acknowledgement; it confirms a downstream update
+     * plan's source change; decision edits never amend a final version in
+     * place). Newer spines get downstream confirmation from their
+     * `provenance.changeSource` instead (`isSourceChangeConfirmed`). */
     isFinal: boolean;
+    /** When the user explicitly confirmed "Generate anyway" for THIS
+     * incomplete version (one or more PRD sections failed) — the durable
+     * incomplete-PRD acknowledgement that replaced legacy `isFinal`, so
+     * resume, Sync outputs, and dependency-graph regeneration keep working
+     * after the first run. Bound to this version: a later spine version
+     * (edit, decision apply, section retry, restore, merge, regenerate) never
+     * inherits it. Optional — written by `acknowledgeIncompleteSpine`. */
+    incompleteAcknowledgedAt?: number;
     structuredPRD?: StructuredPRD;
     preflightSession?: PreflightSession;
     generationError?: {
@@ -2279,11 +2294,14 @@ export type PlanningRecord = {
     assumptionValidation?: AssumptionValidationState;
 };
 
-// --- Deterministic build-readiness review ---------------------------------
-// A readiness review is a persistable, version-pinned explanation of whether
-// the current planning foundation is ready to drive implementation. It is a
-// deterministic projection over existing project state; no model-authored
-// value in this contract can confer user approval.
+// --- LEGACY: deterministic build-readiness review + commitment events -------
+// These types describe data written by the REMOVED Finalize/readiness
+// checkpoint (readiness reviews, commit/authorize/reopen events, the
+// materiality acceptance). Nothing creates them any more; they stay so older
+// projects keep loading and round-tripping through persistence, snapshots,
+// sync, and the recovery bundle (`readinessReviews` /
+// `readinessCommitmentEvents` remain in ALL_PROJECT_COLLECTIONS). Do not build
+// new behavior on them.
 
 export const READINESS_REVIEW_SCHEMA_VERSION = 1;
 // v2 adds integrity-valid, current downstream update-plan state to the
@@ -2685,6 +2703,8 @@ export type HistoryEventType =
     | 'Reverted'
     | 'MarkedCurrent'
     | 'ValidationIssueAccepted'
+    // Legacy: written only by the removed Finalize/readiness checkpoint. Kept
+    // so older projects' timelines still render (as plain entries).
     | 'ReadinessReviewed'
     | 'PlanCommitted'
     | 'PlanReopened';
@@ -2728,6 +2748,7 @@ export type HistoryEvent = {
     spineVersionId?: string;
     artifactId?: string;
     artifactVersionId?: string;
+    /** Legacy: set only on events from the removed readiness checkpoint. */
     readinessReviewId?: string;
     type: HistoryEventType;
     description: string;

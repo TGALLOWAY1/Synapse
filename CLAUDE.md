@@ -231,15 +231,19 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
                    pre-commit critique). Selection → action dialog runs through
                    the shared touch-aware pipeline (see
                    docs/architecture/UI_PATTERNS.md).
-  Build stage:     ArtifactWorkspace (exploratory or committed outputs; bundle/
-                   individual gen, refine, validate; per-artifact renderers in
-                   src/components/renderers/)
+  Build stage:     ArtifactWorkspace (bundle/individual gen, refine, validate;
+                   per-artifact renderers in src/components/renderers/)
                    + the Screens view (src/components/experience/:
                    ScreenListView / ScreenDetailView / MockupVariantsPanel)
                    + MockupViewer (src/components/mockups/: approval gate and
-                   per-screen MockupScreenImage). The `'workspace'` pipeline stage is
-                   labeled **"Explore"** for a working plan and **"Build"** for
-                   a committed plan (the stage key/route stays `workspace`).
+                   per-screen MockupScreenImage). Reached from the Plan page's
+                   "Generate outputs" or the Build stage itself — there is no
+                   commitment/Finalize step; only the incomplete-PRD and safety
+                   gates stand in front of generation. The `'workspace'` stage
+                   is always labeled **"Build"** (the stage key/route stays
+                   `workspace`). The journey rail presents the stages as
+                   **Plan · Decide · Build** (`src/lib/journeyPresentation.ts`;
+                   Decide opens the Decision Center slide-over).
   History stage:   HistoryView — chronological timeline with diffs
 ```
 
@@ -260,12 +264,12 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 | Topic doc | Covers | Read before touching |
 |---|---|---|
 | [docs/architecture/LLM_PIPELINE.md](docs/architecture/LLM_PIPELINE.md) | `geminiClient` transport + LLM Trace Viewer, the PRD DAG pipeline & sections, two-view PRD IA (Overview | Features; decisions route to the Decision Center), consistency review + guards, design-system presets & brief, canonical PRD spine, core artifact services & per-artifact model routing, prompt fragments & the prompt snapshot net, preflight clarification | Anything in `src/lib/services/`, `src/lib/prompts/`, prompts/schemas, PRD generation or rendering, model routing |
-| [docs/architecture/PLANNING_AND_DECISIONS.md](docs/architecture/PLANNING_AND_DECISIONS.md) | Uncertainty-first planning: Plan → Challenge → Build progression, the **two separate readiness evaluators** (planning-reasoning projection vs. build-packet completeness) and their authority models, `PlanningRecord` / `DecisionEvent` authority model, assumption import & validation, decision impact previews, the `compareAndAppendStructuredPRD` write barrier, adversarial review engine, downstream update plans | Anything in `src/lib/planning/`, `src/lib/review/`, `src/components/planning/`, `src/components/review/`, `src/components/downstream/`, the review/readiness/downstream store slices |
+| [docs/architecture/PLANNING_AND_DECISIONS.md](docs/architecture/PLANNING_AND_DECISIONS.md) | Uncertainty-first planning: the Plan · Decide · Build journey and the one-line planning state bar, the **two separate, advisory readiness evaluators** (planning-reasoning projection vs. build-packet completeness), the removed Finalize/commitment layer and its legacy data, `PlanningRecord` / `DecisionEvent` authority model, assumption import & validation, challenge coverage, decision impact previews, the `compareAndAppendStructuredPRD` write barrier, adversarial review engine, downstream update plans | Anything in `src/lib/planning/`, `src/lib/review/`, `src/components/planning/`, `src/components/review/`, `src/components/downstream/`, the review/downstream store slices (and the legacy-only readiness slice) |
 | [docs/architecture/SAFETY_AND_VALIDATION.md](docs/architecture/SAFETY_AND_VALIDATION.md) | The safety gate/classifier (`src/lib/safety/`), blocking vs advisory artifact validation, automatic traceability repair, dependency sufficiency gate | Safety policy, artifact validation, generation gating |
 | [docs/architecture/STATE_AND_AUTH.md](docs/architecture/STATE_AND_AUTH.md) | The store slices, generation lifecycle, interrupted-run recovery, persistence/quota, per-user project namespacing, legacy import, account linking, encrypted provider-key vault, key-resolution rules | `src/store/`, auth flows, anything reading/writing credentials |
 | [docs/architecture/PROJECT_SYNC.md](docs/architecture/PROJECT_SYNC.md) | Server-side project storage (`/api/projects`), revision/conflict model, sync orchestrator + UI, recovery bundle, cross-device mockup image sync (Blob refs) | Project sync, `api/projects.js`, `api/_lib/projectsStore.js`, image refs |
 | [docs/architecture/SNAPSHOTS_AND_DEMO.md](docs/architecture/SNAPSHOTS_AND_DEMO.md) | Owner snapshots (all image kinds + wire format), mockup-image audit, pin-time gate, showcase (demo + project gallery) capability boundary, demo/gallery hydration/reset/cache freshness, the gallery go-live mode toggle | `api/snapshots.js`, `snapshotClient.ts`, anything demo/gallery (`DEMO_PROJECT_ID`, `GALLERY_PROJECT_IDS`) |
-| [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph / freshness actions, build-packet readiness, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
+| [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, reaching the Build stage ("Generate outputs"), consolidated Implementation Plan (+adapter), the advisory Final Review checklist + optional build-packet approval, Artifact Dependency Graph / freshness actions, build-packet readiness, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
 | [docs/architecture/SCREENS_EXPERIENCE.md](docs/architecture/SCREENS_EXPERIENCE.md) | The Screens view: stable screen ids, join layer, screen contracts, readiness/coverage, review workflow (4A), downstream impact (4B), handoff + trace bridge + export (5A–5C), mockup variants (3A–3D), overlays, URL-addressable selection | Anything under `src/components/experience/` or `src/lib/screen*` / `mockupVariant*` |
 | [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest + agent handoff, version history/compare/revert, change-aware staleness, provenance stamping, "Confirm aligned" | Exports, version history, revert, staleness UX |
 | [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, overlay keyboard handling (`useEscapeKey`, `ConfirmDialog` — never native `confirm()`), landmarks, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, modals/drawers/confirmations, `/tour`, `/metrics` |
@@ -340,8 +344,13 @@ rationale and detail.
    PLANNING_AND_DECISIONS.md
 10. **Read-side layers are derived, never persisted** (Screens join/readiness/
     review-issues/downstream/handoff, dependency graph, planning readiness,
-    diffs): pure `src/lib/` modules, unit-tested, honest "estimated/derived"
-    labels, advisory-only — nothing gates rendering or generation.
+    build-packet readiness, challenge coverage, diffs): pure `src/lib/`
+    modules, unit-tested, honest "estimated/derived" labels, advisory-only —
+    nothing gates rendering or generation. There is **no commitment gate**:
+    the Finalize/readiness-commit layer was removed, so only the incomplete-PRD
+    and safety gates may stop output generation (plus the integrity guard that
+    only the latest spine generates — never a historical one), and nothing
+    gates copying, export, or task conversion on readiness. Do not re-add one.
     → SCREENS_EXPERIENCE.md, PLANNING_AND_DECISIONS.md
 11. **Every version-creating path stamps `provenance.changeSource`**, and
     revert/restore always **appends** a new version — history is never mutated

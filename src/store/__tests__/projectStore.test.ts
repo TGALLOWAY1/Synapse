@@ -125,35 +125,21 @@ describe('projectStore', () => {
         });
     });
 
-    describe('markSpineFinal', () => {
-        it('cannot manufacture commitment authority by toggling a boolean', () => {
-            const store = useProjectStore.getState();
-            const { projectId, spineId } = store.createProject('Test', 'prompt');
-
-            useProjectStore.getState().markSpineFinal(projectId, spineId, true);
-
-            const spines = useProjectStore.getState().spineVersions[projectId];
-            const spine = spines.find(s => s.id === spineId);
-            expect(spine?.isFinal).toBe(false);
+    describe('legacy finality', () => {
+        it('exposes no way to toggle a spine final — the Finalize layer was removed', () => {
+            const store = useProjectStore.getState() as unknown as Record<string, unknown>;
+            for (const action of [
+                'markSpineFinal', 'createReadinessReview', 'authorizeReadinessCommitment',
+                'commitReadinessReview', 'reopenReadinessCommitment',
+            ]) expect(store[action]).toBeUndefined();
         });
 
-        it('can reopen a legacy spine that was already final', () => {
-            const store = useProjectStore.getState();
-            const { projectId, spineId } = store.createProject('Test', 'prompt');
-
-            useProjectStore.setState(state => ({
-                spineVersions: {
-                    ...state.spineVersions,
-                    [projectId]: state.spineVersions[projectId].map(spine => (
-                        spine.id === spineId ? { ...spine, isFinal: true } : spine
-                    )),
-                },
-            }));
-            useProjectStore.getState().markSpineFinal(projectId, spineId, false);
-
-            const spines = useProjectStore.getState().spineVersions[projectId];
-            const spine = spines.find(s => s.id === spineId);
+        it('creates new spines non-final and keeps the legacy readiness collections readable', () => {
+            const { projectId, spineId } = useProjectStore.getState().createProject('Test', 'prompt');
+            const spine = useProjectStore.getState().spineVersions[projectId].find(item => item.id === spineId);
             expect(spine?.isFinal).toBe(false);
+            expect(useProjectStore.getState().readinessReviews).toBeTypeOf('object');
+            expect(useProjectStore.getState().readinessCommitmentEvents).toBeTypeOf('object');
         });
     });
 

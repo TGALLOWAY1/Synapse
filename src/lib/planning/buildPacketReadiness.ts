@@ -4,9 +4,9 @@
 // TWO EVALUATORS, TWO QUESTIONS. They must stay independently reportable and
 // must never be conflated in copy:
 //
-//   derivePlanningReadiness   → "is the product REASONING sound?"      → PRD approved
+//   derivePlanningReadiness   → "is the product REASONING sound?"
 //   deriveBuildPacketReadiness → "is the implementation PACKET
-//                                 complete and current?"              → Ready to build
+//                                 complete and current?"
 //
 // `derivePlanningReadiness.isReadyToBuild` looks at foundation clarity, scope
 // confirmation, decisions, challenge coverage and alignment. Nothing in it
@@ -19,9 +19,11 @@
 //  - PURE and DERIVED ON READ (cross-cutting rule 10). No store, no React, no
 //    LLM, no persistence, no side effects. Nothing here is written to an
 //    artifact or a collection, and nothing auto-rewrites an artifact.
-//  - ADVISORY TRANSPORT, HONEST REPORT. The evaluator *reports*; it never
-//    prevents rendering or generation on its own. Consumers decide what to do
-//    with a blocker list.
+//  - ADVISORY, HONEST REPORT. The evaluator *reports*; nothing gates on it —
+//    not rendering, generation, export, task conversion, or prompt copying.
+//    "Blocker" below means "an unmet packet check", reported with a navigable
+//    fix; it is never a lock. (The Finalize/commitment layer that once made
+//    this a gate — and its `reasoning_committed` criterion — was removed.)
 //  - ONE FRESHNESS ENGINE (cross-cutting rule 9). Staleness is CONSUMED from
 //    `evaluateProjectFreshness` / `useProjectFreshness` output — never
 //    re-derived, and no second staleness source is introduced. Both `status`
@@ -36,9 +38,13 @@
 //    owner, impact, and rationale are all recorded (the `BuildPacketWarning`
 //    type makes all three required). Anything that cannot state those three is
 //    a blocker, not a warning.
-//  - FAIL CLOSED. An input that cannot be verified (absent freshness, an
-//    unverifiable readiness commitment, a commitment bound to a different
-//    spine) blocks rather than passing silently.
+//  - FAIL CLOSED. An input that cannot be verified (absent freshness, a
+//    disagreement between slot state and the freshness engine) reports an
+//    unmet check rather than passing silently.
+//  - NEVER STRICTER THAN THE GENERATOR (plan §7). Anything the generator is
+//    not reliably prompted to produce is a warning, not a blocker — which is
+//    why an unresolved conditional MEASUREMENT obligation is a warning while
+//    security & privacy stays a check.
 //  - SELF-REPORTED PROGRESS IS NEVER EVIDENCE (plan §W8). Nothing in this
 //    module may read a task's progress state: not `ImplementationPlanTask
 //    .status`, not the persisted `ProjectTask.status` the Implementation
@@ -54,7 +60,7 @@
 //    "self-reported task progress is never evidence".
 //
 // Every criterion carries evidence and a navigable action target so §W7's
-// Final Review can render "Resolve N blockers" with somewhere to send the user.
+// Final Review checklist can send the user straight to each fix.
 
 import type {
     ArtifactSlotKey,
@@ -68,9 +74,6 @@ import type {
     ImplementationQualityGate,
     PlanMeasurementSection,
     PlanSecurityPrivacySection,
-    ReadinessActionTarget,
-    ReadinessCriterionEvidenceQuality,
-    ReadinessReviewConclusion,
     StructuredPRD,
 } from '../../types';
 import type { DependencyNodeEvaluation, DependencyNodeId } from '../artifactDependencyGraph';
@@ -97,10 +100,9 @@ import {
 // --- Public shape -------------------------------------------------------------
 
 /**
- * The eight blocking criteria of the §W6 table, in blocker-report order.
- * Deliberately its OWN vocabulary — never merged with
- * `ReadinessReviewCriterionId` (product reasoning) or `DependencyNodeStatus`
- * (system freshness).
+ * The seven packet checks of the §W6 table, in report order. Deliberately its
+ * OWN vocabulary — never merged with the planning-readiness criteria (product
+ * reasoning) or `DependencyNodeStatus` (system freshness).
  */
 export type BuildPacketCriterionId =
     | 'artifacts_present'
@@ -109,8 +111,7 @@ export type BuildPacketCriterionId =
     | 'requirement_coverage'
     | 'api_contract'
     | 'cross_cutting'
-    | 'first_slice'
-    | 'reasoning_committed';
+    | 'first_slice';
 
 export const BUILD_PACKET_CRITERION_ORDER: readonly BuildPacketCriterionId[] = [
     'artifacts_present',
@@ -120,7 +121,6 @@ export const BUILD_PACKET_CRITERION_ORDER: readonly BuildPacketCriterionId[] = [
     'api_contract',
     'cross_cutting',
     'first_slice',
-    'reasoning_committed',
 ];
 
 const BUILD_PACKET_CRITERION_LABELS: Record<BuildPacketCriterionId, string> = {
@@ -131,18 +131,16 @@ const BUILD_PACKET_CRITERION_LABELS: Record<BuildPacketCriterionId, string> = {
     api_contract: 'First-slice API contracts complete',
     cross_cutting: 'Cross-cutting obligations discharged',
     first_slice: 'First slice is executable',
-    reasoning_committed: 'Product reasoning committed',
 };
 
 /** Which artifact sub-surface a slot action target should open. */
 export type BuildPacketArtifactSection = 'api_contract' | 'coverage' | 'first_milestone';
 
 /**
- * Action targets reuse `ReadinessActionTarget` (prd / feature /
- * planning_record / challenge / update_plan / output) and add only the two
- * destinations the packet needs that it does not already carry: an artifact
- * SLOT that may not have an artifact id yet (a missing output has none), and
- * the readiness checkpoint where a commitment is recorded.
+ * Where a packet check's fix lives. Exactly two destinations: an artifact
+ * SLOT (which may not have an artifact id yet — a missing output has none),
+ * optionally narrowed to a sub-surface, and a requirement in the PRD's
+ * Features view (no `featureId` → the Features view itself).
  */
 export interface BuildPacketArtifactActionTarget {
     kind: 'artifact_slot';
@@ -152,10 +150,14 @@ export interface BuildPacketArtifactActionTarget {
     milestoneId?: string;
 }
 
+export interface BuildPacketFeatureActionTarget {
+    kind: 'feature';
+    featureId?: string;
+}
+
 export type BuildPacketActionTarget =
-    | ReadinessActionTarget
     | BuildPacketArtifactActionTarget
-    | { kind: 'readiness_commitment' };
+    | BuildPacketFeatureActionTarget;
 
 export type BuildPacketEvidenceSourceType =
     | 'artifact'
@@ -163,13 +165,15 @@ export type BuildPacketEvidenceSourceType =
     | 'validation'
     | 'prd'
     | 'plan'
-    | 'data_model'
-    | 'commitment';
+    | 'data_model';
+
+/** Honest three-way evidence quality: seen directly, inferred (derived /
+ * heuristic — presented as "estimated"), or incomplete. */
+export type BuildPacketEvidenceQuality = 'direct' | 'inferred' | 'incomplete';
 
 export interface BuildPacketEvidence {
     id: string;
-    /** Same honest three-way quality vocabulary the readiness review uses. */
-    quality: ReadinessCriterionEvidenceQuality;
+    quality: BuildPacketEvidenceQuality;
     summary: string;
     sourceType: BuildPacketEvidenceSourceType;
     sourceId?: string;
@@ -184,7 +188,7 @@ export interface BuildPacketBlocker {
     consequence: string;
     /** The concrete next move, in the user's own workflow terms. */
     remedy: string;
-    evidenceQuality: ReadinessCriterionEvidenceQuality;
+    evidenceQuality: BuildPacketEvidenceQuality;
     actionTarget: BuildPacketActionTarget;
 }
 
@@ -234,7 +238,7 @@ export interface BuildPacketReadiness {
     criteria: BuildPacketCriterion[];
     blockers: BuildPacketBlocker[];
     warnings: BuildPacketWarning[];
-    /** The first blocker in criterion order — §W7's single primary action. */
+    /** The first unmet check in criterion order. */
     nextBlocker?: BuildPacketBlocker;
     evaluatedAt: number;
 }
@@ -282,26 +286,6 @@ export interface BuildPacketPlanInput {
     measurement?: PlanMeasurementSection;
 }
 
-/**
- * The CURRENT COMMITTED readiness checkpoint — already filtered by the caller
- * through `commitmentRemainsCurrent(...)` **and** an `activeCommit`. The live
- * `derivePlanningReadiness` projection is NOT accepted here; see
- * `planningProjectionReadyToBuild`.
- */
-export interface BuildPacketCommittedReadiness {
-    reviewId: string;
-    /** The spine version the commitment binds to. */
-    spineVersionId: string;
-    conclusion: ReadinessReviewConclusion;
-    committedAt: number;
-    /**
-     * The authorizing `commit_authorized` event's rationale. Required for a
-     * `not_ready` commitment ("proceeding with accepted risk") to be
-     * reportable as a warning instead of a blocker.
-     */
-    acceptedRiskRationale?: string;
-}
-
 export interface BuildPacketReadinessInput {
     prd?: StructuredPRD | null;
     /** One entry per required slot. A slot with no entry is treated as missing. */
@@ -321,23 +305,6 @@ export interface BuildPacketReadinessInput {
     apiEndpoints?: readonly ApiEndpointLike[] | null;
     plan?: BuildPacketPlanInput | null;
     safety?: CrossCuttingSafetyContext | null;
-    committedReadiness?: BuildPacketCommittedReadiness | null;
-    /**
-     * The `isCommitmentUnverifiable` case: the spine claims commitment and
-     * readiness provenance exists, but no current commitment can be verified.
-     * FAIL CLOSED on it.
-     */
-    commitmentUnverifiable?: boolean;
-    /**
-     * ADVISORY ONLY. `derivePlanningReadiness().isReadyToBuild` — a projection
-     * recomputed every render. It may at most inform the COPY of the
-     * not-committed blocker (i.e. whether a commit action is being offered).
-     * It can never satisfy the criterion; only a current committed
-     * `ReadinessReview` can.
-     */
-    planningProjectionReadyToBuild?: boolean;
-    /** The spine the packet is evaluated against; the commitment must bind to it. */
-    currentSpineVersionId?: string;
     evaluatedAt?: number;
 }
 
@@ -353,6 +320,22 @@ export function buildPacketRequiredSlots(): ArtifactSlotKey[] {
 
 export const buildPacketSlotTitle = (slot: ArtifactSlotKey): string =>
     slot === 'mockup' ? 'Mockups' : getArtifactMeta(slot).title;
+
+const ARTIFACT_SECTION_ACTION_LABEL: Record<BuildPacketArtifactSection, string> = {
+    api_contract: 'Open the API contract',
+    coverage: 'Open plan coverage',
+    first_milestone: 'Open the first milestone',
+};
+
+/** The link label for a packet check's fix. */
+export function buildPacketActionLabel(target: BuildPacketActionTarget): string {
+    if (target.kind === 'feature') {
+        return target.featureId ? 'Open this feature' : 'Open Features';
+    }
+    return target.section
+        ? ARTIFACT_SECTION_ACTION_LABEL[target.section]
+        : `Open ${buildPacketSlotTitle(target.nodeId)}`;
+}
 
 // --- Small helpers ------------------------------------------------------------
 
@@ -734,12 +717,11 @@ const CRITERION_EVIDENCE_SOURCE: Record<BuildPacketCriterionId, BuildPacketEvide
     api_contract: 'data_model',
     cross_cutting: 'plan',
     first_slice: 'plan',
-    reasoning_committed: 'commitment',
 };
 
 const makeEvidence = (
     criterionId: BuildPacketCriterionId,
-    quality: ReadinessCriterionEvidenceQuality,
+    quality: BuildPacketEvidenceQuality,
     summary: string,
     sourceType: BuildPacketEvidenceSourceType,
     sourceId: string,
@@ -1293,9 +1275,14 @@ export function deriveBuildPacketReadiness(
     });
 
     // ── 6. Conditional security/privacy + measurement obligations ──────────
-    // Source: W5 `deriveCrossCuttingObligations` — `report.unresolved` IS the
-    // blocking set. The generator's prompt states the same trigger conditions,
-    // so the gate and the generator cannot disagree about when a section is owed.
+    // Source: W5 `deriveCrossCuttingObligations` — `report.unresolved` is the
+    // set of owed-but-undischarged sections. The generator's prompt states the
+    // same trigger conditions, so the check and the generator cannot disagree
+    // about when a section is owed. An unresolved SECURITY & PRIVACY section is
+    // an unmet check; an unresolved MEASUREMENT section is only a warning — the
+    // generator does not reliably produce an instrumented measurement plan, and
+    // the check must never be stricter than the generator (plan §7). A freshly
+    // generated, well-formed bundle must not open on a measurement "blocker".
     const obligations: CrossCuttingObligationsReport = deriveCrossCuttingObligations({
         prd: input.prd,
         safety: input.safety,
@@ -1311,6 +1298,18 @@ export function deriveBuildPacketReadiness(
     const crossCuttingBlockerIds: string[] = [];
     const crossCuttingWarningIds: string[] = [];
     for (const section of obligations.unresolved) {
+        if (section.key === 'measurement') {
+            crossCuttingWarningIds.push(addWarning(collector, 'cross_cutting', 'unresolved', section.key, {
+                // Same title as the Decision Center record `flagToPlan` creates
+                // for this obligation, so the two read as one item.
+                title: `${section.label} not discharged`,
+                owner: 'user',
+                impact: `${section.reason} ${truncate(section.missing.join(' '), 220)}`,
+                rationale: 'The plan generator is not reliably prompted to produce an instrumented measurement plan, so an absent or thin Measurement section is reported rather than counted as an open check (plan §7: never stricter than the generator).',
+                actionTarget: slotTarget('implementation_plan'),
+            }));
+            continue;
+        }
         crossCuttingBlockerIds.push(addBlocker(collector, 'cross_cutting', 'unresolved', section.key, {
             title: `${section.label} not discharged`,
             consequence: `${section.reason} ${truncate(section.missing.join(' '), 220)}`,
@@ -1334,6 +1333,7 @@ export function deriveBuildPacketReadiness(
         }
     }
     const requiredSections = [obligations.securityPrivacy, obligations.measurement].filter(item => item.required);
+    const measurementOpen = obligations.unresolved.some(section => section.key === 'measurement');
     criteria.push({
         id: 'cross_cutting',
         label: BUILD_PACKET_CRITERION_LABELS.cross_cutting,
@@ -1345,7 +1345,9 @@ export function deriveBuildPacketReadiness(
             ? `${plural(crossCuttingBlockerIds.length, 'required cross-cutting section')} ${crossCuttingBlockerIds.length === 1 ? 'is' : 'are'} unresolved.`
             : requiredSections.length === 0
                 ? 'This project triggers neither a security/privacy nor a measurement obligation.'
-                : `${plural(requiredSections.length, 'required section')} ${requiredSections.length === 1 ? 'is' : 'are'} discharged with linked requirements, tasks, and checks.`,
+                : measurementOpen
+                    ? 'No cross-cutting check is open; the owed measurement section is reported as a warning.'
+                    : `${plural(requiredSections.length, 'required section')} ${requiredSections.length === 1 ? 'is' : 'are'} discharged with linked requirements, tasks, and checks.`,
         evidence: [obligations.securityPrivacy, obligations.measurement].map(section => makeEvidence(
             'cross_cutting',
             section.required ? (section.satisfied ? 'direct' : 'incomplete') : 'inferred',
@@ -1470,105 +1472,6 @@ export function deriveBuildPacketReadiness(
         warningIds: sliceWarningIds,
     });
 
-    // ── 8. Product reasoning is COMMITTED, not merely projected ────────────
-    // Source: the CURRENT COMMITTED `ReadinessReview` (the caller's
-    // `commitmentRemainsCurrent(...) && activeCommit` filter). The live
-    // `isReadyToBuild` projection is never evidence that a commitment happened
-    // — at most it informs whether a commit action is currently on offer.
-    // Fails CLOSED on the `isCommitmentUnverifiable` case.
-    const committedBlockerIds: string[] = [];
-    const committedWarningIds: string[] = [];
-    const committedEvidence: BuildPacketEvidence[] = [];
-    const commitment = input.committedReadiness ?? undefined;
-    if (input.commitmentUnverifiable) {
-        committedBlockerIds.push(addBlocker(collector, 'reasoning_committed', 'unverifiable', 'commitment', {
-            title: 'The readiness commitment cannot be verified',
-            consequence: 'This plan claims to be committed, but no current, integrity-valid commitment can be verified — so nothing here proves the reasoning behind the packet was ever approved.',
-            remedy: 'Reopen the plan and run Review readiness again to record a verifiable commitment.',
-            evidenceQuality: 'incomplete',
-            actionTarget: { kind: 'readiness_commitment' },
-        }));
-        committedEvidence.push(makeEvidence(
-            'reasoning_committed', 'incomplete',
-            'Readiness provenance exists for this spine but no current commitment could be verified.',
-            'commitment', 'unverifiable',
-        ));
-    } else if (!commitment) {
-        committedBlockerIds.push(addBlocker(collector, 'reasoning_committed', 'not_committed', 'commitment', {
-            title: 'The product reasoning has not been committed',
-            consequence: 'The packet would be built on reasoning nobody has approved. A readiness projection recomputed on render is not an approval.',
-            remedy: input.planningProjectionReadyToBuild
-                ? 'Open Review readiness — the current plan is ready to commit.'
-                : 'Resolve the remaining planning items, then commit the plan from Review readiness.',
-            evidenceQuality: 'incomplete',
-            actionTarget: { kind: 'readiness_commitment' },
-        }));
-        committedEvidence.push(makeEvidence(
-            'reasoning_committed', 'incomplete',
-            input.planningProjectionReadyToBuild
-                ? 'No current committed readiness review. The live planning projection reads ready, which only means a commit action can be offered — never that one happened.'
-                : 'No current committed readiness review.',
-            'commitment', 'none',
-        ));
-    } else if (input.currentSpineVersionId && commitment.spineVersionId !== input.currentSpineVersionId) {
-        committedBlockerIds.push(addBlocker(collector, 'reasoning_committed', 'spine_mismatch', commitment.reviewId, {
-            title: 'The commitment belongs to a different plan version',
-            consequence: 'The recorded commitment approved another PRD version, so it says nothing about the reasoning behind this packet.',
-            remedy: 'Run Review readiness against the current plan version and commit it.',
-            evidenceQuality: 'incomplete',
-            actionTarget: { kind: 'readiness_commitment' },
-        }));
-        committedEvidence.push(makeEvidence(
-            'reasoning_committed', 'incomplete',
-            `The current commitment binds to spine ${commitment.spineVersionId}, not ${input.currentSpineVersionId}.`,
-            'commitment', commitment.reviewId, commitment.spineVersionId,
-        ));
-    } else if (commitment.conclusion === 'not_ready') {
-        if (hasText(commitment.acceptedRiskRationale)) {
-            committedWarningIds.push(addWarning(collector, 'reasoning_committed', 'accepted_risk', commitment.reviewId, {
-                title: 'Committed with accepted risk',
-                owner: 'user',
-                impact: 'The packet rests on reasoning the readiness review judged not ready; the concerns the user accepted are still open.',
-                rationale: commitment.acceptedRiskRationale!,
-                actionTarget: { kind: 'readiness_commitment' },
-            }));
-            committedEvidence.push(makeEvidence(
-                'reasoning_committed', 'direct',
-                `Commitment recorded with accepted risk — ${truncate(commitment.acceptedRiskRationale!, 140)}`,
-                'commitment', commitment.reviewId, commitment.spineVersionId,
-            ));
-        } else {
-            committedBlockerIds.push(addBlocker(collector, 'reasoning_committed', 'risk_without_rationale', commitment.reviewId, {
-                title: 'Committed with accepted risk, with no recorded rationale',
-                consequence: 'The commitment authorized a not-ready readiness review, but no rationale was recorded — so the accepted risk cannot be reported as a considered decision.',
-                remedy: 'Reopen the plan and re-commit, recording why the open concerns are acceptable.',
-                evidenceQuality: 'incomplete',
-                actionTarget: { kind: 'readiness_commitment' },
-            }));
-        }
-    } else {
-        committedEvidence.push(makeEvidence(
-            'reasoning_committed', 'direct',
-            `Readiness review ${commitment.reviewId} is committed and remains current for this plan version.`,
-            'commitment', commitment.reviewId, commitment.spineVersionId,
-        ));
-    }
-    criteria.push({
-        id: 'reasoning_committed',
-        label: BUILD_PACKET_CRITERION_LABELS.reasoning_committed,
-        status: committedBlockerIds.length > 0 ? (commitment ? 'attention' : 'not_started') : 'met',
-        blocking: committedBlockerIds.length > 0,
-        explanation: committedBlockerIds.length > 0
-            ? 'The reasoning behind this packet is not backed by a current committed readiness review.'
-            : committedWarningIds.length > 0
-                ? 'The plan is committed, with risk the user explicitly accepted.'
-                : 'A current committed readiness review stands behind this packet.',
-        evidence: committedEvidence,
-        actionTarget: { kind: 'readiness_commitment' },
-        blockerIds: committedBlockerIds,
-        warningIds: committedWarningIds,
-    });
-
     // ── Roll up ────────────────────────────────────────────────────────────
     const order = new Map(BUILD_PACKET_CRITERION_ORDER.map((id, index) => [id, index]));
     const blockers = [...collector.blockers].sort((a, b) => (
@@ -1595,8 +1498,8 @@ export function deriveBuildPacketReadiness(
             ? 'Implementation packet complete'
             : 'Implementation packet incomplete',
         summary: isPacketComplete
-            ? 'Every required output exists, is current, validates, covers the in-scope requirements, and traces to a committed plan.'
-            : `${plural(blockers.length, 'blocker')} must be resolved before this packet can be handed to a build.`,
+            ? 'Every required output exists, is current, validates, and covers the in-scope requirements.'
+            : `${plural(blockers.length, 'open check')} — advisory: nothing here blocks copying prompts, exporting, or converting to tasks.`,
         criteria: reportable.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)),
         blockers,
         warnings,

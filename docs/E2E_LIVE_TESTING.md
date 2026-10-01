@@ -55,16 +55,11 @@ still clip.
    The commit is best-effort: its exact-substring anchor replace can
    legitimately fail on LLM formatting drift, and the error state is itself
    useful visual coverage.
-6. **Downstream asset generation** (unless `--skip-assets`). The plan is
-   committed through the readiness gate — top-bar **Review readiness** →
-   ReadinessCheckpoint (**Finalize plan** when ready-to-build, otherwise the
-   **Finalize with accepted risk** override: reveal the override section, fill
-   the rationale textarea, then **Finalize with N accepted blockers** for an
-   exploring-phase working plan) → **FinalizationSuccessModal**
-   → **Generate build foundation** / **Explore outputs** → the advisory
-   pre-build checkpoint card (**Before generating: …**, which a fresh plan's
-   open planning items always trigger) → **Generate outputs** → the one-time
-   **Choose your visual direction** preset picker (Modern SaaS). That fires
+6. **Downstream asset generation** (unless `--skip-assets`). There is no
+   commitment step: the top-bar **Generate outputs** → (the **Generate
+   anyway** incomplete-PRD confirmation, only when a PRD section failed) → the
+   one-time **Choose your visual direction** preset picker (Modern SaaS) when
+   the inline picker after the draft was not confirmed. That fires
    `artifactJobController.startAll`, which generates the core-artifact bundle +
    mockup spec (real Gemini calls, dependency-layered). Settle is detected from
    the persisted `artifacts[projectId]` array (every *visible* core subtype has
@@ -73,12 +68,12 @@ still clip.
    assets…" pane). Progress screenshots are captured every ~45s.
 7. **The full view/tab inventory walk**, per requested viewport:
    - PRD **Overview** and **Features** tabs (`#prd-tab-*`), reached via the
-     journey rail's **Define** step.
-   - The **Challenge** surface (journey **Define** → PlanningStateBar's
-     **Challenge this plan**): the review workspace, **Review findings**,
-     **Review history** — plus the **Decision Center slide-over** (overflow
-     menu entry; queue + first record detail).
-   - Every artifact (journey **Review** step): Design System; User Flows
+     journey rail's **Plan** step.
+   - The **Challenge** surface (journey **Plan** → the one-line
+     PlanningStateBar's **Challenge this plan**): the review workspace,
+     **Review findings**, **Review history** — plus the **Decision Center
+     slide-over** (overflow menu entry; queue + first record detail).
+   - Every artifact (journey **Build** step): Design System; User Flows
      (plus up to 3 per-flow shots via the `Flow navigation` landmark);
      Screens (list, then the first screen's detail **Overview / Flow /
      Mockups** tabs); Data Model; Implementation Plan (**Build Brief /
@@ -229,12 +224,13 @@ update the script in the same change (treat drift here like docs drift):
 - Start-mode dialog: "How would you like to start?", the "Draft a working
   plan" option, the `Cancel` aria-label.
 - Journey nav: `JourneyRail.tsx` — the `nav[aria-label="Product journey"]`
-  buttons. Accessible names concatenate `"<n> · <status> <label>
-  <description>"` and label words collide with description words ("Review"
-  appears inside Finalize's description), so the driver matches each step by
-  a unique snippet of its description (`JOURNEY_STEP_PATTERNS`, sourced from
-  `src/lib/journeyPresentation.ts`). The Challenge surface is reached via
-  Define + the PlanningStateBar's `Challenge this plan` button; the
+  buttons (Plan · Decide · Build). Accessible names concatenate `"<n>.
+  <label> [<badge> open items] <description>"` and label words recur in other
+  steps' descriptions ("Generate" in Build's), so the driver matches each step
+  by a unique snippet of its description (`JOURNEY_STEP_PATTERNS`, sourced
+  from `src/lib/journeyPresentation.ts`). The Challenge surface is reached via
+  Plan + the `Challenge this plan` button inside the one-line PlanningStateBar
+  (`region` "Planning status" — the overflow menu has a same-named entry); the
   Decision Center and Project history are slide-overs behind the top-bar
   `More actions` overflow menu (`Decision Center` / `Project History`
   entries, `Close Decision Center` / `Close project history` buttons). The
@@ -276,15 +272,11 @@ update the script in the same change (treat drift here like docs drift):
   `dom-fallback` settle signal and a loud console warning instead of
   burning the full timeout, and `report.generation.settleSignal` /
   `report.assets.settleReason` record which signal fired.
-- Commit-to-build path: the top-bar `Review readiness` button
-  (`ProjectWorkspace.tsx`), the `Finalize plan` / `Finalize with accepted
-  risk` / `Finalize with N accepted blockers` buttons and the
-  `#readiness-rationale` textarea (`ReadinessCheckpoint.tsx`), the
-  `Generate build foundation` / `Explore outputs` button
-  (`FinalizationSuccessModal.tsx`), the `Generate outputs` button inside
-  `section[aria-labelledby="pre-build-checkpoint-heading"]`
-  (`PreBuildCheckpointCard.tsx` — a guarded no-op on builds without the card),
-  and the `Choose your visual direction`
+- Generate-outputs path: the top-bar `Generate outputs` button, scoped to the
+  `<header>` banner landmark (`ProjectWorkspace.tsx` — the Build stage has its
+  own same-named banner button), the incomplete-PRD `Generate anyway`
+  confirmation (`ConfirmDialog`, only when a PRD section failed), and the
+  `Choose your visual direction`
   preset picker (`DesignSystemPresetChoice.tsx`) — a `DesignPresetGrid` preview
   grid where the run selects the `Modern SaaS` card and confirms via
   `Continue with…`.

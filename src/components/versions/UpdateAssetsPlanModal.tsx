@@ -30,6 +30,17 @@ interface UpdateAssetsPlanModalProps {
     quickDisabled?: boolean;
     /** Blocks regeneration choices while still allowing mark-current-only sync. */
     regenerationDisabledReason?: string;
+    /**
+     * The current PRD has failed sections and nobody has acknowledged them:
+     * the modal shows the explicit incomplete-PRD confirmation inline (in
+     * place of the plain reason). `onAcknowledge` records the durable
+     * acknowledgement on the spine version; once the parent stops passing
+     * this prop, regeneration choices unlock.
+     */
+    incompletePrdAcknowledgement?: {
+        failedSectionCount: number;
+        onAcknowledge: () => void;
+    };
     onCancel: () => void;
 }
 
@@ -41,7 +52,7 @@ const CHOICE_LABELS: Record<UpdatePlanChoice, string> = {
 
 export function UpdateAssetsPlanModal({
     prdLabel, changeHeadline, rows, onConfirm, previewExecution, onOpenCareful, quickDisabled = false,
-    regenerationDisabledReason, onCancel,
+    regenerationDisabledReason, incompletePrdAcknowledgement, onCancel,
 }: UpdateAssetsPlanModalProps) {
     const dialogRef = useRef<HTMLDivElement>(null);
     const initialFocusRef = useRef<HTMLButtonElement>(null);
@@ -312,7 +323,29 @@ export function UpdateAssetsPlanModal({
                             Another output-generation job is active. Quick sync will be available when it finishes.
                         </p>
                     )}
-                    {!quickDisabled && updateCount > 0 && regenerationDisabledReason && (
+                    {!quickDisabled && updateCount > 0 && incompletePrdAcknowledgement ? (
+                        <div
+                            role="group"
+                            aria-label="Incomplete PRD"
+                            className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900"
+                        >
+                            <p>
+                                <strong>Regenerate from an incomplete PRD?</strong>{' '}
+                                {incompletePrdAcknowledgement.failedSectionCount} section
+                                {incompletePrdAcknowledgement.failedSectionCount === 1 ? '' : 's'} of this PRD failed
+                                to generate, so regenerated outputs will be missing that content. You can re-run the
+                                failed section{incompletePrdAcknowledgement.failedSectionCount === 1 ? '' : 's'} from
+                                the Plan stage first.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={incompletePrdAcknowledgement.onAcknowledge}
+                                className="inline-flex min-h-11 items-center rounded-md border border-amber-300 bg-white px-3 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                            >
+                                Generate anyway
+                            </button>
+                        </div>
+                    ) : !quickDisabled && updateCount > 0 && regenerationDisabledReason && (
                         <p className="text-[11px] font-medium text-amber-700">{regenerationDisabledReason}</p>
                     )}
                     <div className="flex items-center justify-end gap-2">

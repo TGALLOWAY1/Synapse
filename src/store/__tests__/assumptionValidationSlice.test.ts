@@ -3,8 +3,6 @@ import type { AssumptionValidationEvent, PlanningRecord } from '../../types';
 import {
     assumptionEvidenceSetHash,
     assumptionStatementHash,
-    compareReadinessReviewCurrentness,
-    deriveReadinessReview,
     projectAssumptionValidation,
     projectDecision,
     planningContentHash,
@@ -305,33 +303,6 @@ describe('assumption validation store boundary', () => {
             evidenceContentHash: evidence.contentHash,
             reason: expect.stringContaining('recorded incorrectly'),
             actor: 'user',
-        });
-    });
-
-    it('makes a readiness checkpoint historical when evidence supporting it is retracted', () => {
-        const { current, evidence } = prepareCurrentEvidence();
-        const readinessInput = (planningRecord: PlanningRecord, createdAt: number) => ({
-            projectId: 'project-1',
-            spine: {
-                versionId: 'spine-1', content: 'Current plan', incompleteSectionCount: 0,
-                isCommitted: false,
-            },
-            planningRecords: [planningRecord],
-            reviewRuns: [], specialistRuns: [], reviewIssues: [], reviewFindings: [],
-            outputAlignment: {
-                outputs: [], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 0, blockingCount: 0,
-            },
-            createdAt,
-        });
-        const review = deriveReadinessReview(readinessInput(current, 130));
-        expect(useProjectStore.getState().retractAssumptionEvidence(
-            'project-1', current.id, exactGuard(current, evidence.id, evidence.contentHash),
-        )).toMatchObject({ ok: true });
-        const changed = useProjectStore.getState().planningRecords['project-1'][0];
-        expect(compareReadinessReviewCurrentness(review, readinessInput(changed, 140))).toMatchObject({
-            current: false,
-            historical: true,
-            reasons: expect.arrayContaining(['planning_state_changed']),
         });
     });
 

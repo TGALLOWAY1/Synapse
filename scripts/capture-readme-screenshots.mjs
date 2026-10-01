@@ -8,8 +8,8 @@
 //   3. prd            — the generated PRD (Overview)
 //   4. refine         — highlight-to-refine action popover (Clarify/Expand/…)
 //   5. features       — the Features view with per-feature Confirm approval
-//   6. decisions      — the Decision Center (Challenge stage)
-//   7. artifacts      — downstream assets generated in Explore
+//   6. decisions      — the Decision Center (the journey rail's Decide step)
+//   7. artifacts      — downstream assets generated in the Build stage
 //
 // It reuses the same boot / fetch-relay / settle-detection machinery as
 // scripts/e2e-live-run.mjs (see docs/E2E_LIVE_TESTING.md). Auth is the dev-only
@@ -279,8 +279,8 @@ try {
     // On the immediate-generation path the app shows an inline "Choose your
     // visual direction" setup step in the plan area WHILE the PRD generates in
     // the background. Dismiss it with "Decide later" so the live dependency-wave
-    // ProgressTimeline is revealed (the preset picker reappears later, on the
-    // Explore-outputs path, and is handled there).
+    // ProgressTimeline is revealed (the preset picker reappears later, when
+    // outputs are first generated, and is handled there).
     await page.getByRole('button', { name: 'Decide later' }).click({ timeout: 10_000 }).catch(() => {
         console.warn('  no inline design setup to dismiss (timeline may already be visible)');
     });
@@ -381,49 +381,37 @@ try {
     await page.evaluate(() => window.scrollTo(0, 0));
     await shot(page, 'features');
 
-    // --- 6. Decision Center (Challenge stage) --------------------------------
-    const stageNav = page.getByRole('navigation', { name: 'Planning progression' });
-    await stageNav.getByRole('button', { name: /^Challenge:/ }).click({ timeout: 6000 }).catch(() => {});
+    // --- 6. Decision Center (the journey rail's Decide step) -----------------
+    // Journey steps are matched by a unique snippet of their sr-only
+    // description (src/lib/journeyPresentation.ts).
+    const journeyNav = page.getByRole('navigation', { name: 'Product journey' });
+    await journeyNav.getByRole('button', { name: /Answer open decisions/ }).click({ timeout: 6000 }).catch(() => {});
     await settle(1800);
-    await page.evaluate(() => window.scrollTo(0, 0));
     await shot(page, 'decision-center');
+    await page.getByRole('button', { name: 'Close Decision Center' }).click({ timeout: 4000 }).catch(() => {});
+    await settle(400);
 
-    // --- 7. Artifacts in Explore ---------------------------------------------
-    // Commit through the readiness gate with accepted risk (a fresh working plan
-    // is in the exploring phase), then take the "Explore outputs" path → visual
-    // direction preset → real artifact bundle. Skipped under --skip-assets
+    // --- 7. Artifacts in the Build stage -------------------------------------
+    // Top-bar "Generate outputs" (no commitment step in front of it) → the
+    // incomplete-PRD confirmation only when a section failed → visual direction
+    // preset → real artifact bundle. Skipped under --skip-assets
     // (PRD-surface-only run; much cheaper).
     if (!args.assets) {
         console.log('  --skip-assets: stopping after PRD surfaces');
         await context.close();
         throw SKIP_ASSETS_DONE;
     }
-    await page.getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 }).catch(() => {});
-    await settle(1200);
-    const commitReady = page.getByRole('button', { name: 'Commit plan' });
-    if (await commitReady.isVisible().catch(() => false)) {
-        await commitReady.click();
-    } else {
-        await page.getByRole('button', { name: 'Proceed with accepted risk' }).click({ timeout: 6000 }).catch(() => {});
+    await page.getByRole('banner').getByRole('button', { name: 'Generate outputs' }).click({ timeout: 8000 }).catch(() => {});
+    await settle(800);
+    const generateAnyway = page.getByRole('button', { name: 'Generate anyway' });
+    if (await generateAnyway.isVisible().catch(() => false)) {
+        await generateAnyway.click({ timeout: 5000 }).catch(() => {});
         await settle(500);
-        await page.locator('#readiness-rationale').fill(
-            'Screenshot capture run: committing to exercise the downstream asset generation for README imagery.',
-        ).catch(() => {});
-        const containment = page.locator('#readiness-containment');
-        if (await containment.isVisible().catch(() => false)) {
-            await containment.fill('Throwaway local capture build — generated artifacts are used only for screenshots.').catch(() => {});
-        }
-        await page.getByRole('button', { name: /^Proceed with \d+ open item/ }).click({ timeout: 6000 }).catch(() => {});
     }
-    const finalizeButton = () => page.locator('[aria-labelledby="finalize-success-title"]')
-        .getByRole('button', { name: /Generate build foundation|Explore outputs/ });
-    await finalizeButton().waitFor({ timeout: 12_000 }).catch(() => {});
-    await settle(400);
-    await finalizeButton().click({ timeout: 8000 }).catch(() => {});
     // Visual-direction preset picker gates the first bundle. Use waitFor (not
     // isVisible, whose `timeout` option is ignored and returns synchronously) so
     // we don't skip the only preset-selection path if React hasn't rendered the
-    // picker in the same tick as the finalize click.
+    // picker in the same tick as the Generate outputs click.
     const preset = page.getByText('Choose your visual direction');
     const presetShown = await preset.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
     if (presetShown) {
@@ -476,12 +464,12 @@ try {
     console.log(`  assets settled in ${Math.round((Date.now() - aT0) / 1000)}s`);
     await settle(2000);
 
-    // Ensure we're on the Explore stage, then screenshot the workspace + a few
+    // Ensure we're on the Build stage, then screenshot the workspace + a few
     // individual artifacts.
-    await stageNav.getByRole('button', { name: /^(Explore|Build):/ }).click({ timeout: 6000 }).catch(() => {});
+    await journeyNav.getByRole('button', { name: /Generate, review, and export/ }).click({ timeout: 6000 }).catch(() => {});
     await settle(1500);
     await page.evaluate(() => window.scrollTo(0, 0));
-    await shot(page, 'artifacts-explore');
+    await shot(page, 'artifacts-build');
 
     for (const title of ['Design System', 'Screens', 'User Flows', 'Data Model', 'Implementation Plan']) {
         await page.locator('nav[aria-label="Artifacts"] button').filter({ hasText: title }).first()

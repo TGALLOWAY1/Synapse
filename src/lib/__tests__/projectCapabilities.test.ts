@@ -16,7 +16,6 @@ describe('project capabilities', () => {
             isReadOnly: true,
             canExplore: true,
             canEditProjectContent: false,
-            canChangeFinality: false,
             canEditArtifacts: false,
             canReviewArtifacts: false,
             canGenerateArtifacts: false,
@@ -77,5 +76,16 @@ describe('project capabilities', () => {
             'recordDownstreamArtifactUpdateApplication', 'recordDownstreamArtifactUpdateVerification',
             'appendDownstreamArtifactUpdateVerificationEvent',
         ]) expect(PERSISTENT_STORE_ACTIONS.has(action)).toBe(true);
+    });
+
+    it('guards the durable incomplete-PRD acknowledgement like every other spine write', () => {
+        expect(PERSISTENT_STORE_ACTIONS.has('acknowledgeIncompleteSpine')).toBe(true);
+    });
+
+    it('no longer lists the removed Finalize/commitment writes', () => {
+        for (const action of [
+            'markSpineFinal', 'createReadinessReview', 'authorizeReadinessCommitment',
+            'commitReadinessReview', 'reopenReadinessCommitment',
+        ]) expect(PERSISTENT_STORE_ACTIONS.has(action)).toBe(false);
     });
 });

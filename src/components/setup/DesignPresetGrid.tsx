@@ -15,7 +15,7 @@ interface DesignPresetGridProps {
     defaultPresetId?: string | null;
     /**
      * The direction currently stored on the project → "Current" badge. Used by
-     * the post-finalization "change your visual direction" flow so the user can
+     * the post-generation "change your visual direction" flow so the user can
      * see what's active while they pick a new one.
      */
     currentId?: string;
@@ -24,7 +24,7 @@ interface DesignPresetGridProps {
 /**
  * The shared visual-direction picker grid — the large static preview cards used
  * both by the setup-stage `DesignSetupStep` (right after the initial prompt) and
- * the post-finalization "Change your visual direction" flow, so the two screens
+ * the post-generation "Change your visual direction" flow, so the two screens
  * look identical. Presentational only; the caller owns the selection + actions.
  */
 export function DesignPresetGrid({

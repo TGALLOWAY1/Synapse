@@ -6,14 +6,11 @@ import {
     outputAlignmentCopy,
     planningRecordCopy,
     planningRecordDominantCondition,
-    projectCommitmentCopy,
     proposalLifecycleCopy,
 } from '../planningLanguage';
 
 describe('planning language', () => {
     it('uses one plain-language vocabulary without weakening important distinctions', () => {
-        expect(projectCommitmentCopy('proceeding_with_accepted_risk').label)
-            .toBe('Proceeding with accepted risk');
         expect(outputAlignmentCopy('aligned').label).toBe('Up to date');
         expect(outputAlignmentCopy('possibly_affected').label).toBe('Review recommended');
         expect(outputAlignmentCopy('stale').label).toBe('Update required');

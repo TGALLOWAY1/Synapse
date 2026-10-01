@@ -4,8 +4,8 @@
 // systems, tiers, assumptions decisions, …) render safely.
 //
 // These views are a presentation layer over the SAME canonical StructuredPRD:
-// they share one version, one finalization state, one revision history, one
-// freshness/provenance model. Nothing here is persisted as its own structure.
+// they share one version, one revision history, one freshness/provenance
+// model. Nothing here is persisted as its own structure.
 //
 // Decision feedback (assumptions, decision log, deferred scope, risks) lives in
 // the Decision Center (Challenge stage), NOT in a PRD sub-tab. The decision

@@ -52,7 +52,7 @@ interface Props {
     initialMilestoneId?: string;
     /** Opens an exact architecture or delivery-plan region when it can be resolved safely. */
     initialNavigationTarget?: ImplementationPlanNavigationTarget;
-    /** Opens an exact Final Review subsection selected by a packet blocker. */
+    /** Opens an exact Final Review subsection selected by a packet check. */
     initialFinalReviewSection?: 'coverage';
     /** Build-packet context for the Final Review surface (plan §W7). */
     finalReview?: PlanFinalReviewContext;

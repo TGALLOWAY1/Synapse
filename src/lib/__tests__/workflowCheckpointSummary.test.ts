@@ -20,7 +20,6 @@ const input = (
     overrides: Partial<WorkflowCheckpointSummaryInput> = {},
 ): WorkflowCheckpointSummaryInput => ({
     context: 'generation',
-    planningVerdict: { kind: 'working_plan', label: 'Working plan' },
     artifacts: [],
     critiqueIssues: [],
     ...overrides,
@@ -201,40 +200,26 @@ describe('deriveWorkflowCheckpointSummary', () => {
         expect(summary.counts.totalArtifacts).toBe(2);
     });
 
-    it('never tones an accepted-risk verdict as clean', () => {
-        const summary = deriveWorkflowCheckpointSummary(input({
-            planningVerdict: {
-                kind: 'finalized',
-                label: 'Proceeding with accepted risk',
-                acceptedRisks: ['Guest checkout remains deferred.'],
-            },
-        }));
-
-        expect(summary.rows).toHaveLength(0);
-        expect(summary.tone).toBe('attention');
-    });
-
     it('tones a run with nothing to report as clean', () => {
         expect(deriveWorkflowCheckpointSummary(input({
             artifacts: [artifact({})],
         })).tone).toBe('clean');
     });
 
-    it('uses neutral clean copy without turning a working plan into a final verdict', () => {
+    it('uses neutral clean copy and carries no plan verdict at all', () => {
         const generation = deriveWorkflowCheckpointSummary(input());
         expect(generation.headline).toBe('Generation complete');
 
-        const exported = deriveWorkflowCheckpointSummary(input({
-            context: 'export',
-            planningVerdict: { kind: 'working_plan', label: 'Working plan' },
-        }));
+        const exported = deriveWorkflowCheckpointSummary(input({ context: 'export' }));
         expect(exported.headline).toBe('Ready to export');
-        expect(exported.supportingText).not.toContain('Working plan');
-        expect(exported.planningVerdict.kind).toBe('working_plan');
-        expect(renderWorkflowCheckpointSummaryMarkdown(exported).match(/Working plan/g)).toHaveLength(1);
+        // The Finalize/commitment layer is gone: no "Plan finalized" /
+        // "Working plan" / accepted-risk verdict travels with the checkpoint.
+        expect('planningVerdict' in exported).toBe(false);
+        const markdown = renderWorkflowCheckpointSummaryMarkdown(exported);
+        expect(markdown).not.toMatch(/Plan status|Plan finalized|Working plan|accepted risk/i);
     });
 
-    it('renders the same verdict and combined signals for handoff text', () => {
+    it('renders the combined signals for handoff text', () => {
         const summary = deriveWorkflowCheckpointSummary(input({
             context: 'export',
             artifacts: [artifact({
@@ -247,27 +232,8 @@ describe('deriveWorkflowCheckpointSummary', () => {
             })],
         }));
         const markdown = renderWorkflowCheckpointSummaryMarkdown(summary);
-        expect(markdown).toContain('**Plan status:** Working plan');
+        expect(markdown).toContain('## Workflow Checkpoint');
         expect(markdown).toContain('Validation note — Review ownership');
         expect(markdown).toContain('Output may be affected — The target users changed.');
-    });
-
-    it('preserves the exact finalized verdict and accepted planning risks in handoff text', () => {
-        const summary = deriveWorkflowCheckpointSummary(input({
-            context: 'export',
-            planningVerdict: {
-                kind: 'finalized',
-                label: 'Proceeding with accepted risk',
-                acceptedRisks: ['Guest checkout remains deferred.'],
-                rationale: 'The risk is contained for the first release.',
-                containment: 'Keep account creation reversible.',
-            },
-        }));
-
-        const markdown = renderWorkflowCheckpointSummaryMarkdown(summary);
-        expect(markdown).toContain('Proceeding with accepted risk');
-        expect(markdown).toContain('Guest checkout remains deferred.');
-        expect(markdown).toContain('The risk is contained for the first release.');
-        expect(markdown).toContain('Keep account creation reversible.');
     });
 });
