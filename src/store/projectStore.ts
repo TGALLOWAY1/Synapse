@@ -19,7 +19,7 @@ import { createMetricsSlice } from './slices/metricsSlice';
 import { createReviewSlice } from './slices/reviewSlice';
 import { createReadinessSlice } from './slices/readinessSlice';
 import { createDownstreamUpdatePlanSlice } from './slices/downstreamUpdatePlanSlice';
-import { markInterruptedGenerations } from './interruptedGeneration';
+import { markInterruptedGenerations, markInterruptedOutputRuns } from './interruptedGeneration';
 import { markInterruptedReviews } from './interruptedReviews';
 import { guardProjectStoreActions } from '../lib/projectCapabilities';
 import { sweepRetentionCollections } from '../lib/collectionRetention';
@@ -105,7 +105,13 @@ export const useProjectStore = create<ProjectState>()(
                     // persisted mid-generation must be converted to a settled
                     // error — otherwise the UI shows "Generating…" forever.
                     markInterruptedGenerations(state.spineVersions);
+                    // Same for artifact output runs: a leftover 'running'
+                    // marker becomes 'interrupted' so the Build view resumes
+                    // the run (artifactJobController.resumeIfNeeded).
+                    markInterruptedOutputRuns(state.projects ?? {});
                     markInterruptedReviews(state.reviewRuns ?? {}, state.specialistRuns ?? {});
+                    // Legacy blobs predate delete tombstones.
+                    state.projectTombstones ??= {};
                     state.downstreamUpdatePlans ??= {};
                     state.downstreamUpdatePlanEvents ??= {};
                     state.downstreamArtifactUpdateProposals ??= {};
@@ -198,8 +204,9 @@ export const useProjectStore = create<ProjectState>()(
 // (`generationPhase: 'running'`) would be adopted as a settled "interrupted"
 // error here and could then be persisted back over the live run. Instead we
 // read the merged blob and setState only the persisted project-keyed
-// collections; transient slices (jobs, prdProgress) and boot fixups are
-// untouched.
+// collections plus the per-user delete tombstones (the merge unions both tabs'
+// tombstones and drops the projects they suppress); transient slices (jobs,
+// prdProgress) and boot fixups are untouched.
 registerCrossTabMerge({
     merge: mergePersistedProjectBlobs,
     onApplied: () => {
@@ -212,7 +219,7 @@ registerCrossTabMerge({
                 const persistedState = parsed?.state;
                 if (!persistedState || typeof persistedState !== 'object') return;
                 const adopted: Record<string, unknown> = {};
-                for (const key of ALL_PROJECT_COLLECTIONS) {
+                for (const key of [...ALL_PROJECT_COLLECTIONS, 'projectTombstones'] as const) {
                     const value = persistedState[key];
                     if (value && typeof value === 'object') adopted[key] = value;
                 }

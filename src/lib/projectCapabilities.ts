@@ -110,14 +110,15 @@ export function canPerformProjectAction(projectId: string | undefined, action: P
 /** Store actions which change persisted project data. Keep this list explicit:
  * adding a new write is a conscious policy decision, not a UI convention. */
 export const PERSISTENT_STORE_ACTIONS = new Set<string>([
-    'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage',
+    'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage', 'setBranchPendingReply',
     'mergeBranch', 'stageBranch', 'unstageBranch', 'applyStagedBranchesToSpine',
     'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
     'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
     'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
     'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
     'setPreflightIndex', 'setPreflightSummary', 'completePreflightSession', 'setPreflightError',
-    'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'createArtifact', 'updateArtifact',
+    'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'markOutputRunStarted', 'settleOutputRun',
+    'createArtifact', 'updateArtifact',
     'deleteArtifact', 'createArtifactVersion', 'revertArtifactToVersion', 'markArtifactCurrentForSpine',
     'acceptArtifactValidationIssue',
     'setPreferredVersion', 'updateArtifactVersionMetadata', 'updateArtifactOverlay',

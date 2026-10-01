@@ -6,13 +6,36 @@
 
 - **`geminiClient.ts`** — low-level Gemini transport. Two modes:
   `callGemini()` (sync JSON) and `callGeminiStream()` (SSE). Both wrap fetch
-  in `fetchWithRetry` for connection-level transient errors;
-  `callGeminiStream` *also* wraps the entire fetch+reader in a stream-level
-  retry, so a mid-stream mobile-network drop reconnects from byte zero.
-  Stream callers should implement `StreamCallbacks.onRestart` to reset any
+  in `fetchWithRetry`, which retries connection-level transient errors **and
+  rate limits / transient server failures** — HTTP 429 and 500/502/503/504
+  (`isRetryableHttpStatus`; the list is closed: every other 4xx is
+  deterministic and fails immediately). One budget of `MAX_FETCH_RETRIES` (3)
+  per request, exponential backoff ≈1s/2s/4s with up to 50% proportional
+  jitter (`backoffDelayMs`, so the PRD pipeline's concurrent section calls
+  don't retry in lockstep); a `Retry-After` header is honored instead when
+  present, and a `Retry-After` beyond `MAX_RETRY_AFTER_MS` (60s) is not
+  waited out — the error surfaces. Backoff waits honor the caller's abort
+  signal (a cancel during backoff rejects promptly with `AbortError`) and
+  `touch` the 120s inactivity watchdog before and after each wait, so the
+  watchdog still measures only server silence. A status response always
+  arrives before any streamed chunk, so status retries never replay delivered
+  content. `callGeminiStream` *also* wraps the entire fetch+reader in a
+  stream-level retry, so a mid-stream mobile-network drop reconnects from byte
+  zero. Stream callers should implement `StreamCallbacks.onRestart` to reset any
   chunk-derived state (char counters, phase trackers) when the stream is
   re-attempted. `isRetryableNetworkError` is exported for callers that
-  need to reason about retry policy. **Both modes now parse Gemini's
+  need to reason about retry policy. **Error messages say what happened:** a
+  failed response throws `GeminiHttpError` (`.status`; never classified as a
+  network error, so a body that happens to mention "NetworkError" can't
+  trigger another round of stream retries) whose message carries the HTTP
+  status, Gemini's error message or — for a non-JSON or message-less body —
+  its first ~200 characters (whitespace-collapsed, credential-scrubbed via
+  `redactText`), plus
+  "(after N retries)" when the transport retried; never the old opaque
+  "Unknown error". A `finishReason: 'SAFETY'` (or a prompt blocked via
+  `promptFeedback.blockReason`) fails with an explicit safety-filter error in
+  **both** modes — the stream no longer "completes" with a partial/empty body
+  that later fails as a generic parse error. **Both modes now parse Gemini's
   `usageMetadata`** and fire `JsonModeConfig.onUsage` — the streaming path
   reads it off the final SSE chunk, closing the old artifact-token-capture gap.
   `callGemini`/`callGeminiStream` are the **single chokepoint** for every LLM
@@ -55,7 +78,8 @@
 - **LLM Trace Viewer (`src/lib/trace/`, `src/components/developer/`) — a
   developer-only debugging surface.** Every call through the geminiClient
   chokepoint is captured (request, redacted body, raw response, parsed JSON,
-  token usage, finishReason, retries, timing) via `beginTrace()`
+  token usage, finishReason, retries — transport retries included, with their
+  reasons in `validation.retryReason` — timing) via `beginTrace()`
   (`traceRecorder.ts`). **Capture is OFF by default** — enabled per browser via
   the viewer's toggle (localStorage `synapse-llm-trace`) or a `?llmtrace` query
   param; when off, `beginTrace` returns a zero-cost no-op handle. Enabled traces

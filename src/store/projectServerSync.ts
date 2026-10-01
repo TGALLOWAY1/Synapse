@@ -43,6 +43,8 @@ import {
   pullProjectImageRefs,
 } from './projectImageSync';
 import { isShowcaseProjectId } from '../data/demoProject';
+import { latestProjectActivity } from '../lib/crossTabMerge';
+import { isSuppressedByTombstone } from '../lib/projectTombstones';
 
 const PUSH_DEBOUNCE_MS = 1500;
 
@@ -68,6 +70,21 @@ function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): Bun
  * the public demo and every gallery slot). */
 function syncableIds(state: ReturnType<typeof useProjectStore.getState>): string[] {
   return Object.keys(state.projects).filter((id) => !isShowcaseProjectId(id));
+}
+
+/**
+ * Whether `projectId` was deleted on this device and nothing has touched it
+ * since — its per-user delete tombstone (projectTombstones.ts) still
+ * suppresses it. Such an id is never pulled (the deletion must not be undone
+ * by the server copy) or pushed (a stale copy must not re-create it there).
+ */
+function isTombstoned(state: ReturnType<typeof useProjectStore.getState>, projectId: string): boolean {
+  const deletedAt = state.projectTombstones?.[projectId];
+  if (deletedAt === undefined) return false;
+  const activity = projectId in state.projects
+    ? latestProjectActivity(state as unknown as Record<string, unknown>, projectId)
+    : 0;
+  return isSuppressedByTombstone(deletedAt, activity);
 }
 
 /**
@@ -166,6 +183,7 @@ async function pushProjectNow(projectId: string): Promise<void> {
   const state = useProjectStore.getState();
   const bundle = extractProjectBundle(bundleSourceOf(state), projectId);
   if (!bundle) return; // deleted before the debounce fired
+  if (isTombstoned(state, projectId)) return; // deleted here — never re-create it remotely
 
   // Do not auto-push a project that is standing in conflict — that would fight
   // the guard and risk clobbering. Resolution is explicit (see resolveConflict*).
@@ -251,8 +269,11 @@ async function deleteRemote(projectId: string): Promise<void> {
     if (activeUserId) removeProjectSyncMeta(activeUserId, projectId);
     projectsDebug('project deleted on server', { projectId });
   } catch (error) {
+    // The local delete tombstone stays (it was written with the deletion), so
+    // the next reconcile neither pulls the still-live server copy back nor
+    // forgets the delete — it retries it (see reconcile's toRetryDelete).
     const message = error instanceof Error ? error.message : 'delete_failed';
-    projectsDebug('project remote delete failed', { projectId, message });
+    projectsDebug('project remote delete failed — will retry on next reconcile', { projectId, message });
   }
 }
 
@@ -280,11 +301,13 @@ function removeLocalProject(projectId: string): void {
   projectsDebug('remote-deleted project removed locally', { projectId });
 }
 
-/** Apply server bundles into the store additively, without echoing a push. */
+/** Apply server bundles into the store additively, without echoing a push.
+ *  A project deleted on this device (tombstoned) is never added back. */
 function applyBundles(bundles: ProjectBundle[]): string[] {
   if (bundles.length === 0) return [];
   const state = useProjectStore.getState();
-  const { next, addedIds } = mergeBundlesIntoSource(bundleSourceOf(state), bundles);
+  const live = bundles.filter((bundle) => !isTombstoned(state, bundle.project.id));
+  const { next, addedIds } = mergeBundlesIntoSource(bundleSourceOf(state), live);
   if (addedIds.length === 0) return [];
   suspendPush = true;
   try {
@@ -379,8 +402,18 @@ async function reconcile(userId: string): Promise<void> {
     // these pending across a reload. Re-push them so they don't silently linger
     // as local-only while the banner reads "synced".
     const toRetryPush: string[] = [];
+    // Live on the server but deleted on this device (delete tombstone): a
+    // remote delete that failed or never ran (offline / signed out). Never
+    // pull it back; retry the delete — only for a project this device
+    // demonstrably synced, so a tombstone can't delete cloud work it never saw.
+    const toRetryDelete: string[] = [];
+    const stateAtList = useProjectStore.getState();
     for (const summary of liveSummaries) {
       if (!localIds.has(summary.id)) {
+        if (isTombstoned(stateAtList, summary.id)) {
+          if (isProjectUploaded(userId, summary.id)) toRetryDelete.push(summary.id);
+          continue;
+        }
         toAdd.push(summary);
         continue;
       }
@@ -412,6 +445,10 @@ async function reconcile(userId: string): Promise<void> {
       }
     }
 
+    // Per-project pull failures. The reconcile still completes (everything
+    // else synced) but reports these ids instead of a clean "ready", so the
+    // UI can say which cloud copies didn't come down and offer a retry.
+    const failedPullIds: string[] = [];
     async function fetchBundle(summary: ServerProjectSummary): Promise<ProjectBundle | null> {
       try {
         const full = await fetchProject(summary.id);
@@ -421,6 +458,7 @@ async function reconcile(userId: string): Promise<void> {
           projectId: summary.id,
           message: error instanceof Error ? error.message : 'error',
         });
+        failedPullIds.push(summary.id);
         return null;
       }
     }
@@ -450,6 +488,8 @@ async function reconcile(userId: string): Promise<void> {
       const safeToApply: ProjectBundle[] = [];
       for (const bundle of refreshed) {
         const id = bundle.project.id;
+        // Deleted locally while the bundle was in flight — don't resurrect it.
+        if (isTombstoned(useProjectStore.getState(), id)) continue;
         if (getProjectSyncMeta(userId, id).hasUnsyncedChanges === true) {
           const summary = toRefresh.find((s) => s.id === id);
           markConflict(userId, id, 'reconcile', {
@@ -483,6 +523,7 @@ async function reconcile(userId: string): Promise<void> {
     const toPush: string[] = [];
     for (const id of localIds) {
       if (serverIds.has(id)) continue;
+      if (isTombstoned(useProjectStore.getState(), id)) continue;
       const meta = getProjectSyncMeta(userId, id);
       const reachedCloud = meta.lastSeenServerRevision != null || meta.lastCloudSavedAt != null;
       if (reachedCloud && meta.hasUnsyncedChanges !== true) {
@@ -506,8 +547,14 @@ async function reconcile(userId: string): Promise<void> {
       await pushProjectNow(id);
     }
 
+    // Retry remote deletes that never landed. deleteRemote keeps the
+    // tombstone on failure, so a still-failing delete is retried next time.
+    for (const id of toRetryDelete) {
+      await deleteRemote(id);
+    }
+
     knownProjectIds = new Set(syncableIds(useProjectStore.getState()));
-    useProjectSyncStore.getState().markPulled(migratedCount);
+    useProjectSyncStore.getState().markPulled(migratedCount, failedPullIds);
 
     // Pull image refs for every syncable project into the registry so the mockup
     // image store can hydrate bytes lazily on view. Refs only (no bytes), and
@@ -521,6 +568,8 @@ async function reconcile(userId: string): Promise<void> {
       added: added.length,
       refreshed: refreshed.length,
       migrated: migratedCount,
+      failedPulls: failedPullIds.length,
+      retriedDeletes: toRetryDelete.length,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'sync_failed';
@@ -604,14 +653,33 @@ export function refreshProjectsFromServer(): void {
 }
 
 /**
+ * What an explicit conflict resolution actually did — the UI reports anything
+ * but 'resolved' (resolution is explicit, never silent):
+ * - 'resolved' — done as the user asked;
+ * - 'failed' — nothing changed (network/server error); the conflict stands;
+ * - 'cloud_missing' — use-cloud found no cloud copy; the conflict was cleared
+ *   and this device's copy kept (it re-uploads with the next sync);
+ * - 'conflicted_again' — keep-local: the cloud advanced again before the
+ *   overwrite landed; still in conflict;
+ * - 'upload_failed' — keep-local: the choice was recorded but the overwrite
+ *   upload failed; local data is intact and the push retries on the next sync.
+ */
+export type ConflictResolutionOutcome =
+  | 'resolved'
+  | 'failed'
+  | 'cloud_missing'
+  | 'conflicted_again'
+  | 'upload_failed';
+
+/**
  * Resolve a conflict by ADOPTING THE CLOUD VERSION: overwrite the local copy
  * with the server bundle and re-baseline. The local edits are discarded — the
  * UI should only offer this after the user has (optionally) downloaded a
- * recovery copy of their local work. Returns true on success.
+ * recovery copy of their local work.
  */
-export async function resolveConflictUseCloud(projectId: string): Promise<boolean> {
+export async function resolveConflictUseCloud(projectId: string): Promise<ConflictResolutionOutcome> {
   const userId = activeUserId;
-  if (!userId || isShowcaseProjectId(projectId)) return false;
+  if (!userId || isShowcaseProjectId(projectId)) return 'failed';
   useProjectSyncStore.getState().patchProjectSync(projectId, { state: 'saving', updatedAt: Date.now() });
   try {
     const full = await fetchProject(projectId);
@@ -622,18 +690,22 @@ export async function resolveConflictUseCloud(projectId: string): Promise<boolea
         meta: { conflict: false },
         ui: { state: 'dirty', conflict: undefined },
       });
-      return false;
+      return 'cloud_missing';
     }
     applyBundlesOverwrite([full.data]);
     recordPulledBaseline(userId, full);
     projectsDebug('conflict resolved — used cloud version', { projectId });
-    return true;
+    return 'resolved';
   } catch (error) {
+    // Nothing was applied. Put the conflict state back (it was flipped to
+    // 'saving' above) so the banner and its choices return instead of the
+    // project sitting at "Saving…" with an unresolved durable conflict.
+    useProjectSyncStore.getState().patchProjectSync(projectId, { state: 'conflict', updatedAt: Date.now() });
     projectsDebug('conflict resolve (use cloud) failed', {
       projectId,
       message: error instanceof Error ? error.message : 'error',
     });
-    return false;
+    return 'failed';
   }
 }
 
@@ -641,11 +713,11 @@ export async function resolveConflictUseCloud(projectId: string): Promise<boolea
  * Resolve a conflict by KEEPING THE LOCAL VERSION: overwrite the cloud with the
  * local copy. Adopts the server's current revision as the expected baseline so
  * the conditional push succeeds (an explicit, user-authorized overwrite), then
- * pushes. Returns true if the push landed without re-conflicting.
+ * pushes.
  */
-export async function resolveConflictKeepLocal(projectId: string): Promise<boolean> {
+export async function resolveConflictKeepLocal(projectId: string): Promise<ConflictResolutionOutcome> {
   const userId = activeUserId;
-  if (!userId || isShowcaseProjectId(projectId)) return false;
+  if (!userId || isShowcaseProjectId(projectId)) return 'failed';
   try {
     // Read the server's current revision so our next push expects it and wins.
     const full = await fetchProject(projectId);
@@ -663,13 +735,17 @@ export async function resolveConflictKeepLocal(projectId: string): Promise<boole
       },
     });
     await pushProjectNow(projectId);
-    return getProjectSyncMeta(userId, projectId).conflict !== true;
+    const meta = getProjectSyncMeta(userId, projectId);
+    if (meta.conflict === true) return 'conflicted_again';
+    // pushProjectNow never throws: a failed save is recorded as
+    // lastCloudSaveError (cleared to null by a successful one).
+    return meta.lastCloudSaveError ? 'upload_failed' : 'resolved';
   } catch (error) {
     projectsDebug('conflict resolve (keep local) failed', {
       projectId,
       message: error instanceof Error ? error.message : 'error',
     });
-    return false;
+    return 'failed';
   }
 }
 

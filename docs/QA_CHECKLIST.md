@@ -297,7 +297,13 @@ Interrupt a generation (reload the page mid-run):
       mid-progress, and can be retried.
 - [ ] Retrying does not produce duplicate artifacts.
 - [ ] Interrupt an **output** run the same way; it resumes or can be restarted
-      without duplicating slots.
+      without duplicating slots — including a reload **before the first output
+      finishes** (the Build view resumes the run instead of sitting idle).
+- [ ] An output that keeps failing is retried automatically at most twice per
+      session (revisit Build a few times), then stays failed with **Retry**.
+- [ ] Reload while a branch reply is in flight: the thread shows *"Reply was
+      interrupted — send again"* with your message back in the reply box, and
+      nothing is re-sent until you send it.
 
 Recovery bundle (a separate escape hatch — it never touches the network):
 
@@ -362,6 +368,9 @@ the real reload, which those tests simulate.
       resolved decisions are still resolved, and no artifact silently reverts.
 - [ ] Open the project in a second tab, edit in one, and confirm the other does
       not clobber it.
+- [ ] With a second tab open, delete a project in one tab, then make any change
+      in the other: the deleted project does not come back in either tab (or,
+      signed in, on another device).
 - [ ] Signed in with sync available, confirm the project appears on another
       device.
 

@@ -2,12 +2,18 @@ import { useProjectStore } from '../store/projectStore';
 import { useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { replyInBranch } from '../lib/llmProvider';
-import { Send, Maximize2, Trash2, Layers, Undo2, Loader2 } from 'lucide-react';
+import { Send, Maximize2, Trash2, Layers, Undo2, Loader2, AlertTriangle } from 'lucide-react';
 import { normalizeError, userMessage } from '../lib/errors';
 import { useToastStore } from '../store/toastStore';
 import type { Branch, BranchMessage } from '../types';
 import { IntentHelperLabel } from '../lib/intentHelper';
 import { getActionFromIntent } from '../lib/prdEditActions';
+import {
+    beginBranchReplyRequest,
+    endBranchReplyRequest,
+    isBranchReplyInFlight,
+    isBranchReplyInterrupted,
+} from '../lib/branchReplyInFlight';
 
 interface BranchListProps {
     projectId: string;
@@ -23,11 +29,29 @@ interface BranchListProps {
 
 export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasOpen, onStage, onReviewStaged, readOnly = false }: BranchListProps) {
     const [animationParent] = useAutoAnimate();
-    const { getBranchesForSpine, addBranchMessage, deleteBranch, unstageBranch } = useProjectStore();
+    const { getBranchesForSpine, addBranchMessage, setBranchPendingReply, deleteBranch, unstageBranch } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [isReplying, setIsReplying] = useState<Record<string, boolean>>({});
     const [isStaging, setIsStaging] = useState<Record<string, boolean>>({});
+
+    // A reply whose request is live — started here, or still running from a
+    // previous mount of this list (navigating away doesn't cancel it).
+    const replyingFor = (branch: Branch): boolean =>
+        !!isReplying[branch.id] || (!!branch.pendingReply && isBranchReplyInFlight(branch.id));
+
+    // The input shows what the user typed; until they touch it, a reply that
+    // was interrupted by a reload offers the user's message back to resend.
+    const inputFor = (branch: Branch): string =>
+        replyInputs[branch.id] ?? (isBranchReplyInterrupted(branch) ? branch.pendingReply?.message ?? '' : '');
+
+    const clearPendingReply = (branchId: string) => {
+        try {
+            setBranchPendingReply(projectId, branchId, null);
+        } catch {
+            // The project was deleted mid-request — nothing left to clear.
+        }
+    };
 
     const stagedCount = branches.filter(b => b.status === 'resolved').length;
 
@@ -59,14 +83,27 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
 
     const handleReply = async (e: React.FormEvent, branch: Branch) => {
         e.preventDefault();
-        const replyText = replyInputs[branch.id];
-        if (!replyText?.trim() || isReplying[branch.id]) return;
+        const replyText = inputFor(branch).trim();
+        if (!replyText || replyingFor(branch)) return;
 
+        // Resending an interrupted reply unchanged: the user's message already
+        // sits unanswered at the end of the thread — answer it instead of
+        // appending a duplicate.
+        const lastMessage = branch.messages[branch.messages.length - 1];
+        const resendingInterrupted = isBranchReplyInterrupted(branch)
+            && lastMessage?.role === 'user'
+            && lastMessage.content === replyText;
+        const threadHistory = resendingInterrupted ? branch.messages.slice(0, -1) : branch.messages;
+
+        // Register the live request BEFORE persisting the marker, so no render
+        // ever reads this in-flight reply as interrupted.
+        beginBranchReplyRequest(branch.id);
         try {
             setIsReplying(prev => ({ ...prev, [branch.id]: true }));
 
             // User message
-            addBranchMessage(projectId, branch.id, 'user', replyText.trim());
+            if (!resendingInterrupted) addBranchMessage(projectId, branch.id, 'user', replyText);
+            setBranchPendingReply(projectId, branch.id, { startedAt: Date.now(), message: replyText });
             setReplyInputs(prev => ({ ...prev, [branch.id]: '' }));
 
             // Carry the branch's originating action (from its first message's
@@ -74,12 +111,15 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
             // persona instead of falling back to the generic prompt.
             const response = await replyInBranch({
                 anchorText: branch.anchorText,
-                intent: replyText.trim(),
-                threadHistory: branch.messages,
+                intent: replyText,
+                threadHistory,
                 actionId: getActionFromIntent(branch.messages[0]?.content ?? '')?.id,
             });
+            // Landing the reply also clears the pending-reply marker.
             addBranchMessage(projectId, branch.id, 'assistant', response);
         } catch (e) {
+            // A failure (unlike a reload) is reported right here — not pending.
+            clearPendingReply(branch.id);
             const err = normalizeError(e);
             console.error('[Branch reply failed]', err.raw);
             useToastStore.getState().addToast({
@@ -88,6 +128,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                 message: userMessage(err),
             });
         } finally {
+            endBranchReplyRequest(branch.id);
             setIsReplying(prev => ({ ...prev, [branch.id]: false }));
         }
     };
@@ -224,7 +265,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                                 </div>
                             </div>
                         ))}
-                        {isReplying[branch.id] && (
+                        {replyingFor(branch) && (
                             <div className="flex items-start">
                                 <div className="bg-white border border-neutral-200 rounded-lg p-2.5 text-sm text-neutral-500 animate-pulse">
                                     Assistant is typing...
@@ -233,20 +274,31 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                         )}
                     </div>
 
+                    {/* A reply lost to a reload mid-request: say so, offer the message back. */}
+                    {branch.status === 'active' && !readOnly && isBranchReplyInterrupted(branch) && (
+                        <div
+                            role="status"
+                            className="mx-2 mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800"
+                        >
+                            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+                            <span>Reply was interrupted — send again.</span>
+                        </div>
+                    )}
+
                     {/* Input */}
                     {branch.status === 'active' && !readOnly && (
                         <form onSubmit={(e) => handleReply(e, branch)} className="p-2 border-t border-neutral-200 bg-white flex gap-2">
                             <input
                                 type="text"
-                                value={replyInputs[branch.id] || ''}
+                                value={inputFor(branch)}
                                 onChange={e => setReplyInputs(prev => ({ ...prev, [branch.id]: e.target.value }))}
                                 placeholder="Reply..."
                                 className="flex-1 bg-neutral-100 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm rounded-md px-3 py-1.5 outline-none transition"
-                                disabled={isReplying[branch.id]}
+                                disabled={replyingFor(branch)}
                             />
                             <button
                                 type="submit"
-                                disabled={!replyInputs[branch.id]?.trim() || isReplying[branch.id]}
+                                disabled={!inputFor(branch).trim() || replyingFor(branch)}
                                 className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md transition disabled:opacity-50"
                                 title="Send reply"
                                 aria-label="Send reply"

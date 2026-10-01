@@ -96,7 +96,19 @@ device-scoped and never syncs) and full design.
   the cloud is stale. Conflict resolution is **explicit, never
   silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
   recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
-  local, re-baselined so the conditional push wins). The module-local
+  local, re-baselined so the conditional push wins). Both return a
+  `ConflictResolutionOutcome` — `resolved`, `failed` (nothing changed; the
+  conflict stands — a failed use-cloud restores the `conflict` UI state it had
+  flipped to `saving`), `cloud_missing` (use-cloud found no cloud copy; local
+  kept), `conflicted_again` (keep-local: the cloud advanced again), or
+  `upload_failed` (keep-local recorded, upload retries next sync) — and
+  `ProjectConflictBanner` reports every outcome but `resolved` with a toast.
+  Reconcile **reports partial failure**: a per-project bundle fetch that throws
+  no longer disappears into a debug log behind a clean "ready" — its id lands
+  in `useProjectSyncStore.failedPullIds` (`markPulled(migratedCount,
+  failedPullIds)`; phase stays `ready` because everything else synced) and
+  `SyncStatusBanner` shows "N projects couldn't be downloaded … Retry" until a
+  later reconcile pulls them. The module-local
   `recordSyncState(userId, projectId, { meta?, ui? })` helper writes the durable
   meta (`setProjectSyncMeta`) and the reactive per-project UI info
   (`patchProjectSync`) together at the sites that update both. `suspendPush`
@@ -105,13 +117,40 @@ device-scoped and never syncs) and full design.
   (`DEMO_PROJECT_ID`) is never synced. A `beforeunload` guard warns only when
   cloud state is genuinely stuck (`conflict`/`error`), never for normal pending
   pushes.
+- **Delete tombstones (per user).** `deleteProject` records `projectTombstones[id]
+  = deletedAt` (epoch ms) in the SAME store write that removes the project
+  (`src/lib/projectTombstones.ts`, pure). They live in the user's persisted
+  namespace blob — per user, not per project: never part of a `ProjectBundle`,
+  snapshot, or export, but reset/rehydrated with the namespace switch
+  (`emptyPersistedState`) and carried by cross-tab adoption. Bounded: entries
+  older than 30 days are pruned on write (hard cap 500, newest kept). What they
+  prevent: (1) the cross-tab merge resurrecting a project another tab deleted
+  (it drops any project whose tombstone is at least as new as its latest
+  activity — see STATE_AND_AUTH.md "Cross-tab write safety"); (2) sync undoing a
+  delete — a tombstoned id that is absent locally is **never pulled**, a
+  tombstoned copy is **never pushed** (`isTombstoned` in `projectServerSync.ts`,
+  also checked when applying pulled/refreshed bundles, so a project deleted
+  during reconcile's fetch window isn't re-added); (3) a failed remote delete
+  coming back — `deleteRemote` keeps the tombstone on failure, and the next
+  reconcile, seeing the project still live on the server, **retries the
+  delete** instead of pulling it back. The retry only fires for a project this
+  device demonstrably synced (durable meta has a revision / cloud-save
+  baseline), so a tombstone can never delete cloud work this device never saw;
+  (4) the legacy-import / merged-account namespace merges re-adding it. A
+  project with activity strictly AFTER its tombstone (edited in another tab
+  after the delete) is live again: the merge keeps it and clears the
+  tombstone. Known limit: a tombstoned id stays hidden on this device even if
+  another device later re-creates the same project (e.g. "keep local" after a
+  conflict) until the tombstone expires.
 - **Sync UI state** (`src/store/projectSyncStore.ts`,
   `src/components/sync/ProjectSyncStatus.tsx`). Overall `phase`
-  (idle/loading/ready/error) + `online` + per-project
+  (idle/loading/ready/error) + `failedPullIds` (partial pull failure) +
+  `online` + per-project
   saving/saved/error/dirty/**conflict** (with `lastCloudSavedAt`/
   `lastCloudSaveError`/`conflict` details; `patchProjectSync` merges partial
-  updates). Surfaced as: a `SyncStatusBanner` (retry on failure, conflict count)
-  and per-row `ProjectSyncDot` in `ProjectDrawer`; a compact `ProjectCloudStatus`
+  updates). Surfaced as: a `SyncStatusBanner` (retry on failure or partial
+  pull, conflict count) and per-row `ProjectSyncDot` in `ProjectDrawer`; a
+  compact `ProjectCloudStatus`
   pill in the workspace header distinguishing saved-on-device / synced-to-cloud
   ("synced Nm ago") / cloud-sync-pending / cloud-save-failed / conflict; and a
   `ProjectConflictBanner` above the workspace body ("Cloud version changed on

@@ -18,6 +18,7 @@ import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { deleteImagesForVersion } from '../../lib/mockupImageStore';
 import { deleteScreenImagesForArtifactVersion } from '../../lib/screenInventoryImageStore';
 import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore';
+import { addProjectTombstone } from '../../lib/projectTombstones';
 import { useMockupImageStore } from '../mockupImageStore';
 import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
 import { useMockupVariantImageStore } from '../mockupVariantImageStore';
@@ -26,6 +27,7 @@ export const DEMO_CACHE_POLICY_VERSION = 1;
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
+    projectTombstones: Record<string, number>;
     historyEvents: Record<string, HistoryEvent[]>;
     createProject: ProjectState['createProject'];
     deleteProject: ProjectState['deleteProject'];
@@ -34,6 +36,8 @@ export type ProjectSlice = {
     setProjectStage: ProjectState['setProjectStage'];
     setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
     markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
+    markOutputRunStarted: ProjectState['markOutputRunStarted'];
+    settleOutputRun: ProjectState['settleOutputRun'];
     loadDemoProject: ProjectState['loadDemoProject'];
     clearDemoProject: ProjectState['clearDemoProject'];
     resetDemoProject: ProjectState['resetDemoProject'];
@@ -281,6 +285,7 @@ async function wipeShowcaseProject(
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
     projects: {},
+    projectTombstones: {},
     historyEvents: {},
 
     createProject: (name: string, promptText: string, platform?: ProjectPlatform) => {
@@ -383,6 +388,10 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newDownstreamArtifactUpdateVerificationEvents[projectId];
             return {
                 projects: newProjects,
+                // Remember the deletion in the same write, so a stale tab's
+                // copy (cross-tab merge), the server (sync), or a namespace
+                // merge can't bring the project back. See projectTombstones.ts.
+                projectTombstones: addProjectTombstone(state.projectTombstones ?? {}, projectId),
                 spineVersions: newSpines,
                 historyEvents: newHistory,
                 branches: newBranches,
@@ -453,6 +462,45 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 projects: {
                     ...state.projects,
                     [projectId]: { ...project, needsDesignSetup: false, updatedAt: Date.now() },
+                },
+            };
+        });
+    },
+
+    // Durable output-run marker (Project.outputRun) — the artifact-run
+    // counterpart of SpineVersion.generationPhase. Written only by
+    // artifactJobController.startAll (stamp on launch, settle on end); a page
+    // load turns a leftover 'running' marker into 'interrupted'
+    // (markInterruptedOutputRuns), which resumeIfNeeded treats as resume
+    // evidence. Project-record mutations stamp updatedAt (cross-tab recency).
+    markOutputRunStarted: (projectId: string, spineVersionId: string, runId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            const now = Date.now();
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: {
+                        ...project,
+                        outputRun: { spineVersionId, runId, startedAt: now, phase: 'running' },
+                        updatedAt: now,
+                    },
+                },
+            };
+        });
+    },
+
+    // Only the run that stamped the marker may clear it: a superseded run
+    // settling late must not erase the marker of the run that replaced it.
+    settleOutputRun: (projectId: string, runId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project?.outputRun || project.outputRun.runId !== runId) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, outputRun: undefined, updatedAt: Date.now() },
                 },
             };
         });

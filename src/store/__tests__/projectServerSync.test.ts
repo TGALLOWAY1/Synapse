@@ -23,13 +23,20 @@ vi.mock('../../lib/projectsClient', () => client);
 
 import { useProjectStore } from '../projectStore';
 import { useProjectSyncStore } from '../projectSyncStore';
-import { startProjectSync, stopProjectSync } from '../projectServerSync';
+import {
+  startProjectSync,
+  stopProjectSync,
+  refreshProjectsFromServer,
+  resolveConflictUseCloud,
+  resolveConflictKeepLocal,
+} from '../projectServerSync';
 import { setProjectSyncMeta, getProjectSyncMeta } from '../../lib/projectSyncMeta';
 import type { ProjectBundle } from '../../lib/projectBundle';
 
 function emptyState() {
   return {
     projects: {},
+    projectTombstones: {},
     spineVersions: {},
     historyEvents: {},
     branches: {},
@@ -324,5 +331,137 @@ describe('cloud save failure exposes unsynced / failed durability state', () => 
     // Local data intact + durable unsynced flag set.
     expect(useProjectStore.getState().projects['p1']).toBeTruthy();
     expect(getProjectSyncMeta('user-a', 'p1').hasUnsyncedChanges).toBe(true);
+  });
+});
+
+describe('deleted projects stay deleted (delete tombstones)', () => {
+  const phase = () => useProjectSyncStore.getState().phase;
+
+  it('keeps the tombstone when the remote delete fails and retries the delete on the next reconcile instead of pulling the project back', async () => {
+    seedLocalProject('p1', 'Local p1');
+    setProjectSyncMeta('user-a', 'p1', { lastSeenServerRevision: 1, hasUnsyncedChanges: false });
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 1, updatedAt: '2026-01-01' }]);
+    client.deleteProject.mockRejectedValueOnce(new Error('network')).mockResolvedValue(undefined);
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    useProjectStore.getState().deleteProject('p1');
+    await vi.waitFor(() => expect(client.deleteProject).toHaveBeenCalledTimes(1));
+    expect(useProjectStore.getState().projectTombstones['p1']).toBeGreaterThan(0);
+
+    // Next reconcile (reload / back online): the server still lists p1 live.
+    refreshProjectsFromServer();
+    await vi.waitFor(() => expect(client.deleteProject).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.fetchProject).not.toHaveBeenCalled(); // never pulled back
+    expect(useProjectStore.getState().projects['p1']).toBeUndefined();
+    expect(getProjectSyncMeta('user-a', 'p1')).toEqual({}); // delete landed
+  });
+
+  it('never pulls a tombstoned project, and never deletes cloud work this device never synced', async () => {
+    useProjectStore.setState({ ...emptyState(), projectTombstones: { p1: Date.now() } });
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 3, updatedAt: '2026-01-01' }]);
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.fetchProject).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().projects['p1']).toBeUndefined();
+    expect(client.deleteProject).not.toHaveBeenCalled();
+  });
+
+  it('never re-creates a tombstoned project on the server', async () => {
+    // A stale copy of a deleted project, untouched since the deletion.
+    useProjectStore.setState({
+      ...emptyState(),
+      projects: { p1: { id: 'p1', name: 'Stale', createdAt: 1 } },
+      spineVersions: { p1: [] },
+      projectTombstones: { p1: Date.now() },
+    });
+    client.fetchProjectList.mockResolvedValue([]);
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.saveProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcile reports partial pull failures', () => {
+  it('lists the projects it could not download instead of reporting a clean sync', async () => {
+    client.fetchProjectList.mockResolvedValue([
+      { id: 'p1', updatedAt: '2026-01-01' },
+      { id: 'p2', updatedAt: '2026-01-01' },
+    ]);
+    client.fetchProject.mockImplementation(async (id: string) => {
+      if (id === 'p2') throw new Error('fetch_failed_500');
+      return { id, data: serverBundle(id) };
+    });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(useProjectSyncStore.getState().phase).toBe('ready'));
+
+    expect(useProjectSyncStore.getState().failedPullIds).toEqual(['p2']);
+    expect(useProjectStore.getState().projects['p1']).toBeTruthy();
+    expect(useProjectStore.getState().projects['p2']).toBeUndefined();
+
+    // A clean retry clears the partial-failure status.
+    client.fetchProject.mockImplementation(async (id: string) => ({ id, data: serverBundle(id) }));
+    refreshProjectsFromServer();
+    await vi.waitFor(() => expect(useProjectStore.getState().projects['p2']).toBeTruthy());
+    await vi.waitFor(() => expect(useProjectSyncStore.getState().phase).toBe('ready'));
+    expect(useProjectSyncStore.getState().failedPullIds).toEqual([]);
+  });
+});
+
+describe('conflict resolution reports what actually happened', () => {
+  async function startInConflict(): Promise<void> {
+    seedLocalProject('p1', 'Local edit');
+    setProjectSyncMeta('user-a', 'p1', { lastSeenServerRevision: 1, hasUnsyncedChanges: true });
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 5, updatedAt: '2026-03-03' }]);
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(useProjectSyncStore.getState().projects['p1']?.state).toBe('conflict'));
+  }
+
+  it('use cloud: a failed fetch reports failed and restores the conflict (not stuck at saving)', async () => {
+    await startInConflict();
+    client.fetchProject.mockRejectedValue(new Error('network'));
+
+    await expect(resolveConflictUseCloud('p1')).resolves.toBe('failed');
+    expect(useProjectSyncStore.getState().projects['p1']?.state).toBe('conflict');
+    expect(useProjectStore.getState().projects['p1']?.name).toBe('Local edit');
+  });
+
+  it('use cloud: adopts the cloud copy', async () => {
+    await startInConflict();
+    client.fetchProject.mockResolvedValue({ id: 'p1', revision: 5, data: serverBundle('p1') });
+
+    await expect(resolveConflictUseCloud('p1')).resolves.toBe('resolved');
+    expect(useProjectStore.getState().projects['p1']?.name).toBe('Server p1');
+  });
+
+  it('use cloud: reports a missing cloud copy (local kept)', async () => {
+    await startInConflict();
+    client.fetchProject.mockResolvedValue(null);
+
+    await expect(resolveConflictUseCloud('p1')).resolves.toBe('cloud_missing');
+    expect(useProjectStore.getState().projects['p1']?.name).toBe('Local edit');
+  });
+
+  it('keep local: reports a second conflict, an upload failure, and success distinctly', async () => {
+    await startInConflict();
+    client.fetchProject.mockResolvedValue({ id: 'p1', revision: 6, data: serverBundle('p1') });
+
+    client.saveProject.mockRejectedValueOnce(new client.RevisionConflictError(7));
+    await expect(resolveConflictKeepLocal('p1')).resolves.toBe('conflicted_again');
+
+    client.saveProject.mockRejectedValueOnce(new Error('save_failed'));
+    await expect(resolveConflictKeepLocal('p1')).resolves.toBe('upload_failed');
+
+    client.saveProject.mockResolvedValueOnce({ id: 'p1', revision: 7 });
+    await expect(resolveConflictKeepLocal('p1')).resolves.toBe('resolved');
+    expect(getProjectSyncMeta('user-a', 'p1').conflict).toBe(false);
   });
 });

@@ -37,6 +37,22 @@ export type Project = {
     // preset is chosen (any path) or the user explicitly skips. Optional —
     // legacy projects and the demo have none and never see the setup step.
     needsDesignSetup?: boolean;
+    // Durable lifecycle marker for a full artifact output run
+    // (`artifactJobController.startAll`) — the output-run counterpart of
+    // `SpineVersion.generationPhase`. Stamped 'running' when the run launches
+    // and removed when it settles; a page load converts a persisted 'running'
+    // marker to 'interrupted' (`markInterruptedOutputRuns`), which is how
+    // `resumeIfNeeded` recognizes a run killed before its FIRST output landed.
+    // Optional — legacy projects and runs that settled normally have none.
+    outputRun?: OutputRunMarker;
+};
+
+export type OutputRunMarker = {
+    spineVersionId: string;
+    /** Identity of the run that stamped the marker (settles only its own). */
+    runId: string;
+    startedAt: number;
+    phase: 'running' | 'interrupted';
 };
 
 export type BranchMessage = {
@@ -62,6 +78,18 @@ export type Branch = {
     // applied to the anchor on batch consolidation. Optional — legacy branches
     // and never-staged branches omit it.
     proposedReplacement?: string;
+    // Set while an assistant reply is in flight (the user's message that asked
+    // for it, and when). Cleared when the reply lands or fails. The request
+    // itself cannot survive a reload, so a marker found with no live request
+    // in this page load means the reply was interrupted — the branch UI offers
+    // to send it again (never automatically). Optional — legacy branches and
+    // branches with no reply pending omit it.
+    pendingReply?: BranchPendingReply;
+};
+
+export type BranchPendingReply = {
+    startedAt: number;
+    message: string;
 };
 
 // Structured PRD types
@@ -1361,12 +1389,26 @@ export interface SlotState {
     error?: { message: string; category: string; timestamp: number };
     attempt: number;
     progressLog?: string[];
+    /**
+     * Automatic resume runs (`resumeIfNeeded`) that have included this slot for
+     * the job's spine in this page session. Carried across job re-inits for
+     * the same spine; once it reaches the cap the slot is left failed for the
+     * manual Retry. Transient (jobs are not persisted) and optional.
+     */
+    autoResumeAttempts?: number;
 }
 
 export interface ProjectJobState {
     spineVersionId: string;
     startedAt: number;
     slots: Record<ArtifactSlotKey, SlotState>;
+    /**
+     * The run that currently owns this job. Every job write from the controller
+     * carries its run id, and a write from any other (superseded) run is a
+     * no-op — so an old run settling late can't clobber the new run's slots.
+     * Optional: jobs created without a run id are unguarded.
+     */
+    runId?: string;
 }
 
 export type ArtifactValidationBlockerCode =
