@@ -103,6 +103,26 @@ describe('projectStore', () => {
 
             expect(useProjectStore.getState().projectTombstones[projectId]).toBeGreaterThanOrEqual(before);
         });
+
+        it('reviveDeletedProject clears the tombstone and lifts activity just past the deletion only when the content predates it', () => {
+            const deletedAt = Date.now() + 60_000; // newer than anything either project holds
+            useProjectStore.setState({
+                projects: {
+                    old: { id: 'old', name: 'Old', createdAt: 1 },
+                    fresh: { id: 'fresh', name: 'Fresh', createdAt: 1, updatedAt: deletedAt + 5_000 },
+                },
+                projectTombstones: { old: deletedAt, fresh: deletedAt },
+            });
+
+            useProjectStore.getState().reviveDeletedProject('old', deletedAt);
+            useProjectStore.getState().reviveDeletedProject('fresh', deletedAt);
+
+            const state = useProjectStore.getState();
+            expect(state.projectTombstones).toEqual({});
+            expect(state.projects['old']?.updatedAt).toBe(deletedAt + 1);
+            // Already active after the deletion: left exactly as pulled.
+            expect(state.projects['fresh']?.updatedAt).toBe(deletedAt + 5_000);
+        });
     });
 
     describe('legacy finality', () => {

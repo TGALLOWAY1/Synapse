@@ -8,9 +8,10 @@
 // on sign-out. Imports the store + sync store + client; must NOT be imported by
 // any of them (no cycles).
 
-import { useProjectStore } from './projectStore';
+import { useProjectStore, readPersistedProjectSnapshot, requestCrossTabCatchUp } from './projectStore';
 import { useProjectSyncStore } from './projectSyncStore';
 import {
+  ARRAY_COLLECTIONS,
   extractProjectBundle,
   mergeBundlesIntoSource,
   overwriteBundlesIntoSource,
@@ -45,6 +46,7 @@ import {
 import { isShowcaseProjectId } from '../data/demoProject';
 import { latestProjectActivity } from '../lib/crossTabMerge';
 import { isSuppressedByTombstone } from '../lib/projectTombstones';
+import { isHeartbeatOnlyProjectChange } from '../lib/outputRunLease';
 
 const PUSH_DEBOUNCE_MS = 1500;
 
@@ -76,7 +78,9 @@ function syncableIds(state: ReturnType<typeof useProjectStore.getState>): string
  * Whether `projectId` was deleted on this device and nothing has touched it
  * since — its per-user delete tombstone (projectTombstones.ts) still
  * suppresses it. Such an id is never pulled (the deletion must not be undone
- * by the server copy) or pushed (a stale copy must not re-create it there).
+ * by the server copy) or pushed (a stale copy must not re-create it there) —
+ * except that reconcile pulls back a cloud copy that changed AFTER the
+ * deletion (newer wins; see resolveTombstonedServerCopy).
  */
 function isTombstoned(state: ReturnType<typeof useProjectStore.getState>, projectId: string): boolean {
   const deletedAt = state.projectTombstones?.[projectId];
@@ -85,6 +89,84 @@ function isTombstoned(state: ReturnType<typeof useProjectStore.getState>, projec
     ? latestProjectActivity(state as unknown as Record<string, unknown>, projectId)
     : 0;
   return isSuppressedByTombstone(deletedAt, activity);
+}
+
+/**
+ * Whether the live server copy of a project this device deleted changed AFTER
+ * that deletion — another device edited or recreated it — so retrying the
+ * delete would erase newer cloud work. Activity after the delete wins (the
+ * same rule as the cross-tab merge):
+ * - unchanged since this device's last-synced baseline (same revision, or the
+ *   same updatedAt for legacy rows): the server holds exactly what was
+ *   deleted here — not newer, so the delete is retried;
+ * - changed since the baseline, or no baseline to compare: newer unless the
+ *   server stamped that change before the deletion. An unreadable timestamp
+ *   counts as newer — when in doubt, keep the cloud work.
+ */
+function serverCopyOutlivesDeletion(
+  summary: ServerProjectSummary,
+  meta: ProjectSyncMeta,
+  deletedAt: number,
+): boolean {
+  const hasBaseline =
+    typeof meta.lastSeenServerRevision === 'number' || typeof meta.lastSeenServerUpdatedAt === 'string';
+  if (hasBaseline && !isServerNewer(summary, meta)) return false;
+  const serverAt = typeof summary.updatedAt === 'string' ? Date.parse(summary.updatedAt) : Number.NaN;
+  return !Number.isFinite(serverAt) || serverAt > deletedAt;
+}
+
+type TombstonedServerCopyAction =
+  | { kind: 'revive'; deletedAt: number }
+  | { kind: 'kept_in_another_tab' }
+  | { kind: 'retry_delete' }
+  | { kind: 'leave' };
+
+/**
+ * What reconcile does with a project that is live on the server but deleted
+ * (tombstoned) in this tab's memory — a remote delete that failed or never
+ * ran. This tab's memory can be stale (another tab's writes only reach it on
+ * this tab's next write) and the sync-meta baseline is device-wide (another
+ * tab's push advances it), so the fresh persisted blob is consulted first:
+ * - another tab kept the project (activity after the newest known deletion is
+ *   persisted): it is live on this device — neither pull nor delete; the
+ *   cross-tab catch-up adopts it;
+ * - the cloud copy changed after the deletion (serverCopyOutlivesDeletion):
+ *   newer work wins — revive it (pull it back, tombstone superseded);
+ * - otherwise retry the delete, but only for a project this device
+ *   demonstrably synced, so a tombstone can't delete cloud work it never saw.
+ */
+function resolveTombstonedServerCopy(
+  userId: string,
+  summary: ServerProjectSummary,
+  memoryDeletedAt: number,
+): TombstonedServerCopyAction {
+  const persisted = readPersistedProjectSnapshot(summary.id);
+  // The newest known deletion — another tab may have deleted it again since.
+  const deletedAt = Math.max(memoryDeletedAt, persisted?.deletedAt ?? 0);
+  if (persisted && persisted.activity > deletedAt) return { kind: 'kept_in_another_tab' };
+  if (serverCopyOutlivesDeletion(summary, getProjectSyncMeta(userId, summary.id), deletedAt)) {
+    return { kind: 'revive', deletedAt };
+  }
+  return isProjectUploaded(userId, summary.id) ? { kind: 'retry_delete' } : { kind: 'leave' };
+}
+
+const NO_REVIVALS: ReadonlyMap<string, number> = new Map();
+
+/**
+ * A change to one project that is ONLY a refreshed output-run lease heartbeat
+ * (`outputRun.heartbeatAt`, every OUTPUT_RUN_HEARTBEAT_MS while a run is live
+ * — see src/lib/outputRunLease.ts). That is cross-tab coordination, not content, so
+ * it must not push the whole bundle every heartbeat; the latest heartbeat
+ * rides along with the next real change.
+ */
+function isLeaseHeartbeatOnlyChange(prev: BundleSource, next: BundleSource, projectId: string): boolean {
+  for (const key of ARRAY_COLLECTIONS) {
+    if ((prev[key] as Record<string, unknown> | undefined)?.[projectId]
+      !== (next[key] as Record<string, unknown> | undefined)?.[projectId]) {
+      return false;
+    }
+  }
+  return isHeartbeatOnlyProjectChange(prev.projects[projectId], next.projects[projectId]);
 }
 
 /**
@@ -302,16 +384,30 @@ function removeLocalProject(projectId: string): void {
 }
 
 /** Apply server bundles into the store additively, without echoing a push.
- *  A project deleted on this device (tombstoned) is never added back. */
-function applyBundles(bundles: ProjectBundle[]): string[] {
+ *  A project deleted on this device (tombstoned) is never added back — except
+ *  one reconcile found newer in the cloud than that deletion (`revivals`: id
+ *  -> the deletedAt it was checked against), which comes back with its
+ *  tombstone superseded in the same write, unless it was deleted again after
+ *  that check. Returns the ids actually added. */
+function applyBundles(bundles: ProjectBundle[], revivals: ReadonlyMap<string, number> = NO_REVIVALS): string[] {
   if (bundles.length === 0) return [];
   const state = useProjectStore.getState();
-  const live = bundles.filter((bundle) => !isTombstoned(state, bundle.project.id));
+  const live = bundles.filter((bundle) => {
+    const id = bundle.project.id;
+    const checkedDeletedAt = revivals.get(id);
+    if (checkedDeletedAt !== undefined) return (state.projectTombstones?.[id] ?? 0) <= checkedDeletedAt;
+    return !isTombstoned(state, id);
+  });
   const { next, addedIds } = mergeBundlesIntoSource(bundleSourceOf(state), live);
   if (addedIds.length === 0) return [];
   suspendPush = true;
   try {
     useProjectStore.setState(next);
+    // Same synchronous turn as the add, so both land in one persisted write.
+    for (const id of addedIds) {
+      const deletedAt = revivals.get(id);
+      if (deletedAt !== undefined) useProjectStore.getState().reviveDeletedProject(id, deletedAt);
+    }
   } finally {
     suspendPush = false;
   }
@@ -403,15 +499,33 @@ async function reconcile(userId: string): Promise<void> {
     // as local-only while the banner reads "synced".
     const toRetryPush: string[] = [];
     // Live on the server but deleted on this device (delete tombstone): a
-    // remote delete that failed or never ran (offline / signed out). Never
-    // pull it back; retry the delete — only for a project this device
-    // demonstrably synced, so a tombstone can't delete cloud work it never saw.
+    // remote delete that failed or never ran (offline / signed out). Newer
+    // cloud work wins over the deletion and is pulled back (revived); a copy
+    // another tab kept is left to the cross-tab catch-up; only an older copy
+    // this device demonstrably synced gets the delete retried — see
+    // resolveTombstonedServerCopy.
     const toRetryDelete: string[] = [];
+    const revivals = new Map<string, number>();
+    let keptInAnotherTab = false;
     const stateAtList = useProjectStore.getState();
     for (const summary of liveSummaries) {
       if (!localIds.has(summary.id)) {
         if (isTombstoned(stateAtList, summary.id)) {
-          if (isProjectUploaded(userId, summary.id)) toRetryDelete.push(summary.id);
+          const action = resolveTombstonedServerCopy(
+            userId,
+            summary,
+            stateAtList.projectTombstones?.[summary.id] ?? 0,
+          );
+          if (action.kind === 'revive') {
+            projectsDebug('cloud copy is newer than the local delete — pulling it back', { projectId: summary.id });
+            revivals.set(summary.id, action.deletedAt);
+            toAdd.push(summary);
+          } else if (action.kind === 'kept_in_another_tab') {
+            projectsDebug('deleted here but kept in another tab — catching up instead', { projectId: summary.id });
+            keptInAnotherTab = true;
+          } else if (action.kind === 'retry_delete') {
+            toRetryDelete.push(summary.id);
+          }
           continue;
         }
         toAdd.push(summary);
@@ -463,14 +577,19 @@ async function reconcile(userId: string): Promise<void> {
       }
     }
 
+    if (keptInAnotherTab) requestCrossTabCatchUp();
+
     const added: ProjectBundle[] = [];
     for (const summary of toAdd) {
       const bundle = await fetchBundle(summary);
       if (bundle) added.push(bundle);
     }
-    applyBundles(added);
+    // Baseline only what actually landed: a bundle skipped at apply time
+    // (deleted here meanwhile) must not record a server revision this device
+    // never held — that baseline is what licenses a later delete retry.
+    const appliedIds = new Set(applyBundles(added, revivals));
     for (const summary of toAdd) {
-      if (added.some((b) => b.project.id === summary.id)) recordPulledBaseline(userId, summary);
+      if (appliedIds.has(summary.id)) recordPulledBaseline(userId, summary);
     }
 
     const refreshed: ProjectBundle[] = [];
@@ -588,11 +707,16 @@ function handleStoreChange(
   const prevSource = bundleSourceOf(prev);
   const currentIds = new Set(syncableIds(state));
 
-  // Pushes: new or changed projects.
+  // Pushes: new or changed projects — except a change that is only a refreshed
+  // output-run lease heartbeat (coordination, not content).
   for (const id of currentIds) {
-    if (!knownProjectIds.has(id) || projectSlicesChanged(source, prevSource, id)) {
+    if (!knownProjectIds.has(id)) {
       schedulePush(id);
+      continue;
     }
+    if (!projectSlicesChanged(source, prevSource, id)) continue;
+    if (isLeaseHeartbeatOnlyChange(prevSource, source, id)) continue;
+    schedulePush(id);
   }
   // Deletes: projects that were present and are now gone.
   for (const id of knownProjectIds) {

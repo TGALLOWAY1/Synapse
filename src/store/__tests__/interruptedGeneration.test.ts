@@ -117,6 +117,30 @@ describe('markInterruptedOutputRuns', () => {
         expect(projects.p1.outputRun).toEqual({ spineVersionId: 's1', runId: 'r1', startedAt: 5, phase: 'interrupted' });
     });
 
+    // The output-run lease: a second tab loading while the first tab is still
+    // generating must not flip that live run to interrupted.
+    const NOW = 10_000_000;
+    const liveMarker = (ownerTabId: string, heartbeatAt: number) =>
+        ({ spineVersionId: 's1', runId: 'r1', startedAt: NOW - 120_000, phase: 'running' as const, ownerTabId, heartbeatAt });
+
+    it('keeps another tab\'s live run running when its heartbeat is fresh', () => {
+        const projects = { p1: project({ outputRun: liveMarker('first-tab', NOW - 5_000) }) };
+        expect(markInterruptedOutputRuns(projects, { now: NOW, tabId: 'second-tab' })).toBe(false);
+        expect(projects.p1.outputRun?.phase).toBe('running');
+    });
+
+    it('interrupts another tab\'s run once its heartbeat is stale (the owner died)', () => {
+        const projects = { p1: project({ outputRun: liveMarker('first-tab', NOW - 46_000) }) };
+        expect(markInterruptedOutputRuns(projects, { now: NOW, tabId: 'second-tab' })).toBe(true);
+        expect(projects.p1.outputRun?.phase).toBe('interrupted');
+    });
+
+    it('interrupts this same tab\'s run on its own reload, even with a fresh heartbeat', () => {
+        const projects = { p1: project({ outputRun: liveMarker('this-tab', NOW - 1_000) }) };
+        expect(markInterruptedOutputRuns(projects, { now: NOW, tabId: 'this-tab' })).toBe(true);
+        expect(projects.p1.outputRun?.phase).toBe('interrupted');
+    });
+
     it('leaves projects without a running marker untouched', () => {
         const interrupted = project({ outputRun: { spineVersionId: 's1', runId: 'r1', startedAt: 5, phase: 'interrupted' } });
         const legacy = project({ id: 'p2' });

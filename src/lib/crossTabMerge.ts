@@ -22,7 +22,11 @@
 // (`projectTombstones`, see projectTombstones.ts) are unioned, and a project
 // whose tombstone is at least as new as its latest activity is dropped
 // instead of resurrected. Activity strictly after the deletion wins (the
-// project is kept and its superseded tombstone cleared).
+// project is kept and its superseded tombstone cleared). One field is merged
+// across the sides instead of taken wholesale: a live output run's lease
+// heartbeat (`outputRun.heartbeatAt`, see outputRunLease.ts) — the newest
+// copy of the same run's marker wins, since heartbeats don't count as
+// activity.
 //
 // PURE — no store or storage imports (storage.ts must stay import-cycle-free).
 
@@ -34,6 +38,7 @@ import {
   readProjectTombstones,
   type ProjectTombstones,
 } from './projectTombstones';
+import { newestOutputRunMarker, readOutputRunMarker } from './outputRunLease';
 
 interface PersistedEnvelope {
   state?: Record<string, unknown>;
@@ -106,6 +111,8 @@ export function latestProjectActivity(state: Record<string, unknown>, projectId:
  *   project whose tombstone is at least as new as its winning side's latest
  *   activity is dropped with all its collections. A project with activity
  *   after its tombstone survives and the stale tombstone is cleared.
+ * - A project's `outputRun` marker keeps the newest heartbeat for the same
+ *   run, whichever side won it (heartbeats don't stamp activity).
  * - Other non-collection keys and the envelope `version` come from ours.
  * - If either blob does not parse as a persist envelope, ours is returned
  *   unchanged (never let a corrupt blob poison the write).
@@ -168,16 +175,33 @@ export function mergePersistedProjectBlobs(storedRaw: string, oursRaw: string): 
       mergedTombstones = { ...mergedTombstones };
       delete mergedTombstones[id];
     }
-    if (!storedWins) continue;
-    changed = true;
-    mergedProjects[id] = storedProjects[id];
-    for (const key of ARRAY_COLLECTIONS) {
-      const storedMap = storedState[key];
-      const rows = storedMap && typeof storedMap === 'object' ? (storedMap as CollectionMap)[id] : undefined;
-      // Take the winning side's entry wholesale — including its ABSENCE, so the
-      // grafted project stays one coherent snapshot.
-      if (Array.isArray(rows)) mergedCollections[key][id] = rows;
-      else delete mergedCollections[key][id];
+    if (storedWins) {
+      changed = true;
+      mergedProjects[id] = storedProjects[id];
+      for (const key of ARRAY_COLLECTIONS) {
+        const storedMap = storedState[key];
+        const rows = storedMap && typeof storedMap === 'object' ? (storedMap as CollectionMap)[id] : undefined;
+        // Take the winning side's entry wholesale — including its ABSENCE, so the
+        // grafted project stays one coherent snapshot.
+        if (Array.isArray(rows)) mergedCollections[key][id] = rows;
+        else delete mergedCollections[key][id];
+      }
+    }
+    // Output-run lease: a heartbeat never stamps updatedAt (it is coordination,
+    // not content), so the side that won above may hold an OLDER heartbeat for
+    // the very same run. Keep the newest heartbeat whichever side won — a stale
+    // one would make a run that is alive in another tab look lapsed (and get
+    // resumed a second time). See outputRunLease.ts.
+    if (inStored && inOurs) {
+      const winner = mergedProjects[id] as Record<string, unknown> | undefined;
+      const loser = (storedWins ? oursProjects[id] : storedProjects[id]) as Record<string, unknown> | undefined;
+      const winnerRun = readOutputRunMarker(winner?.outputRun);
+      const freshest = newestOutputRunMarker(winnerRun, readOutputRunMarker(loser?.outputRun));
+      if (winner && freshest && freshest !== winnerRun) {
+        const withFreshestLease: Record<string, unknown> = { ...winner, outputRun: freshest };
+        mergedProjects[id] = withFreshestLease;
+        changed = true;
+      }
     }
   }
 

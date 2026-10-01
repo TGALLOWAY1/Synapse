@@ -9,11 +9,16 @@
 
 - `projectSlice` — Project CRUD, current stage. `deleteProject` also records a
   per-user **delete tombstone** (`projectTombstones`: project id → deletedAt) in
-  the same write — see "Cross-tab write safety" below and PROJECT_SYNC.md. The
+  the same write — see "Cross-tab write safety" below and PROJECT_SYNC.md.
+  `reviveDeletedProject` supersedes one when server sync pulls back a cloud
+  copy that changed after the deletion: it clears the tombstone and, if the
+  pulled content predates the deletion, stamps `Project.updatedAt` to
+  `deletedAt + 1` so the cross-tab merge keeps the project in every tab. The
   durable output-run marker (`Project.outputRun`, `markOutputRunStarted` /
-  `settleOutputRun`) is the artifact-run counterpart of
-  `SpineVersion.generationPhase` — see WORKSPACE_AND_ARTIFACTS.md "Artifact job
-  runs".
+  `heartbeatOutputRun` / `settleOutputRun`) is the artifact-run counterpart of
+  `SpineVersion.generationPhase` and doubles as a cross-tab **lease** (owner
+  tab id + heartbeat, `src/lib/outputRunLease.ts`) — see
+  WORKSPACE_AND_ARTIFACTS.md "Artifact job runs".
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
@@ -164,12 +169,19 @@ load kills any in-flight PRD pipeline, so spines still marked
 placeholder with no structured PRD — are converted into a settled
 `generationError` (`category: 'interrupted'`), which renders the existing
 error card with Try Again instead of an eternal "Generating…" state. Spines
-with an open preflight session or a blocked safety review are skipped. The same
-callback runs `markInterruptedOutputRuns`: a project still carrying a
-`'running'` `outputRun` marker (an artifact output run the load killed) is
-flipped to `'interrupted'`, the evidence `artifactJobController.resumeIfNeeded`
-uses to resume that run on the next Build mount even when no output had
-completed yet. It also defaults `projectTombstones` to `{}` for legacy blobs.
+with an open preflight session or a blocked safety review are skipped. (This
+PRD recovery has no lease: a second tab that loads mid-generation still marks
+that spine interrupted.) The same callback runs `markInterruptedOutputRuns`: a
+project still carrying a `'running'` `outputRun` marker is flipped to
+`'interrupted'` — the evidence `artifactJobController.resumeIfNeeded` uses to
+resume that run on the next Build mount even when no output had completed yet
+— **only when this load actually killed the run**: the marker's `ownerTabId`
+is this tab (a reload keeps the sessionStorage tab id) or its `heartbeatAt`
+lease lapsed (older than `OUTPUT_RUN_LEASE_MS`, 45 s). A fresh heartbeat from
+another tab means the run is live there: the marker stays `'running'`, this tab
+never auto-resumes it, and its Build view is read-only until the run settles
+or the lease lapses (WORKSPACE_AND_ARTIFACTS.md "The marker is a lease"). It
+also defaults `projectTombstones` to `{}` for legacy blobs.
 
 **Concurrency rule:** store actions that append a version (e.g.
 `createArtifactVersion`, `regenerateSpine`, `mergeBranch`) must do **all** state
@@ -240,13 +252,23 @@ whose tombstone is at least as new as its winning side's latest activity is
 dropped with all its collections instead of resurrected — so a stale tab can
 no longer bring a deleted project back (and, signed in, re-push it). Activity
 strictly after the deletion wins: the project is kept and its superseded
-tombstone cleared. Ties go to the in-memory tab — and to keep real changes out of tie
+tombstone cleared — which is why server sync's newer-wins revival
+(`reviveDeletedProject`) lifts a pulled-back project's activity just past its
+deletion: otherwise a stale tab still holding the tombstone would drop it
+again, and the tab adopting that drop would echo it as a remote delete of the
+very cloud work being restored. Ties go to the in-memory tab — and to keep real changes out of tie
 territory, **every in-place mutation stamps `updatedAt`**: spine mutations
 (streaming PRD fill, decision-edit amend, preflight patches,
 finality/error/safety settles — `SpineVersion.updatedAt`) and project-record
-mutations (stage, design preset, product metadata — `Project.updatedAt`), both
-optional fields (legacy data predates them); the activity scan also reads
-generic `at` stamps on event rows. After a merged value lands (and no newer
+mutations (stage, design preset, product metadata, output-run start/settle —
+`Project.updatedAt`), both optional fields (legacy data predates them); the
+activity scan also reads generic `at` stamps on event rows. The one deliberate
+exception is the output-run lease heartbeat (`heartbeatOutputRun`, every 10 s
+while a run is live): it is coordination, not content, so it stamps nothing —
+stamping it would make the run owner's copy win every merge over real edits in
+another tab. Instead the merge keeps the newest `heartbeatAt` for the same run
+id whichever side wins the project (`newestOutputRunMarker`), so a lease never
+looks lapsed just because the other side's content won. After a merged value lands (and no newer
 write is already pending), the storage fires the handler's `onApplied`, which
 adopts the merged blob into memory on the next microtask by setState-ing the
 persisted project-keyed collections (plus `projectTombstones`) **directly — never via

@@ -40,9 +40,12 @@ export type Project = {
     // Durable lifecycle marker for a full artifact output run
     // (`artifactJobController.startAll`) — the output-run counterpart of
     // `SpineVersion.generationPhase`. Stamped 'running' when the run launches
-    // and removed when it settles; a page load converts a persisted 'running'
-    // marker to 'interrupted' (`markInterruptedOutputRuns`), which is how
-    // `resumeIfNeeded` recognizes a run killed before its FIRST output landed.
+    // and removed when it settles. It is a LEASE: the owning tab refreshes
+    // `heartbeatAt` while the run is live, so on page load a 'running' marker
+    // becomes 'interrupted' (`markInterruptedOutputRuns`) only when this same
+    // tab owned it or its heartbeat lapsed — never while another tab's run is
+    // alive. An 'interrupted' marker is how `resumeIfNeeded` recognizes a run
+    // killed before its FIRST output landed. See src/lib/outputRunLease.ts.
     // Optional — legacy projects and runs that settled normally have none.
     outputRun?: OutputRunMarker;
 };
@@ -53,6 +56,13 @@ export type OutputRunMarker = {
     runId: string;
     startedAt: number;
     phase: 'running' | 'interrupted';
+    /** Tab that owns the live run (per-tab id kept in sessionStorage, so it
+     *  survives that tab's own reload). Optional — older markers lack it. */
+    ownerTabId?: string;
+    /** Last time the owning tab confirmed the run is alive (epoch ms), refreshed
+     *  every few seconds while it runs. Optional — older markers lack it (their
+     *  `startedAt` stands in). */
+    heartbeatAt?: number;
 };
 
 export type BranchMessage = {

@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectState } from './types';
-import type { SpineVersion } from '../types';
+import type { OutputRunMarker, SpineVersion } from '../types';
 import { createDebouncedStorage, registerCrossTabMerge, registerQuotaRecovery } from './storage';
 import { compactPersistedNamespaces, decodePersistedBlob } from './persistCodec';
-import { mergePersistedProjectBlobs } from '../lib/crossTabMerge';
+import { latestProjectActivity, mergePersistedProjectBlobs } from '../lib/crossTabMerge';
+import { readOutputRunMarker } from '../lib/outputRunLease';
+import { readProjectTombstones } from '../lib/projectTombstones';
 import { ALL_PROJECT_COLLECTIONS } from '../lib/projectBundle';
 import { resolveProjectStorageName } from './userScope';
 import { createProjectSlice } from './slices/projectSlice';
@@ -106,8 +108,10 @@ export const useProjectStore = create<ProjectState>()(
                     // error — otherwise the UI shows "Generating…" forever.
                     markInterruptedGenerations(state.spineVersions);
                     // Same for artifact output runs: a leftover 'running'
-                    // marker becomes 'interrupted' so the Build view resumes
-                    // the run (artifactJobController.resumeIfNeeded).
+                    // marker this tab owned, or whose lease lapsed, becomes
+                    // 'interrupted' so the Build view resumes the run
+                    // (artifactJobController.resumeIfNeeded). A marker another
+                    // live tab is still heartbeating is left 'running'.
                     markInterruptedOutputRuns(state.projects ?? {});
                     markInterruptedReviews(state.reviewRuns ?? {}, state.specialistRuns ?? {});
                     // Legacy blobs predate delete tombstones.
@@ -266,3 +270,49 @@ registerQuotaRecovery(() => {
     useProjectStore.setState(sweep.collections);
     return true;
 });
+
+/**
+ * What this user's persisted namespace currently holds for one project — i.e.
+ * what OTHER tabs have written. This tab's store only adopts another tab's
+ * writes when it next writes itself (the cross-tab merge above), so decision
+ * points that must not act on a stale in-memory view check this fresh one:
+ * - before spending money on generation, `artifactJobController` looks for
+ *   another tab's live output-run lease (its heartbeat never reaches this
+ *   tab's memory on its own) and whether that tab advanced the project past
+ *   what this tab has in memory;
+ * - before acting on a delete tombstone against a still-live cloud copy,
+ *   server sync's reconcile checks whether another tab kept the project
+ *   (`activity` after the deletion) or deleted it again (a newer `deletedAt`).
+ * `activity` is 0 and `deletedAt` undefined when the blob has no such project /
+ * tombstone. Parses the whole blob — call it only at such decision points.
+ * Undefined when storage is unavailable or the blob can't be read.
+ */
+export function readPersistedProjectSnapshot(
+    projectId: string,
+): { outputRun?: OutputRunMarker; activity: number; deletedAt?: number } | undefined {
+    try {
+        const json = decodePersistedBlob(localStorage.getItem(resolveProjectStorageName()));
+        if (!json) return undefined;
+        const state = (JSON.parse(json) as { state?: Record<string, unknown> })?.state;
+        if (!state || typeof state !== 'object') return undefined;
+        const projects = state.projects as Record<string, { outputRun?: unknown } | undefined> | undefined;
+        return {
+            outputRun: readOutputRunMarker(projects?.[projectId]?.outputRun),
+            activity: latestProjectActivity(state, projectId),
+            deletedAt: readProjectTombstones(state.projectTombstones)[projectId],
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Ask this tab to catch up with what other tabs persisted. A no-op setState
+ * schedules the normal debounced write, whose cross-tab guard merges the
+ * newer stored blob and adopts the result (onApplied) — the same safe path
+ * every write takes. Never adopt by overwriting memory directly: that could
+ * drop this tab's own not-yet-flushed edits.
+ */
+export function requestCrossTabCatchUp(): void {
+    useProjectStore.setState({});
+}

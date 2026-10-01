@@ -33,6 +33,8 @@ import {
 } from '../projectServerSync';
 import { setProjectSyncMeta, getProjectSyncMeta } from '../../lib/projectSyncMeta';
 import type { ProjectBundle } from '../../lib/projectBundle';
+import { latestProjectActivity, mergePersistedProjectBlobs } from '../../lib/crossTabMerge';
+import { resolveProjectStorageName } from '../userScope';
 
 function emptyState() {
   return {
@@ -387,6 +389,185 @@ describe('deleted projects stay deleted (delete tombstones)', () => {
     await vi.waitFor(() => expect(phase()).toBe('ready'));
 
     expect(client.saveProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('a failed delete never erases newer cloud work (newer-wins)', () => {
+  const phase = () => useProjectSyncStore.getState().phase;
+  const deletedAt = Date.parse('2026-05-01T12:00:00Z');
+
+  /** This device deleted p1 (tombstone) after last syncing it at revision 4. */
+  function seedDeletedHere(): void {
+    useProjectStore.setState({ ...emptyState(), projectTombstones: { p1: deletedAt } });
+    setProjectSyncMeta('user-a', 'p1', {
+      lastSeenServerRevision: 4,
+      lastSeenServerUpdatedAt: '2026-05-01T11:00:00.000Z',
+      lastCloudSavedAt: deletedAt - 3_600_000,
+    });
+  }
+
+  /** A persist envelope holding the given project-keyed state (one tab's blob). */
+  const blobOf = (state: Record<string, unknown>) => JSON.stringify({ state: { ...emptyState(), ...state }, version: 0 });
+
+  it('a cloud copy changed after the delete survives: pulled back, tombstone cleared, no delete', async () => {
+    seedDeletedHere();
+    // Another device edited (or recreated) p1 after this device deleted it.
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 6, updatedAt: '2026-05-01T12:30:00.000Z' }]);
+    client.fetchProject.mockResolvedValue({ id: 'p1', revision: 6, data: serverBundle('p1') });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().projects['p1']?.name).toBe('Server p1');
+    expect(useProjectStore.getState().projectTombstones['p1']).toBeUndefined();
+    expect(getProjectSyncMeta('user-a', 'p1').lastSeenServerRevision).toBe(6);
+  });
+
+  it('a revived copy whose content predates the delete still survives a second tab that holds the tombstone', async () => {
+    seedDeletedHere();
+    // The cloud row changed after the delete, but its CONTENT is older (e.g.
+    // offline edits pushed late): serverBundle's activity is epoch 1.
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 6, updatedAt: '2026-05-01T12:30:00.000Z' }]);
+    client.fetchProject.mockResolvedValue({ id: 'p1', revision: 6, data: serverBundle('p1') });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(useProjectStore.getState().projects['p1']).toBeTruthy());
+
+    const s = useProjectStore.getState();
+    // The revival itself is activity after the delete...
+    expect(latestProjectActivity(s as unknown as Record<string, unknown>, 'p1')).toBeGreaterThan(deletedAt);
+    // ...so the cross-tab merge with a stale tab still holding the tombstone
+    // keeps the project (in either write direction) instead of dropping it and
+    // echoing the drop as a remote delete of the restored cloud work.
+    const revived = blobOf({ projects: s.projects, spineVersions: s.spineVersions, projectTombstones: s.projectTombstones });
+    const staleTab = blobOf({ projectTombstones: { p1: deletedAt } });
+    for (const merged of [mergePersistedProjectBlobs(staleTab, revived), mergePersistedProjectBlobs(revived, staleTab)]) {
+      const state = JSON.parse(merged).state;
+      expect(state.projects['p1']?.name).toBe('Server p1');
+      expect(state.projectTombstones['p1']).toBeUndefined();
+    }
+  });
+
+  it('a copy another tab kept after the delete is neither deleted nor pulled over — this tab catches up', async () => {
+    seedDeletedHere();
+    // A second tab still had p1, edited it after the delete here (the
+    // cross-tab merge keeps post-delete work) and pushed it — which advanced
+    // the device-wide sync baseline to the server's current revision.
+    setProjectSyncMeta('user-a', 'p1', { lastSeenServerRevision: 5, lastSeenServerUpdatedAt: '2026-05-01T12:10:00.000Z' });
+    const kept = serverBundle('p1');
+    localStorage.setItem(resolveProjectStorageName(), blobOf({
+      projects: { p1: { ...kept.project, name: 'Kept in tab 2', updatedAt: deletedAt + 600_000 } },
+      spineVersions: { p1: kept.spineVersions },
+    }));
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 5, updatedAt: '2026-05-01T12:10:00.000Z' }]);
+    client.saveProject.mockResolvedValue({ id: 'p1', revision: 6 });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    expect(client.fetchProject).not.toHaveBeenCalled();
+    // The catch-up write merges the other tab's blob and adopts its copy.
+    await vi.waitFor(
+      () => expect(useProjectStore.getState().projects['p1']?.name).toBe('Kept in tab 2'),
+      { timeout: 3_000 },
+    );
+    expect(useProjectStore.getState().projectTombstones['p1']).toBeUndefined();
+  });
+
+  it('a project deleted again after the newer-wins check stays deleted', async () => {
+    seedDeletedHere();
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 6, updatedAt: '2026-05-01T12:30:00.000Z' }]);
+    client.fetchProject.mockImplementation(async (id: string) => {
+      // Another tab revived p1 and the user deleted it again while this
+      // bundle was in flight (adopted as a newer tombstone).
+      useProjectStore.setState({ projectTombstones: { p1: Date.parse('2026-05-01T13:00:00Z') } });
+      return { id, revision: 6, data: serverBundle(id) };
+    });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(useProjectStore.getState().projects['p1']).toBeUndefined();
+    expect(useProjectStore.getState().projectTombstones['p1']).toBe(Date.parse('2026-05-01T13:00:00Z'));
+    // Not applied, so no server baseline is recorded for content never held.
+    expect(getProjectSyncMeta('user-a', 'p1').lastSeenServerRevision).toBe(4);
+  });
+
+  it('a pulled bundle skipped at apply time records no server baseline', async () => {
+    client.fetchProjectList.mockResolvedValue([{ id: 'p2', revision: 3, updatedAt: '2026-05-01T12:00:00.000Z' }]);
+    client.fetchProject.mockImplementation(async (id: string) => {
+      // Deleted in another tab while the bundle was in flight.
+      useProjectStore.setState({ projectTombstones: { [id]: Date.now() } });
+      return { id, revision: 3, data: serverBundle(id) };
+    });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(useProjectStore.getState().projects['p2']).toBeUndefined();
+    // A baseline would make the next reconcile treat the server copy as
+    // "unchanged since this device synced it" and retry the delete on it.
+    expect(getProjectSyncMeta('user-a', 'p2')).toEqual({});
+  });
+
+  it('an older cloud copy — unchanged since this device last synced it — is deleted', async () => {
+    seedDeletedHere();
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 4, updatedAt: '2026-05-01T11:00:00.000Z' }]);
+    client.deleteProject.mockResolvedValue(undefined);
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.deleteProject).toHaveBeenCalledWith('p1');
+    expect(client.fetchProject).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().projects['p1']).toBeUndefined();
+  });
+
+  it('a cloud change stamped before the delete loses to it (the delete is retried)', async () => {
+    seedDeletedHere();
+    // Changed on another device since this one last synced — but before the
+    // deletion here, so the delete is the newer act.
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 5, updatedAt: '2026-05-01T11:30:00.000Z' }]);
+    client.deleteProject.mockResolvedValue(undefined);
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(phase()).toBe('ready'));
+
+    expect(client.deleteProject).toHaveBeenCalledWith('p1');
+    expect(client.fetchProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('output-run lease heartbeats are not pushed', () => {
+  it('a heartbeat-only change does not upload the bundle; a real change still does', async () => {
+    seedLocalProject('p1', 'Local p1');
+    useProjectStore.setState((s) => ({
+      projects: {
+        ...s.projects,
+        p1: {
+          ...s.projects['p1'],
+          outputRun: { spineVersionId: 'v1', runId: 'r1', startedAt: 1, phase: 'running', ownerTabId: 't', heartbeatAt: 1 },
+        },
+      },
+    }));
+    setProjectSyncMeta('user-a', 'p1', { lastSeenServerRevision: 2, hasUnsyncedChanges: false });
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 2 }]);
+    client.saveProject.mockResolvedValue({ id: 'p1', revision: 3 });
+
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(useProjectSyncStore.getState().phase).toBe('ready'));
+    client.saveProject.mockClear();
+
+    vi.useFakeTimers();
+    useProjectStore.getState().heartbeatOutputRun('p1', 'r1');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.saveProject).not.toHaveBeenCalled();
+
+    useProjectStore.getState().setProjectStage('p1', 'workspace');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.saveProject).toHaveBeenCalledTimes(1);
   });
 });
 

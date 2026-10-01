@@ -124,6 +124,7 @@ import type {
     ArtifactVersion, GenerationStatus, ProjectTask,
 } from '../types';
 import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
+import { readOnlyWhileRunElsewhere, useOutputRunLiveElsewhere } from '../hooks/useOutputRunLiveElsewhere';
 
 // Stable empty reference for the tasks selector. Returning `[]` literal each
 // call would make Zustand's useSyncExternalStore see a fresh snapshot on every
@@ -364,7 +365,16 @@ export function ArtifactWorkspace({
     onOpenPlanningRecord, onNavigatePlanning,
     buildPacket, buildPacketManifest, onNavigateBuildPacketTarget,
 }: ArtifactWorkspaceProps) {
-    const capabilities = useProjectCapabilities(projectId);
+    const baseCapabilities = useProjectCapabilities(projectId);
+    // Another tab is generating this project's outputs (its output-run lease
+    // is live — src/lib/outputRunLease.ts): show that run's in-progress state
+    // read-only until it settles or the lease lapses. Generating or editing
+    // here would duplicate the paid run or race its writes.
+    const runLiveElsewhere = useOutputRunLiveElsewhere(projectId);
+    const capabilities = useMemo(
+        () => (runLiveElsewhere ? readOnlyWhileRunElsewhere(baseCapabilities) : baseCapabilities),
+        [baseCapabilities, runLiveElsewhere],
+    );
     const isMobile = useIsMobile();
     const {
         getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
@@ -1053,7 +1063,7 @@ export function ArtifactWorkspace({
     // idle slot doesn't read as empty while siblings are still in flight.
     // 'mockup' no longer renders a sidebar row (it lives inside the Screens
     // view), so it's re-added here explicitly to keep the in-flight signal.
-    const isActive = ([...slotMetas.map(s => s.key), 'mockup'] as WorkspaceSelection[]).some(key => {
+    const isActive = runLiveElsewhere || ([...slotMetas.map(s => s.key), 'mockup'] as WorkspaceSelection[]).some(key => {
         const status = slotStatusFor(key);
         return status === 'generating' || status === 'queued';
     });
@@ -2381,6 +2391,18 @@ export function ArtifactWorkspace({
                                     Return to update plan
                                 </button>
                             )}
+                        </div>
+                    )}
+                    {runLiveElsewhere && (
+                        <div
+                            role="status"
+                            className="mb-3 flex items-start gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950"
+                        >
+                            <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-indigo-600" />
+                            <span>
+                                Outputs for this project are being generated in another tab or window.
+                                This view is read-only until that run finishes.
+                            </span>
                         </div>
                     )}
                     {renderMain()}
