@@ -316,7 +316,10 @@ rationale and detail.
    list the bundle, sync, recovery, namespace switch, and legacy import all
    derive from), the snapshot collectors/restorers +
    `namespaceSnapshotForRestore`, and demo cleanup — or it silently won't
-   survive snapshots/sync. → SNAPSHOTS_AND_DEMO.md, PROJECT_SYNC.md
+   survive snapshots/sync. Per-user state that is *not* a project collection
+   (e.g. `projectTombstones`) stays out of `ALL_PROJECT_COLLECTIONS` but must
+   be reset on user switch and carried by the cross-tab merge.
+   → SNAPSHOTS_AND_DEMO.md, PROJECT_SYNC.md, STATE_AND_AUTH.md
 7. **Prompts are snapshot-locked:** every major prompt surface is covered by
    `src/lib/__tests__/promptSurfaces.test.ts` — an intentional prompt edit
    updates the snapshot in the same change; an unreviewed snapshot diff is
