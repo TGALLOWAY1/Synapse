@@ -4,6 +4,7 @@
 **Audit basis:** source inspection and targeted automated tests on `16fd21c`  
 **Scope:** changing approved requirements after downstream artifacts exist; proposal authority; propagation; version comparison and recovery  
 **Implementation changes:** none
+**Remediation:** the findings below are sequenced into phases with invariants, acceptance criteria, and a status ledger in [docs/CHANGE_MANAGEMENT_REMEDIATION_PLAN.md](../CHANGE_MANAGEMENT_REMEDIATION_PLAN.md). Track CM status there — this audit is a fixed snapshot and is not updated as work lands.
 
 ## Executive conclusion
 
