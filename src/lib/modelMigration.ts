@@ -6,12 +6,15 @@
  * is wrapped in try/catch because localStorage throws in private-browsing modes.
  */
 
+import type { CoreArtifactSubtype } from '../types';
+import { getArtifactModelOverrides, setArtifactModelOverrides } from './artifactModelSettings';
+
 const LATEST_FLASH_MODEL = 'gemini-3.8-flash';
 const LATEST_FLASH_LITE_MODEL = 'gemini-3.1-flash-lite';
 
 // Flash model IDs that predate the GA 3.8 Flash default. Users sitting on one
 // of these (whether as their primary or fast-tier selection) are moved forward;
-// Pro selections are intentionally left untouched.
+// Pro selections are left to `migrateGeminiProModel` below.
 const SUPERSEDED_FLASH_MODELS = new Set([
     'gemini-3.7-flash',
     'gemini-3.6-flash',
@@ -51,6 +54,51 @@ export function migrateGeminiFlashModel() {
             }
         }
         localStorage.setItem(FLASH_MIGRATION_KEY, '1');
+    } catch {
+        // localStorage unavailable (private mode, etc.) — skip migration.
+    }
+}
+
+const LATEST_STRONG_MODEL = 'gemini-4-argon';
+
+// Pro IDs superseded by the GA Gemini 4 Argon, the new Expert (strong) tier
+// default. Settings writes every tier key on Save, so most users carry the old
+// default in GEMINI_STRONG_MODEL without ever having picked it — changing
+// DEFAULT_STRONG_MODEL alone would never reach them. Gemini 2.5 Pro is a
+// deliberate legacy pick and stays put.
+const SUPERSEDED_PRO_MODELS = new Set([
+    'gemini-3.1-pro-preview',
+]);
+
+// Its own sentinel: the 2026_10 Flash wave has already run for most users.
+const PRO_MIGRATION_KEY = 'GEMINI_PRO_MODEL_MIGRATED_2026_10';
+
+/**
+ * Move every stored Gemini 3.1 Pro Preview selection to Gemini 4 Argon — the
+ * three tier keys (`GEMINI_MODEL`, `GEMINI_FAST_MODEL`, `GEMINI_STRONG_MODEL`)
+ * and any per-artifact override. 3.1 Pro stays in the legacy catalog, so a
+ * user can pick it again afterwards and the one-shot sentinel respects that.
+ */
+export function migrateGeminiProModel() {
+    try {
+        if (localStorage.getItem(PRO_MIGRATION_KEY)) return;
+        for (const key of ['GEMINI_MODEL', 'GEMINI_FAST_MODEL', 'GEMINI_STRONG_MODEL']) {
+            const current = localStorage.getItem(key);
+            if (current && SUPERSEDED_PRO_MODELS.has(current)) {
+                localStorage.setItem(key, LATEST_STRONG_MODEL);
+            }
+        }
+        const overrides = getArtifactModelOverrides();
+        let overridesChanged = false;
+        for (const subtype of Object.keys(overrides) as CoreArtifactSubtype[]) {
+            const model = overrides[subtype];
+            if (model && SUPERSEDED_PRO_MODELS.has(model)) {
+                overrides[subtype] = LATEST_STRONG_MODEL;
+                overridesChanged = true;
+            }
+        }
+        if (overridesChanged) setArtifactModelOverrides(overrides);
+        localStorage.setItem(PRO_MIGRATION_KEY, '1');
     } catch {
         // localStorage unavailable (private mode, etc.) — skip migration.
     }

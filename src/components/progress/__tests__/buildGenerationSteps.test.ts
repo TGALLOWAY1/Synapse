@@ -20,6 +20,7 @@ describe('formatModelName', () => {
         expect(formatModelName('gemini-1.5-flash')).toBe('Gemini 1.5 Flash');
         expect(formatModelName('gemini-2.0-pro')).toBe('Gemini 2.0 Pro');
         expect(formatModelName('gemini-3.6-flash')).toBe('Gemini 3.6 Flash');
+        expect(formatModelName('gemini-4-argon')).toBe('Gemini 4 Argon');
     });
     it('strips a models/ prefix and handles empty input', () => {
         expect(formatModelName('models/gemini-2.0-flash')).toBe('Gemini 2.0 Flash');

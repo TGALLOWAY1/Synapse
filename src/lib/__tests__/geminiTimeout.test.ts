@@ -5,6 +5,7 @@ import {
     GeminiTimeoutError,
     GEMINI_TIMEOUT_MS,
     isRetryableNetworkError,
+    resolveTimeoutMs,
 } from '../geminiClient';
 
 /**
@@ -45,6 +46,27 @@ describe('gemini request watchdog', () => {
         // rejection is observed and not reported as unhandled.
         const assertion = expect(pending).rejects.toBeInstanceOf(GeminiTimeoutError);
         await vi.advanceTimersByTimeAsync(GEMINI_TIMEOUT_MS + 1);
+        await assertion;
+    });
+
+    it('gives Gemini 4 Argon a 20-minute window and every other model the default', () => {
+        expect(resolveTimeoutMs('gemini-4-argon')).toBe(20 * 60_000);
+        expect(resolveTimeoutMs('gemini-3.8-flash')).toBe(GEMINI_TIMEOUT_MS);
+    });
+
+    it('keeps waiting on an Argon call past the default window, then times out at its own', async () => {
+        vi.stubGlobal('fetch', hangingFetch);
+
+        const pending = callGemini('system', 'prompt', { model: 'gemini-4-argon' });
+        let settled = false;
+        void pending.then(() => { settled = true; }, () => { settled = true; });
+        const assertion = expect(pending).rejects.toBeInstanceOf(GeminiTimeoutError);
+
+        // Still thinking at the 2-minute mark — a Flash call would be dead.
+        await vi.advanceTimersByTimeAsync(GEMINI_TIMEOUT_MS + 1);
+        expect(settled).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(resolveTimeoutMs('gemini-4-argon') - GEMINI_TIMEOUT_MS);
         await assertion;
     });
 

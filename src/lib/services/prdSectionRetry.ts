@@ -119,7 +119,10 @@ export const regeneratePrdSection = async (
         // re-running with the identical cap would be a near-guaranteed repeat
         // failure (and full re-spend) for an over-length section. The budget is
         // derived per section rather than flat, so a wide section that already
-        // starts at the larger cap still gains headroom here.
+        // starts at the larger cap still gains headroom here. (On Gemini 4 Argon
+        // the transport lifts both passes to its 32,768 floor — see
+        // `resolveMaxOutputTokens` — so there the retry is a fresh attempt at
+        // that ceiling rather than a larger budget.)
         let finishReason: string | undefined;
         const raw = await callGemini(
             '',

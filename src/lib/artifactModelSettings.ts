@@ -10,15 +10,17 @@ import { getFastModel, getStrongModel } from './geminiClient';
  *
  * Resolution order for a given artifact subtype:
  *   1. explicit user override (Settings)               — `getArtifactModelOverrides()`
- *   2. complexity recommendation (Flash vs Pro)        — `CORE_ARTIFACT_COMPLEXITY`
+ *   2. complexity recommendation (Flash vs Argon)      — `CORE_ARTIFACT_COMPLEXITY`
  *   3. tier-model fallback via `getFastModel`/`getStrongModel` — an explicit
  *      tier model, else the single Default model, else the tier's own default
- *      (`DEFAULT_FAST_MODEL` = Flash / `DEFAULT_STRONG_MODEL` = Pro). The strong
- *      tier defaults to Pro, matching Settings — it must NOT collapse to the
- *      Flash global default, or "Pro for complex artifacts" silently runs Flash.
+ *      (`DEFAULT_FAST_MODEL` = Flash / `DEFAULT_STRONG_MODEL` = Argon). The
+ *      strong tier defaults to Argon, matching Settings — it must NOT collapse
+ *      to the Flash global default, or "Argon for complex artifacts" silently
+ *      runs Flash.
  *
  * Existing projects have no override key, so behaviour is unchanged until the
- * user picks a model — no migration is required.
+ * user picks a model. The one exception is `migrateGeminiProModel`
+ * (`modelMigration.ts`), which moves saved Gemini 3.1 Pro overrides to Argon.
  *
  * Keep `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
  */

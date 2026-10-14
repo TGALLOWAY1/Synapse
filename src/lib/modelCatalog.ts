@@ -24,9 +24,9 @@ export const MODEL_CATALOG: ModelOption[] = [
         tier: 'current',
     },
     {
-        id: 'gemini-3.1-pro-preview',
-        name: 'Gemini 3.1 Pro',
-        description: 'Maximum reasoning power for the most complex PRDs.',
+        id: 'gemini-4-argon',
+        name: 'Gemini 4 Argon',
+        description: 'Maximum reasoning power for the most complex PRDs. GA, paid tier only.',
         tier: 'current',
     },
     {
@@ -39,6 +39,12 @@ export const MODEL_CATALOG: ModelOption[] = [
         id: 'gemini-3.7-flash',
         name: 'Gemini 3.7 Flash',
         description: 'Previous-generation GA Flash — superseded by 3.8 Flash.',
+        tier: 'legacy',
+    },
+    {
+        id: 'gemini-3.1-pro-preview',
+        name: 'Gemini 3.1 Pro Preview',
+        description: 'Preview build with reduced quotas — superseded by the GA Gemini 4 Argon.',
         tier: 'legacy',
     },
     {

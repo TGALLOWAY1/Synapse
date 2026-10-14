@@ -108,7 +108,7 @@ const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown' | 'project_access_d
     truncated_response:
         'The model ran out of room before it could finish writing the PRD, so the response was cut off ' +
         'mid-sentence and could not be parsed. Try a shorter, more focused product description, or open ' +
-        'Settings and switch to a model with more output capacity (e.g. Gemini 2.5 Pro). Then tap Try Again.',
+        'Settings and switch to a model with more output capacity (e.g. Gemini 4 Argon). Then tap Try Again.',
 };
 
 const RAW_TRUNCATE = 400;

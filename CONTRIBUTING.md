@@ -34,7 +34,8 @@ the browser console), let you tune model routing without code changes:
 
 - `GEMINI_MODEL` — default model (defaults to `gemini-3.8-flash`).
 - `GEMINI_FAST_MODEL` / `GEMINI_STRONG_MODEL` — per-tier overrides for the DAG
-  pipeline (low-risk sections use fast, high-risk use strong).
+  pipeline (low-risk sections use fast, high-risk use strong). The strong tier
+  defaults to `gemini-4-argon`, which has no free tier.
 - `GEMINI_PROJECT_ID` — a GCP project id, forwarded as `x-goog-user-project`
   for billing/quota.
 

@@ -1,6 +1,6 @@
 // Multi-agent progressive PRD pipeline. Replaces the single-pass
 // runPrdPipeline call with a DAG-orchestrated approach: the 8 schema-aligned
-// sections in DEFAULT_PRD_SECTIONS run concurrently with Flash (fast) or Pro
+// sections in DEFAULT_PRD_SECTIONS run concurrently with Flash (fast) or Argon
 // (strong) per section. Returns the same PrdPipelineResult shape for drop-in
 // compatibility.
 
@@ -161,7 +161,7 @@ export const runProgressivePrdPipeline = async (
                     completedAt: nowEpoch(),
                 };
                 const startedSection = SECTION_BY_ID[event.sectionId];
-                const tierLabel = event.modelTier === 'fast' ? 'Flash' : 'Pro';
+                const tierLabel = event.modelTier === 'fast' ? 'Flash' : 'Argon';
                 const estimate = startedSection?.estimatedSeconds;
                 const estimateSuffix = estimate ? ` · ~${estimate}s` : '';
                 onProgress?.(`Generating ${startedSection?.title ?? event.sectionId} (${tierLabel}${estimateSuffix})…`);
@@ -191,7 +191,7 @@ export const runProgressivePrdPipeline = async (
                 }
                 const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
-                onProgress?.(`✓ ${section?.title ?? event.sectionId} (${tier === 'fast' ? 'Flash' : 'Pro'}) · ${(ms / 1000).toFixed(1)}s`);
+                onProgress?.(`✓ ${section?.title ?? event.sectionId} (${tier === 'fast' ? 'Flash' : 'Argon'}) · ${(ms / 1000).toFixed(1)}s`);
                 logPrd({
                     event: 'section_completed',
                     sectionId: event.sectionId,
