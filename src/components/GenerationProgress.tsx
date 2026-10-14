@@ -45,7 +45,7 @@ interface GenerationProgressProps {
     /**
      * Per-section generation status. When populated, renders a section-grid
      * below the message log: one pip per section, colour-coded by tier
-     * (teal = Flash, indigo = Pro) and shaped by status.
+     * (teal = Flash, indigo = Argon) and shaped by status.
      */
     sectionStatus?: Record<string, SectionStatusInfo>;
     /**
@@ -365,9 +365,10 @@ export function GenerationProgress({
                                 const isFast = info.tier === 'fast';
                                 const modelLabel = info.model
                                     ? (info.model.toLowerCase().includes('flash') ? 'Flash'
+                                        : info.model.toLowerCase().includes('argon') ? 'Argon'
                                         : info.model.toLowerCase().includes('pro') ? 'Pro'
                                         : info.model.slice(0, 6))
-                                    : (isFast ? 'Flash' : 'Pro');
+                                    : (isFast ? 'Flash' : 'Argon');
 
                                 const isActive = info.status === 'generating';
                                 const isComplete = info.status === 'complete';

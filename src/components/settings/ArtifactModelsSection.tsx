@@ -153,13 +153,13 @@ export function ArtifactModelsSection({
                                 <div className="space-y-1.5">
                                     <label className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-400">
                                         <Brain size={11} />
-                                        Expert model (Pro)
+                                        Expert model (Argon)
                                     </label>
                                     <select
                                         value={strongModel}
                                         onChange={(e) => onStrongModelChange(e.target.value)}
                                         className={selectClass}
-                                        aria-label="PRD expert (Pro) model"
+                                        aria-label="PRD expert (Argon) model"
                                     >
                                         {MODEL_CATALOG.map((m) => (
                                             <option key={m.id} value={m.id}>{m.name}</option>

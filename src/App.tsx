@@ -11,7 +11,7 @@ import { getOwnerToken } from './lib/snapshotClient';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
 import { useAuthStore } from './store/authStore';
-import { migrateGeminiFlashModel } from './lib/modelMigration';
+import { migrateGeminiFlashModel, migrateGeminiProModel } from './lib/modelMigration';
 import { Analytics } from '@vercel/analytics/react';
 
 // Secondary routes are code-split so the entry chunk carries only the landing
@@ -171,6 +171,7 @@ function App() {
 
   useEffect(() => {
     migrateGeminiFlashModel();
+    migrateGeminiProModel();
     refreshSession();
   }, [refreshSession]);
 

@@ -61,8 +61,8 @@ describe('core artifact complexity routing', () => {
 
     it('falls back to the per-tier defaults when tier models are unset', () => {
         // No GEMINI_FAST_MODEL / GEMINI_STRONG_MODEL and no GEMINI_MODEL → each
-        // tier's default. Low → Flash default; high → the Pro (strong) default,
-        // which must NOT collapse to Flash (that was the "Pro never used" bug).
+        // tier's default. Low → Flash default; high → the Argon (strong) default,
+        // which must NOT collapse to Flash (the old "Pro never used" bug).
         expect(selectArtifactModel('design_system')).toBe(DEFAULT_GEMINI_MODEL);
         expect(selectArtifactModel('implementation_plan')).toBe(DEFAULT_STRONG_MODEL);
 

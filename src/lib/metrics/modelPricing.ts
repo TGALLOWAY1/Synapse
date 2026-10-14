@@ -21,6 +21,9 @@ export interface ModelPrice {
  */
 const MODEL_PRICING: Array<{ match: string; price: ModelPrice }> = [
     { match: 'flash-lite', price: { input: 0.10, output: 0.40 } },
+    // Gemini 4 Argon's introductory rate, which runs through 2026-11-30; it is
+    // announced to double to $4 / $20 from 2026-12-01.
+    { match: 'argon', price: { input: 2.0, output: 10.0 } },
     { match: 'pro', price: { input: 1.25, output: 5.0 } },
     { match: 'flash', price: { input: 0.30, output: 2.5 } },
     { match: 'gpt-4', price: { input: 2.5, output: 10.0 } },

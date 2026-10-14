@@ -75,6 +75,24 @@
   hand a wide section zero headroom. When adding a section that emits several
   collections in one response, give it the wide cap.
 
+  **Model output floors (Gemini 4 Argon).** Every cap above is sized for the
+  answer alone, but Gemini 4 Argon — the strong-tier default — spends its
+  thinking tokens from the same `maxOutputTokens` budget, so a 4K–16K cap can
+  be used up by thinking and come back truncated or empty (`MAX_TOKENS`).
+  Google's guidance is to raise any Argon cap under 32K to at least 32,768, so
+  the transport does it in one place: `resolveMaxOutputTokens(model, cap)`
+  (`geminiClient.ts`, applied in both `callGemini` and `callGeminiStream`)
+  lifts a cap to the model's entry in `MIN_MAX_OUTPUT_TOKENS` and leaves larger
+  caps and every other model alone. Call sites keep sizing caps for the answer.
+  The floor is exactly 32,768 because that is the most one non-streaming Argon
+  request returns — above it the API answers with a `CONTINUATION` finish this
+  client does not implement — so don't raise the floor, and don't give a
+  non-streaming Argon call a cap above it (32,768 is today's highest cap). One
+  consequence: on Argon a section's first pass and its retry both run at
+  32,768, so there the retry is a fresh attempt at the ceiling rather than a
+  larger budget. The retry-budget invariant above still holds for every model
+  without a floor.
+
   **Response schemas: never bound arrays of objects.** Gemini rejects some
   `responseSchema`s outright — HTTP 400 `INVALID_ARGUMENT` ("Request contains
   an invalid argument."), before any generation — when an array of objects
@@ -160,7 +178,7 @@
     component specs" demands to prompts or rubric. `runDag()` runs every section whose
     deps are satisfied concurrently, under separate per-tier concurrency caps
     (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
-    fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs
+    fast (Flash) model, high-risk the strong (Argon) model. `validateGraph()` runs
     first and throws on unknown-dependency references or cycles (Kahn's
     algorithm) so a broken graph fails loudly instead of silently dropping
     sections. Each section emits a typed slice of `StructuredPRD`; slices are
@@ -654,20 +672,22 @@
     resolves **(1)** an explicit per-artifact override (Settings → "Artifact
     Generation Models", persisted as the `GEMINI_ARTIFACT_MODELS` JSON map),
     else **(2)** the complexity recommendation — `high` (screen_inventory,
-    user_flows, data_model, implementation_plan) → Expert/Pro (`getStrongModel`),
+    user_flows, data_model, implementation_plan) → Expert/Argon (`getStrongModel`),
     `low` (component_inventory, design_system, prompt_pack) → Fast/Flash
     (`getFastModel`), else **(3)** the tier fallback in `getFastModel`/
     `getStrongModel`: an explicit tier model → the single Default model
     (`GEMINI_MODEL`) → the **tier's own default** (`DEFAULT_FAST_MODEL` = Flash,
-    `DEFAULT_STRONG_MODEL` = Pro, both in `geminiClient.ts`). The strong tier
-    defaults to **Pro**, matching the Settings pickers — it must never collapse
+    `DEFAULT_STRONG_MODEL` = Gemini 4 Argon, both in `geminiClient.ts`). The
+    strong tier defaults to **Argon**, matching the Settings pickers — it must never collapse
     to the Flash global default (the old `getStrongModel → getModel →
     DEFAULT_GEMINI_MODEL` chain did, so complex PRD sections / high-complexity
     artifacts silently ran on Flash even though Settings advertised Pro).
     `coreArtifactService.selectArtifactModel`
     delegates to `getArtifactModel` and re-exports `CORE_ARTIFACT_COMPLEXITY` for
     back-compat. Existing projects have no override key, so behaviour is
-    unchanged until the user picks a model (no migration). The resolved model is
+    unchanged until the user picks a model (no migration — except that
+    `migrateGeminiProModel` moves saved Gemini 3.1 Pro overrides to Argon, see
+    below). The resolved model is
     threaded into every generate **and** refine call, and `artifactJobController`
     records that same per-subtype model in workflow metrics. Keep
     `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
@@ -696,7 +716,7 @@
     on view). The Settings section is `settings/ArtifactModelsSection.tsx`,
     now the single place PRD **and** artifact models are configured: the PRD row
     (badge "Per-section") expands to reveal the authoritative Fast (Flash) /
-    Expert (Pro) model pickers **plus** a read-only per-section preview showing
+    Expert (Argon) model pickers **plus** a read-only per-section preview showing
     which tier each PRD section actually runs on — this replaced the old,
     separate "PRD Generation Models" block in `SettingsModal` (removing the
     redundancy that made PRD look like it "defaulted to Flash"). Text artifacts
@@ -705,7 +725,17 @@
     browser keys, Integrations, Refine & enhance model) behind collapsed
     `Disclosure` sections; the Gemini billing project ID sits with the vault (it
     applies to every Gemini request regardless of key source), not buried in the
-    local-keys fallback. The model list is the shared `src/lib/modelCatalog.ts`.
+    local-keys fallback. The model list is the shared `src/lib/modelCatalog.ts`
+    (current vs legacy tiers — a superseded model moves to legacy rather than
+    disappearing). Saved selections move forward through the sentinel-gated
+    one-shot migrations in `src/lib/modelMigration.ts`, run on app start:
+    `migrateGeminiFlashModel` (older Flash ids → 3.8 Flash) and
+    `migrateGeminiProModel` (Gemini 3.1 Pro Preview → Gemini 4 Argon across
+    `GEMINI_MODEL` / `GEMINI_FAST_MODEL` / `GEMINI_STRONG_MODEL` and the
+    per-artifact overrides). The Pro move is load-bearing: Settings writes every
+    tier key on Save, so most users had the old strong default pinned, and a new
+    `DEFAULT_STRONG_MODEL` alone would never reach them. Each migration runs
+    once, so re-picking a legacy model afterwards sticks.
     Three of these
     (screen/data/component inventory) use Gemini JSON mode with schemas in
     `schemas/artifactSchemas.ts`, then convert to markdown via

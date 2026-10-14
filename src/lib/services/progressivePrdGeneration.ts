@@ -115,7 +115,7 @@ export type ProgressiveEvent =
 // ─── Section topology ────────────────────────────────────────────────────────
 // 8 schema-aligned sections. Each emits a typed slice of StructuredPRD that
 // is merged client-side into the final document. Fast (Flash) sections run
-// independently; strong (Pro) sections depend on earlier results.
+// independently; strong (Argon) sections depend on earlier results.
 //
 // The PRD is the product DECISION document — detailed specification belongs to
 // the dedicated downstream artifacts. The former `data_model` and

@@ -22,7 +22,8 @@ export interface JsonModeConfig {
      * rich JSON-mode PRD response needs — hitting the cap mid-response
      * truncates the JSON inside a string and causes "Unterminated string in
      * JSON" parse failures. Pin this to the model's full headroom for
-     * structured-output paths.
+     * structured-output paths. Models whose thinking shares this budget get
+     * it raised to their floor (`resolveMaxOutputTokens`).
      */
     maxOutputTokens?: number;
     /**
@@ -115,12 +116,17 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 /**
  * Per-tier defaults. These MUST match the tier defaults advertised in the
  * Settings model pickers (`SettingsModal`/`ArtifactModelsSection`) — the Fast
- * tier defaults to Flash, the Expert (strong) tier defaults to Pro. If the
- * runtime and the UI disagree here, the app silently generates complex PRD
- * sections / high-complexity artifacts on Flash while Settings claims Pro.
+ * tier defaults to Flash, the Expert (strong) tier defaults to Gemini 4 Argon.
+ * If the runtime and the UI disagree here, the app silently generates complex
+ * PRD sections / high-complexity artifacts on Flash while Settings claims Argon.
+ *
+ * Gemini 4 Argon (GA, October 2026) replaced Gemini 3.1 Pro Preview as the
+ * strong-tier model; `modelMigration.ts` moves saved 3.1 Pro selections over.
+ * It has no free tier, and it counts thinking tokens against
+ * `maxOutputTokens` — see `MIN_MAX_OUTPUT_TOKENS`.
  */
 export const DEFAULT_FAST_MODEL = DEFAULT_GEMINI_MODEL;
-export const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
+export const DEFAULT_STRONG_MODEL = 'gemini-4-argon';
 
 /** The single "Default model" override, when the user has set one. */
 const getStoredDefaultModel = () => localStorage.getItem('GEMINI_MODEL') || '';
@@ -129,13 +135,34 @@ const getModel = () => getStoredDefaultModel() || DEFAULT_GEMINI_MODEL;
 
 // Resolution order per tier: explicit tier override → the single Default model
 // override (so "set both to the same model" still works) → the tier default.
-// The final fallback is the crux: the strong tier defaults to Pro (matching the
-// UI), NOT to the Flash global default.
+// The final fallback is the crux: the strong tier defaults to Argon (matching
+// the UI), NOT to the Flash global default.
 export const getFastModel = (): string =>
     localStorage.getItem('GEMINI_FAST_MODEL') || getStoredDefaultModel() || DEFAULT_FAST_MODEL;
 
 export const getStrongModel = (): string =>
     localStorage.getItem('GEMINI_STRONG_MODEL') || getStoredDefaultModel() || DEFAULT_STRONG_MODEL;
+
+/**
+ * Smallest `maxOutputTokens` a model is sent, keyed by model id. Gemini 4 Argon
+ * spends its thinking tokens from the same budget as the answer, so the 4K–16K
+ * caps most call sites size for the answer alone can be used up by thinking —
+ * a MAX_TOKENS finish with a truncated or empty body. Google's guidance for
+ * Argon is to raise any cap under 32K to at least 32,768. That is also the most
+ * one non-streaming request returns (past it the API switches to continuation,
+ * which this client does not implement), so the floor is exactly that.
+ */
+const MIN_MAX_OUTPUT_TOKENS: ReadonlyMap<string, number> = new Map([
+    ['gemini-4-argon', 32_768],
+]);
+
+/**
+ * The output cap actually sent for `model`: the caller's cap, raised to the
+ * model's floor when it sits below it. A cap is a ceiling, not a reservation,
+ * so raising it costs nothing unless a response would otherwise be cut off.
+ */
+export const resolveMaxOutputTokens = (model: string, requested: number): number =>
+    Math.max(requested, MIN_MAX_OUTPUT_TOKENS.get(model) ?? 0);
 
 /**
  * Optional Google Cloud project ID. When present, we forward it as the
@@ -454,7 +481,9 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
-            ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
+            ...(typeof jsonMode.maxOutputTokens === 'number'
+                ? { maxOutputTokens: resolveMaxOutputTokens(model, jsonMode.maxOutputTokens) }
+                : {}),
         };
         // A model-only override (no schema/params) carries no generationConfig.
         if (Object.keys(generationConfig).length > 0) {
@@ -606,7 +635,9 @@ export const callGeminiStream = async (
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
-            ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
+            ...(typeof jsonMode.maxOutputTokens === 'number'
+                ? { maxOutputTokens: resolveMaxOutputTokens(model, jsonMode.maxOutputTokens) }
+                : {}),
         };
         // A model-only override (no schema/params) carries no generationConfig.
         if (Object.keys(generationConfig).length > 0) {

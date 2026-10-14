@@ -27,7 +27,7 @@ generation:
   serialization.
 - Caps default to `maxFastConcurrency: 4` / `maxStrongConcurrency: 3`
   (`progressivePrdPipeline.ts`). Low-risk sections use the fast (Flash) model,
-  high-risk the strong (Pro) model — each tier has an independent slot budget so
+  high-risk the strong (Argon) model — each tier has an independent slot budget so
   one tier's rate limit doesn't starve the other.
 - Dependencies are **true data dependencies only** (a section lists another
   only when it consumes that section's output as prompt context), so the graph

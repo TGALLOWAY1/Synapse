@@ -31,9 +31,9 @@ describe('artifact model settings — persistence & defaults', () => {
 
     it('falls back through the tier resolvers to the per-tier defaults', () => {
         // Nothing set at all → each tier's own default: high artifacts get the
-        // strong (Pro) default, low artifacts get the fast (Flash) default. The
+        // strong (Argon) default, low artifacts get the fast (Flash) default. The
         // strong default must NOT collapse to Flash, or Settings' advertised
-        // "Pro for complex" would silently run on Flash.
+        // "Argon for complex" would silently run on Flash.
         for (const subtype of Object.keys(CORE_ARTIFACT_COMPLEXITY) as CoreArtifactSubtype[]) {
             const expected = CORE_ARTIFACT_COMPLEXITY[subtype] === 'high'
                 ? DEFAULT_STRONG_MODEL

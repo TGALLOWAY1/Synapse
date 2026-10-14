@@ -584,7 +584,7 @@ export const generateCoreArtifact = async (
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     const onProgress = options?.onProgress;
-    // Route by complexity: high-reasoning artifacts → Expert (Pro), the rest →
+    // Route by complexity: high-reasoning artifacts → Expert (Argon), the rest →
     // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
     const model = selectArtifactModel(subtype);
 
