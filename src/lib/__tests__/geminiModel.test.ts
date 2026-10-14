@@ -187,18 +187,22 @@ describe('migrateGeminiProModel', () => {
     });
 });
 
+const okBody = (usageMetadata?: object) => ({
+    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }],
+    ...(usageMetadata ? { usageMetadata } : {}),
+});
+const okJson = (usageMetadata?: object): Response =>
+    new Response(JSON.stringify(okBody(usageMetadata)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+    });
+const okSse = (usageMetadata?: object): Response =>
+    new Response(`data: ${JSON.stringify(okBody(usageMetadata))}\n\n`, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+    });
+
 describe('Argon output-token floor', () => {
-    const candidate = { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }] };
-    const okJson = (): Response =>
-        new Response(JSON.stringify(candidate), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-        });
-    const okSse = (): Response =>
-        new Response(`data: ${JSON.stringify(candidate)}\n\n`, {
-            status: 200,
-            headers: { 'Content-Type': 'text/event-stream' },
-        });
     const sentMaxOutputTokens = (calls: unknown[][]): number | undefined => {
         const [, init] = calls[0] as unknown as [string, RequestInit];
         const body = JSON.parse(init.body as string) as { generationConfig?: { maxOutputTokens?: number } };
@@ -253,6 +257,56 @@ describe('Argon output-token floor', () => {
             maxOutputTokens: 4096,
         });
         expect(sentMaxOutputTokens(fetchMock.mock.calls)).toBe(4096);
+    });
+});
+
+describe('token usage', () => {
+    // A thinking model reports its reasoning apart from the answer; Gemini
+    // bills both at the output rate, so both count as output.
+    const usageMetadata = {
+        promptTokenCount: 1000,
+        candidatesTokenCount: 400,
+        thoughtsTokenCount: 2600,
+        totalTokenCount: 4000,
+    };
+    const billed = { inputTokens: 1000, outputTokens: 3000, totalTokens: 4000 };
+
+    beforeEach(() => {
+        localStorage.clear();
+        localStorage.setItem('GEMINI_API_KEY', 'test-key');
+        vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it('counts thinking tokens as output on a non-streaming call', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => okJson(usageMetadata)));
+        const onUsage = vi.fn();
+        await callGemini('system', 'prompt', { model: ARGON, onUsage });
+        expect(onUsage).toHaveBeenCalledWith(billed);
+    });
+
+    it('counts thinking tokens as output on a streaming call', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => okSse(usageMetadata)));
+        const onUsage = vi.fn();
+        await callGeminiStream(
+            'system',
+            'prompt',
+            { onChunk: vi.fn(), onComplete: vi.fn(), onError: vi.fn() },
+            undefined,
+            { model: ARGON, onUsage },
+        );
+        expect(onUsage).toHaveBeenCalledWith(billed);
+    });
+
+    it('needs no thinking count from a model that does not report one', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => okJson({ promptTokenCount: 10, candidatesTokenCount: 5 })));
+        const onUsage = vi.fn();
+        await callGemini('system', 'prompt', { model: LATEST_FLASH, onUsage });
+        expect(onUsage).toHaveBeenCalledWith({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
     });
 });
 

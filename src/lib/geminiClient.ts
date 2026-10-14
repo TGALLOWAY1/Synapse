@@ -61,9 +61,30 @@ export interface JsonModeConfig {
 /** Token counts extracted from a Gemini response's `usageMetadata`. */
 export interface GeminiTokenUsage {
     inputTokens: number;
+    /** Billed output: the answer plus any thinking tokens (see `toTokenUsage`). */
     outputTokens: number;
     totalTokens: number;
 }
+
+/** The parts of Gemini's `usageMetadata` this client reads. */
+interface GeminiUsageMetadata {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+}
+
+/**
+ * Map `usageMetadata` to `GeminiTokenUsage`. `outputTokens` counts everything
+ * Gemini bills at the output rate: the answer (`candidatesTokenCount`) plus
+ * thinking (`thoughtsTokenCount`), which a thinking model such as Gemini 4
+ * Argon can spend more on than on the answer itself.
+ */
+const toTokenUsage = (u: GeminiUsageMetadata): GeminiTokenUsage => {
+    const inputTokens = u.promptTokenCount ?? 0;
+    const outputTokens = (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0);
+    return { inputTokens, outputTokens, totalTokens: u.totalTokenCount ?? inputTokens + outputTokens };
+};
 
 export interface StreamCallbacks {
     onChunk: (text: string) => void;
@@ -122,8 +143,8 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
  *
  * Gemini 4 Argon (GA, October 2026) replaced Gemini 3.1 Pro Preview as the
  * strong-tier model; `modelMigration.ts` moves saved 3.1 Pro selections over.
- * It has no free tier, and it counts thinking tokens against
- * `maxOutputTokens` — see `MIN_MAX_OUTPUT_TOKENS`.
+ * It has no free tier, counts thinking tokens against `maxOutputTokens`, and
+ * can think for minutes — see `MODEL_TRANSPORT_OVERRIDES`.
  */
 export const DEFAULT_FAST_MODEL = DEFAULT_GEMINI_MODEL;
 export const DEFAULT_STRONG_MODEL = 'gemini-4-argon';
@@ -142,27 +163,6 @@ export const getFastModel = (): string =>
 
 export const getStrongModel = (): string =>
     localStorage.getItem('GEMINI_STRONG_MODEL') || getStoredDefaultModel() || DEFAULT_STRONG_MODEL;
-
-/**
- * Smallest `maxOutputTokens` a model is sent, keyed by model id. Gemini 4 Argon
- * spends its thinking tokens from the same budget as the answer, so the 4K–16K
- * caps most call sites size for the answer alone can be used up by thinking —
- * a MAX_TOKENS finish with a truncated or empty body. Google's guidance for
- * Argon is to raise any cap under 32K to at least 32,768. That is also the most
- * one non-streaming request returns (past it the API switches to continuation,
- * which this client does not implement), so the floor is exactly that.
- */
-const MIN_MAX_OUTPUT_TOKENS: ReadonlyMap<string, number> = new Map([
-    ['gemini-4-argon', 32_768],
-]);
-
-/**
- * The output cap actually sent for `model`: the caller's cap, raised to the
- * model's floor when it sits below it. A cap is a ceiling, not a reservation,
- * so raising it costs nothing unless a response would otherwise be cut off.
- */
-export const resolveMaxOutputTokens = (model: string, requested: number): number =>
-    Math.max(requested, MIN_MAX_OUTPUT_TOKENS.get(model) ?? 0);
 
 /**
  * Optional Google Cloud project ID. When present, we forward it as the
@@ -240,6 +240,7 @@ export const parseRetryAfterMs = (value: string | null, now: number = Date.now()
  * otherwise waits forever — no error, no retry, no way for the UI to recover.
  * Streaming calls reset the clock on every received chunk, so an actively
  * streaming response is never killed mid-flight; only true silence trips it.
+ * Slow-thinking models get a longer window via `resolveTimeoutMs`.
  */
 export const GEMINI_TIMEOUT_MS = 120_000;
 
@@ -249,6 +250,39 @@ export class GeminiTimeoutError extends Error {
         this.name = 'GeminiTimeoutError';
     }
 }
+
+/**
+ * Per-model transport settings that differ from the defaults, keyed by model
+ * id. Gemini 4 Argon needs two, both from Google's Argon migration guidance:
+ *
+ * - `minMaxOutputTokens`: Argon spends its thinking tokens from the same
+ *   budget as the answer, so the 4K–16K caps most call sites size for the
+ *   answer alone can be used up by thinking — a MAX_TOKENS finish with a
+ *   truncated or empty body. Google says to raise any Argon cap under 32K to
+ *   at least 32,768. That is also the most one non-streaming request returns
+ *   (past it the API switches to continuation, which this client does not
+ *   implement), so the floor is exactly that.
+ * - `timeoutMs`: Argon can think for minutes before its first byte, and a
+ *   non-streaming call sends nothing until it is done, so the 2-minute
+ *   watchdog would abort valid work. Google recommends client timeouts of at
+ *   least 15–20 minutes; this takes 20. The cost is that a hung connection on
+ *   an Argon call takes that long to detect — the caller can still cancel.
+ */
+const MODEL_TRANSPORT_OVERRIDES: ReadonlyMap<string, { minMaxOutputTokens: number; timeoutMs: number }> = new Map([
+    ['gemini-4-argon', { minMaxOutputTokens: 32_768, timeoutMs: 20 * 60_000 }],
+]);
+
+/**
+ * The output cap actually sent for `model`: the caller's cap, raised to the
+ * model's floor when it sits below it. A cap is a ceiling, not a reservation,
+ * so raising it costs nothing unless a response would otherwise be cut off.
+ */
+export const resolveMaxOutputTokens = (model: string, requested: number): number =>
+    Math.max(requested, MODEL_TRANSPORT_OVERRIDES.get(model)?.minMaxOutputTokens ?? 0);
+
+/** The inactivity watchdog for a call to `model`: its override, else `GEMINI_TIMEOUT_MS`. */
+export const resolveTimeoutMs = (model: string): number =>
+    MODEL_TRANSPORT_OVERRIDES.get(model)?.timeoutMs ?? GEMINI_TIMEOUT_MS;
 
 /**
  * A non-OK HTTP response from Gemini, thrown once any transport retries are
@@ -501,14 +535,15 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         meta: jsonMode?.traceMeta,
     });
 
-    const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
+    const timeoutMs = resolveTimeoutMs(model);
+    const watchdog = createWatchdog(timeoutMs, signal);
     // Transport retries (429 / 5xx / connection drops) for the trace + message.
     let retries = 0;
     const retryReasons: string[] = [];
     let data: {
         candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
         promptFeedback?: { blockReason?: string };
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+        usageMetadata?: GeminiUsageMetadata;
     } | undefined;
     try {
         const response = await fetchWithRetry(url, {
@@ -532,7 +567,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     } catch (e) {
         annotateRetries(trace, retryReasons);
         if (watchdog.timedOut()) {
-            const timeout = new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+            const timeout = new GeminiTimeoutError(timeoutMs);
             trace.finishError(timeout, { retryCount: retries });
             throw timeout;
         }
@@ -571,12 +606,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     // responses, in which case we simply skip the callback.
     let usage: GeminiTokenUsage | undefined;
     if (data?.usageMetadata) {
-        const u = data.usageMetadata;
-        usage = {
-            inputTokens: u.promptTokenCount ?? 0,
-            outputTokens: u.candidatesTokenCount ?? 0,
-            totalTokens: u.totalTokenCount ?? (u.promptTokenCount ?? 0) + (u.candidatesTokenCount ?? 0),
-        };
+        usage = toTokenUsage(data.usageMetadata);
         jsonMode?.onUsage?.(usage);
     }
     // Record the trace (developer-only; no-op when capture is disabled). For
@@ -622,6 +652,7 @@ export const callGeminiStream = async (
     const apiKey = getApiKey();
     const model = jsonMode?.model || getModel();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+    const timeoutMs = resolveTimeoutMs(model);
 
     const body: Record<string, unknown> = {
         systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -668,7 +699,7 @@ export const callGeminiStream = async (
     const streamOnce = async (): Promise<{ fullText: string; finishReason?: string; usage?: GeminiTokenUsage }> => {
         // Watchdog is per-attempt: each retry gets a fresh inactivity window,
         // and every received chunk resets it — only true silence times out.
-        const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
+        const watchdog = createWatchdog(timeoutMs, signal);
         let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
         let attemptRetries = 0;
         try {
@@ -733,13 +764,8 @@ export const callGeminiStream = async (
                         // Gemini reports token usage on the final SSE chunk. The
                         // non-streaming path parses this too; capturing it here
                         // closes the artifact-generation token-metrics gap.
-                        const u = chunk.usageMetadata;
-                        if (u) {
-                            usage = {
-                                inputTokens: u.promptTokenCount ?? 0,
-                                outputTokens: u.candidatesTokenCount ?? 0,
-                                totalTokens: u.totalTokenCount ?? (u.promptTokenCount ?? 0) + (u.candidatesTokenCount ?? 0),
-                            };
+                        if (chunk.usageMetadata) {
+                            usage = toTokenUsage(chunk.usageMetadata);
                         }
                     } catch {
                         // Skip malformed JSON chunks
@@ -757,7 +783,7 @@ export const callGeminiStream = async (
         } catch (e) {
             if (watchdog.timedOut()) {
                 reader?.cancel().catch(() => undefined);
-                throw new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+                throw new GeminiTimeoutError(timeoutMs);
             }
             if (signal?.aborted) {
                 reader?.cancel().catch(() => undefined);

@@ -95,7 +95,7 @@ function toNodeRun(obs: NodeObservation, fallbackGroup?: number): WorkflowNodeRu
         (inputTokens !== undefined || outputTokens !== undefined
             ? (inputTokens ?? 0) + (outputTokens ?? 0)
             : undefined);
-    const cost = estimateCost(obs.model, { inputTokens, outputTokens, totalTokens: totalTokens ?? 0 });
+    const cost = estimateCost(obs.model, { inputTokens, outputTokens, totalTokens: totalTokens ?? 0 }, obs.startedAt);
     return {
         id: uuidv4(),
         nodeId: obs.nodeId,

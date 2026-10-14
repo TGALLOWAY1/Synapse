@@ -16,7 +16,8 @@
   present, and a `Retry-After` beyond `MAX_RETRY_AFTER_MS` (60s) is not
   waited out — the error surfaces. Backoff waits honor the caller's abort
   signal (a cancel during backoff rejects promptly with `AbortError`) and
-  `touch` the 120s inactivity watchdog before and after each wait, so the
+  `touch` the inactivity watchdog (120s; 20 min for Gemini 4 Argon — see
+  "Model transport overrides" below) before and after each wait, so the
   watchdog still measures only server silence. A status response always
   arrives before any streamed chunk, so status retries never replay delivered
   content. `callGeminiStream` *also* wraps the entire fetch+reader in a
@@ -38,6 +39,10 @@
   that later fails as a generic parse error. **Both modes now parse Gemini's
   `usageMetadata`** and fire `JsonModeConfig.onUsage` — the streaming path
   reads it off the final SSE chunk, closing the old artifact-token-capture gap.
+  Both map it through `toTokenUsage`, whose `outputTokens` is billed output:
+  the answer (`candidatesTokenCount`) **plus** thinking (`thoughtsTokenCount`),
+  which Gemini prices at the output rate. Counting the answer alone
+  understated every thinking model's tokens and cost.
   `callGemini`/`callGeminiStream` are the **single chokepoint** for every LLM
   call in the app; both are instrumented by the LLM Trace Viewer (see below).
   **Truncation is detected, never silently accepted:** both modes surface the
@@ -75,15 +80,22 @@
   hand a wide section zero headroom. When adding a section that emits several
   collections in one response, give it the wide cap.
 
-  **Model output floors (Gemini 4 Argon).** Every cap above is sized for the
-  answer alone, but Gemini 4 Argon — the strong-tier default — spends its
-  thinking tokens from the same `maxOutputTokens` budget, so a 4K–16K cap can
-  be used up by thinking and come back truncated or empty (`MAX_TOKENS`).
-  Google's guidance is to raise any Argon cap under 32K to at least 32,768, so
-  the transport does it in one place: `resolveMaxOutputTokens(model, cap)`
-  (`geminiClient.ts`, applied in both `callGemini` and `callGeminiStream`)
-  lifts a cap to the model's entry in `MIN_MAX_OUTPUT_TOKENS` and leaves larger
-  caps and every other model alone. Call sites keep sizing caps for the answer.
+  **Model transport overrides (Gemini 4 Argon).** Two transport defaults are
+  wrong for Gemini 4 Argon, the strong-tier default, so
+  `MODEL_TRANSPORT_OVERRIDES` (`geminiClient.ts`) overrides them per model id,
+  applied in both `callGemini` and `callGeminiStream`; every other model keeps
+  the defaults. **Timeout:** Argon can think for minutes before its first
+  byte, and a non-streaming call sends nothing until it is done, so the 120s
+  watchdog aborted valid work. Google recommends client timeouts of at least
+  15–20 minutes, so `resolveTimeoutMs(model)` gives Argon 20 — at the price
+  that a hung connection on an Argon call takes that long to detect (the
+  caller's cancel still works). **Output floor:** every cap above is sized for
+  the answer alone, but Argon spends its thinking tokens from the same
+  `maxOutputTokens` budget, so a 4K–16K cap can be used up by thinking and
+  come back truncated or empty (`MAX_TOKENS`). Google's guidance is to raise
+  any Argon cap under 32K to at least 32,768, so
+  `resolveMaxOutputTokens(model, cap)` lifts a cap to the model's floor and
+  leaves larger caps alone. Call sites keep sizing caps for the answer.
   The floor is exactly 32,768 because that is the most one non-streaming Argon
   request returns — above it the API answers with a `CONTINUATION` finish this
   client does not implement — so don't raise the floor, and don't give a

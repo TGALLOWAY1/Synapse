@@ -77,7 +77,7 @@ All timings are milliseconds, derived from per-node start/end timestamps.
 | **Max Concurrency** | sweep-line peak overlap of node intervals | Most agents in flight at once. |
 | **Average Concurrency** | `totalNodeRuntime ÷ actualRuntime` | Average agents in flight over the run. |
 | **Critical Path** | longest dependency chain weighted by node duration | Theoretical runtime floor even with infinite concurrency. |
-| **Estimated Cost** | `Σ (inTok·inPrice + outTok·outPrice)` per node | Approximate USD from `modelPricing.ts`. **Estimate only.** |
+| **Estimated Cost** | `Σ (inTok·inPrice + outTok·outPrice)` per node | Approximate USD from `modelPricing.ts`, at the rate in effect when the node started (Gemini 4 Argon's introductory rate ends 2026-12-01). Output tokens include thinking tokens, which Gemini bills as output. **Estimate only.** |
 
 ### Interpreting sequential estimate vs actual runtime
 

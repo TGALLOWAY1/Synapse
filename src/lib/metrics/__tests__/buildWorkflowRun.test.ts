@@ -64,6 +64,21 @@ describe('buildWorkflowRun', () => {
         expect(run.parallelGroupCount).toBe(2);
     });
 
+    it('prices each node at the rate in effect when it started', () => {
+        const argonRunAt = (start: number) => buildWorkflowRun({
+            projectId: 'p1',
+            workflowType: 'prd',
+            nodes: [obs('a', start, start + 1000, {
+                model: 'gemini-4-argon',
+                inputTokens: 1_000_000,
+                outputTokens: 1_000_000,
+            })],
+        });
+        // Argon's introductory rate ends 2026-12-01 (standard rate is double).
+        expect(argonRunAt(Date.UTC(2026, 10, 30)).estimatedCost).toBeCloseTo(12);
+        expect(argonRunAt(Date.UTC(2026, 11, 1)).estimatedCost).toBeCloseTo(24);
+    });
+
     it('marks a run partial when some nodes error and error when all error', () => {
         const partial = buildWorkflowRun({
             projectId: 'p1',
