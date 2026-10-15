@@ -284,7 +284,8 @@ Standalone design docs (referenced from the topic docs):
 `docs/ORCHESTRATION_AND_METRICS.md`, `docs/QA_CHECKLIST.md`,
 `docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md`,
 `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md`, `docs/audits/WORKFLOW_AUDIT.md`,
-`docs/audits/ARTIFACTS_BUILD_READINESS_AUDIT_2026-07-25.md`.
+`docs/audits/ARTIFACTS_BUILD_READINESS_AUDIT_2026-07-25.md`,
+`docs/audits/UX_JOURNEY_AUDIT_2026-09-12.md`.
 
 ## Cross-cutting rules (always apply)
 
