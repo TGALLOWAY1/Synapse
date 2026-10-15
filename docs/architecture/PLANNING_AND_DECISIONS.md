@@ -1,6 +1,6 @@
 # Uncertainty-First Planning, Adversarial Review & the Decision Center
 
-> Extracted from CLAUDE.md. The planning decision domain (PlanningRecord/DecisionEvent), readiness projection, assumption import/validation, decision impact + the compare-and-append write barrier, and the adversarial review engine. Design docs: docs/DECISION_CENTER_DESIGN.md, docs/ADVERSARIAL_PLANNING_REVIEW.md, docs/UNCERTAINTY_FIRST_PLANNING.md, docs/DECISION_CENTER_SIMPLIFICATION_PLAN.md.
+> Extracted from CLAUDE.md. The planning decision domain (PlanningRecord/DecisionEvent), readiness projection, assumption import/validation, decision impact + the compare-and-append write barrier, and the adversarial review engine. Design docs: docs/DECISION_CENTER_DESIGN.md, docs/ADVERSARIAL_PLANNING_REVIEW.md, docs/UNCERTAINTY_FIRST_PLANNING.md, docs/DECISION_CENTER_SIMPLIFICATION_PLAN.md. Open remediation program for change-management coherence (dependency coverage, approved baselines/change sets, region-level restore): docs/CHANGE_MANAGEMENT_REMEDIATION_PLAN.md — read it before extending downstream update plans, output alignment, or restore semantics.
 
 ### Uncertainty-first planning, adversarial review, and Decision Center
 
