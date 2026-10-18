@@ -29,6 +29,11 @@ vi.mock('../../lib/openaiClient', () => ({
     },
     hasOpenAIKey: () => true,
 }));
+// Nano Banana stub for explicit-model regeneration (returns JPEG, like the live model).
+vi.mock('../../lib/geminiClient', async (importActual) => ({
+    ...(await importActual<typeof import('../../lib/geminiClient')>()),
+    callGeminiImage: async () => ({ b64: currentB64, mimeType: 'image/jpeg' }),
+}));
 
 // Design tokens selector reads the project store — stub it out.
 vi.mock('../../lib/designTokens', () => ({ selectPreferredDesignTokens: () => undefined }));
@@ -142,6 +147,20 @@ describe('mockupVariantImageStore.generate', () => {
         expect(rec?.history).toHaveLength(1);
         expect(rec?.history?.[0].dataUrl).toBe('data:image/png;base64,FIRST');
         expect(rec?.history?.[0].reason).toBe('regenerated');
+    });
+
+    it('records the model, and regenerating with the other model moves the previous render (with its model) to history', async () => {
+        const req = makeRequest();
+        currentB64 = 'GPT';
+        await useMockupVariantImageStore.getState().generate(genArgs(req));
+        currentB64 = 'BANANA';
+        await useMockupVariantImageStore.getState().generate({ ...genArgs(req), provider: 'gemini' });
+
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        expect(rec?.model).toBe('gemini-nano-banana-2.1');
+        expect(rec?.dataUrl).toBe('data:image/jpeg;base64,BANANA');
+        expect(rec?.prompt).toMatch(/^Create a UI design mockup/);
+        expect(rec?.history?.[0]).toMatchObject({ model: 'gpt-image-2', dataUrl: 'data:image/png;base64,GPT' });
     });
 
     it('failed regeneration preserves the current successful record and adds no history entry', async () => {

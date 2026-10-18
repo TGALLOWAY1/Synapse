@@ -1331,13 +1331,13 @@ try {
                             settleReason,
                             readySubtypes: [...new Set(subtypes)].sort(),
                             missingSubtypes: REQUIRED_OUTPUT_SUBTYPES.filter((subtype) => !subtypes.includes(subtype)),
-                            // Mockup *images* come from the /api/image/generate backend proxy
-                            // (server-side, gated by the provider-key status endpoint), and
-                            // hasOpenAIKey() reflects that server status — NOT any shell env
-                            // var. Plain `vite dev` runs no `api/` functions, so images never
-                            // render here regardless of key; the mockup *spec* still generates
-                            // via Gemini and screens show as wireframe/placeholder.
-                            note: 'Local harness: mockup screen images are always wireframe/placeholder — the /api image backend does not run under vite dev. The mockup spec generates via Gemini.',
+                            // Mockup *images* only generate once the mockup flow-approval
+                            // gate is approved, which this harness never does, so screens
+                            // show as wireframe/placeholder. (GPT Image 2 renders would also
+                            // need the /api/image/generate proxy, which plain `vite dev` does
+                            // not run; Nano Banana 2.1 renders go browser-direct on the seeded
+                            // Gemini key.) The mockup *spec* still generates via Gemini.
+                            note: 'Local harness: mockup screen images stay wireframe/placeholder — the harness never approves the mockup flow gate (GPT Image 2 renders also need the /api image proxy, which vite dev does not run). The mockup spec generates via Gemini.',
                         };
                         console.log(`  assets settled in ${Math.round((Date.now() - t0) / 1000)}s (${settleReason})`,
                             report.assets.readySubtypes);

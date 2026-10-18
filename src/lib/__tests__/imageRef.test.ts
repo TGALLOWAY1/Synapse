@@ -66,6 +66,18 @@ describe('mockupRecordFromRef', () => {
       prompt: '',
     });
   });
+
+  it('carries which image model made the render across devices', () => {
+    const gemini: MockupImageRecord = {
+      ...record,
+      key: 'v1:s1:low:gemini',
+      dataUrl: 'data:image/jpeg;base64,AAAA',
+      model: 'gemini-nano-banana-2.1',
+    };
+    const ref = buildMockupImageRef(gemini, 'h', 'https://blob/x.jpg', 10);
+    const out = mockupRecordFromRef(ref, 'data:image/jpeg;base64,BBBB');
+    expect(out).toEqual({ ...gemini, dataUrl: 'data:image/jpeg;base64,BBBB' });
+  });
 });
 
 describe('refVersionId', () => {

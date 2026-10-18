@@ -69,6 +69,9 @@ export function mockupRecordFromRef(ref: ImageRef, dataUrl: string): MockupImage
     dataUrl,
     quality: (meta.quality ?? ref.quality ?? 'low') as MockupImageQuality,
     prompt: meta.prompt ?? '',
+    // Which image model made it (absent on pre-provider renders and meta-less
+    // backup refs; the key's `:gemini` suffix still identifies the provider).
+    ...(typeof meta.model === 'string' && meta.model ? { model: meta.model } : {}),
     generatedAt: meta.generatedAt ?? 0,
   };
 }

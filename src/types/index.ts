@@ -2509,8 +2509,8 @@ export type MockupSettings = {
 
 // Mockup screen payload. Each screen is a semantic specification derived
 // from the screen_inventory + component_inventory + design_system artifacts.
-// The visual rendering is produced by AI image generation (OpenAI gpt-image-2);
-// no HTML is generated or stored here.
+// The visual rendering is produced by AI image generation (OpenAI gpt-image-2
+// or Google Nano Banana 2.1); no HTML is generated or stored here.
 export type MockupScreen = {
     id: string;                  // stable per-screen id (uuid, assigned client-side)
     name: string;                // screen title, e.g. "Editor Dashboard"
@@ -2541,24 +2541,37 @@ export const MOCKUP_SPEC_V1 = 'mockup_spec_v1' as const;
 // no longer used; the parser strips them on read.
 export const MOCKUP_HTML_V1 = 'mockup_html_v1' as const;
 
-// --- AI image previews (OpenAI gpt-image-2) ---
+// --- AI image previews (OpenAI gpt-image-2 / Google Nano Banana 2.1) ---
 //
-// Each MockupScreen can optionally have an associated AI-generated image
-// preview produced by OpenAI gpt-image-2. The image lives outside the Zustand
-// store (in IndexedDB) because base64 PNGs are too large for localStorage's
-// quota. MockupPayload is intentionally unchanged — image presence is looked
-// up by `${versionId}:${screenId}` in the IDB image store.
+// Each MockupScreen can optionally have associated AI-generated image previews,
+// produced by one of two image providers (see src/lib/mockupImageModels.ts).
+// The images live outside the Zustand store (in IndexedDB) because base64 PNGs
+// are too large for localStorage's quota. MockupPayload is intentionally
+// unchanged — image presence is looked up by the `${versionId}:${screenId}:`
+// prefix in the IDB image store.
 export type MockupImageQuality = 'low' | 'medium' | 'high';
 
+/** Image provider slot: OpenAI GPT Image or Google Nano Banana (Gemini). The
+ * concrete model behind each slot lives in `MOCKUP_IMAGE_MODELS`; records keep
+ * the exact model id they were generated with in `model`. */
+export type MockupImageProvider = 'openai' | 'gemini';
+
 export type MockupImageRecord = {
-    key: string;            // `${versionId}:${screenId}`
+    /** `${versionId}:${screenId}:${quality}` for OpenAI renders (the legacy
+     * shape), `…:${quality}:gemini` for Gemini renders — so one screen can hold
+     * a render from each provider side by side (`buildImageKey`). */
+    key: string;
     projectId: string;
     artifactId: string;
     versionId: string;
     screenId: string;
-    dataUrl: string;        // `data:image/png;base64,...`
+    dataUrl: string;        // `data:image/png;base64,...` (Gemini may return other image types)
     quality: MockupImageQuality;
-    prompt: string;         // prompt sent to gpt-image-2 (for traceability)
+    prompt: string;         // prompt sent to the image model (for traceability)
+    /** Exact image model id that produced this render (e.g. `gpt-image-2`,
+     * `gemini-nano-banana-2.1`). Optional: renders from before this field
+     * existed are gpt-image-2 — readers use `imageModelLabelForRecord`. */
+    model?: string;
     generatedAt: number;
 };
 
@@ -2615,6 +2628,8 @@ export type MockupVariantImageHistoryEntry = {
     dataUrl: string;
     quality: MockupImageQuality;
     prompt?: string;
+    /** Exact image model id of this render (absent on pre-provider renders, which were gpt-image-2). */
+    model?: string;
     coverageManifest?: MockupCoverageManifest;
     /** Phase 3C source signature captured when this render was generated
      * (absent for pre-3C records). Untyped here to avoid a lib→types import
@@ -2635,7 +2650,9 @@ export type MockupVariantImageRecord = {
     stateName: string;
     dataUrl: string;          // `data:image/png;base64,...`
     quality: MockupImageQuality;
-    prompt: string;           // prompt sent to gpt-image-2 (for traceability)
+    prompt: string;           // prompt sent to the image model (for traceability)
+    /** Exact image model id of this render (absent on pre-provider renders, which were gpt-image-2). */
+    model?: string;
     coverageManifest?: MockupCoverageManifest;
     // --- Phase 3C trust metadata (all optional / back-compat) ---
     /** Deterministic snapshot of the screen/design/PRD inputs at generation

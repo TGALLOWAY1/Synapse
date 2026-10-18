@@ -4,7 +4,8 @@ import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings } f
 import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
-import { buildScreenScopeKey } from '../../lib/mockupImageStore';
+import { buildScreenScopeKey, imageKeyProvider, pickDisplayedMockupImage } from '../../lib/mockupImageStore';
+import { imageModelLabel } from '../../lib/mockupImageModels';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import { computeMockupImageCompletion, type ScreenImageState } from '../../lib/mockupImageCompletion';
 import { FreshnessBadge } from '../FreshnessBadge';
@@ -25,8 +26,6 @@ type Props = {
     artifactId?: string;
 };
 
-const QUALITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
-
 function formatDate(ts: number): string {
     return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -35,14 +34,6 @@ function formatDateTime(ts: number): string {
     return new Date(ts).toLocaleString(undefined, {
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     });
-}
-
-function pickPreviewRecord(records: MockupImageRecord[]): MockupImageRecord | undefined {
-    if (records.length === 0) return undefined;
-    return records.reduce<MockupImageRecord>(
-        (best, r) => (QUALITY_RANK[r.quality] > QUALITY_RANK[best.quality] ? r : best),
-        records[0],
-    );
 }
 
 function pageAnchorId(versionId: string | undefined, screen: MockupScreen, idx: number): string {
@@ -58,6 +49,7 @@ function pageAnchorId(versionId: string | undefined, screen: MockupScreen, idx: 
  */
 function PageThumb({ versionId, screen }: { versionId?: string; screen: MockupScreen }) {
     const aiImages = useMockupImageStore((s) => s.images);
+    const selectedRenders = useMockupImageStore((s) => s.selected);
     const uploads = useScreenInventoryImageStore((s) => s.images);
 
     const src = useMemo(() => {
@@ -72,9 +64,11 @@ function PageThumb({ versionId, screen }: { versionId?: string; screen: MockupSc
         for (const k of Object.keys(aiImages)) {
             if (k.startsWith(aiScope)) matching.push(aiImages[k]);
         }
-        const best = pickPreviewRecord(matching);
+        // Same pick as the screen image (switcher selection first), so the
+        // thumbnail mirrors the render the user is looking at.
+        const best = pickDisplayedMockupImage(matching, selectedRenders[aiScope]);
         return best?.dataUrl ?? null;
-    }, [versionId, aiImages, uploads, screen.id, screen.name]);
+    }, [versionId, aiImages, selectedRenders, uploads, screen.id, screen.name]);
 
     if (!src) {
         return (
@@ -96,6 +90,7 @@ function PageThumb({ versionId, screen }: { versionId?: string; screen: MockupSc
  */
 function PageImageFooter({ versionId, screen }: { versionId?: string; screen: MockupScreen }) {
     const aiImages = useMockupImageStore((s) => s.images);
+    const selectedRenders = useMockupImageStore((s) => s.selected);
     const uploads = useScreenInventoryImageStore((s) => s.images);
     const [promptOpen, setPromptOpen] = useState(false);
 
@@ -106,17 +101,22 @@ function PageImageFooter({ versionId, screen }: { versionId?: string; screen: Mo
             (u) => u.artifactVersionId === versionId && u.screenSlug === slug && u.isPreferred,
         );
         if (upload) {
-            return { label: 'Uploaded', generatedAt: upload.generatedAt, prompt: upload.prompt ?? '' };
+            return { label: 'Uploaded', model: undefined, generatedAt: upload.generatedAt, prompt: upload.prompt ?? '' };
         }
         const aiScope = buildScreenScopeKey(versionId, screen.id);
         const matching: MockupImageRecord[] = [];
         for (const k of Object.keys(aiImages)) {
             if (k.startsWith(aiScope)) matching.push(aiImages[k]);
         }
-        const best = pickPreviewRecord(matching);
+        const best = pickDisplayedMockupImage(matching, selectedRenders[aiScope]);
         if (!best) return null;
-        return { label: 'AI Generated', generatedAt: best.generatedAt, prompt: best.prompt ?? '' };
-    }, [versionId, aiImages, uploads, screen.id, screen.name]);
+        return {
+            label: 'AI Generated',
+            model: imageModelLabel(best.model, imageKeyProvider(best.key)),
+            generatedAt: best.generatedAt,
+            prompt: best.prompt ?? '',
+        };
+    }, [versionId, aiImages, selectedRenders, uploads, screen.id, screen.name]);
 
     if (!info) return null;
     const hasPrompt = info.prompt.length > 0;
@@ -127,6 +127,7 @@ function PageImageFooter({ versionId, screen }: { versionId?: string; screen: Mo
                     <Sparkles size={10} />
                     {info.label}
                 </span>
+                {info.model && <span className="text-neutral-600 font-medium">{info.model}</span>}
                 <span className="text-neutral-500">{formatDateTime(info.generatedAt)}</span>
                 <button
                     type="button"

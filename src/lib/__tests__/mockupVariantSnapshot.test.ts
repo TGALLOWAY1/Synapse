@@ -387,6 +387,31 @@ describe('full wire round-trip (build -> split -> upload/fetch -> join -> restor
         expect(restored?.sourceSignature).toBeTruthy();
         expect(restored?.history?.[0].dataUrl).toBe(PNG2);
     });
+
+    it('carries which image model made the current render and each history entry', async () => {
+        const JPEG = 'data:image/jpeg;base64,bmFuby1iYW5hbmE=';
+        const rec = makeRecord({
+            dataUrl: JPEG,
+            model: 'gemini-nano-banana-2.1',
+            history: [{ dataUrl: PNG2, quality: 'low', model: 'gpt-image-2', generatedAt: 500 }],
+        });
+        const { snapshot: wire, images } = splitVariantSnapshotImages(
+            buildMockupVariantImageSnapshot([rec], { exportedAt: 'now' }));
+        const blobStore = new Map(images.map(i => [i.key, i.dataUrl]));
+        const joined = joinVariantSnapshotImages(
+            wire, new Map(collectVariantSnapshotImageRefs(wire).map(k => [k, blobStore.get(k)!])));
+
+        const db = new Map<string, MockupVariantImageRecord>();
+        await restoreMockupVariantImageSnapshot(joined, {
+            listExisting: async (v) => [...db.values()].filter(r => r.versionId === v),
+            put: async (r) => { db.set(r.key, r); },
+        });
+
+        const restored = db.get('v1:scr-home:mobile:default:low');
+        expect(restored?.dataUrl).toBe(JPEG);
+        expect(restored?.model).toBe('gemini-nano-banana-2.1');
+        expect(restored?.history?.[0].model).toBe('gpt-image-2');
+    });
 });
 
 describe('namespaceVariantSnapshot', () => {

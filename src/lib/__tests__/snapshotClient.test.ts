@@ -83,6 +83,27 @@ describe('namespaceSnapshotForRestore', () => {
         }
     });
 
+    it('keeps a Nano Banana render in its own :gemini slot when rebuilding keys', () => {
+        const snapshot = makeSnapshot();
+        snapshot.images = [
+            makeImage('low'),
+            {
+                ...makeImage('low'),
+                key: buildImageKey(VERSION_ID, 'screen-1', 'low', 'gemini'),
+                dataUrl: 'data:image/jpeg;base64,banana',
+                model: 'gemini-nano-banana-2.1',
+            },
+        ];
+        const { images } = namespaceSnapshotForRestore(snapshot, DEMO_PROJECT_ID);
+        const namespacedVersionId = `${DEMO_PROJECT_ID}:${VERSION_ID}`;
+
+        expect(images.map((r) => r.key)).toEqual([
+            `${namespacedVersionId}:screen-1:low`,
+            `${namespacedVersionId}:screen-1:low:gemini`,
+        ]);
+        expect(images[1].model).toBe('gemini-nano-banana-2.1');
+    });
+
     it('isolates restored images from the source project (no shared version ids)', () => {
         const { images } = namespaceSnapshotForRestore(makeSnapshot(), DEMO_PROJECT_ID);
         // None of the restored images reuse the source project's version id, so

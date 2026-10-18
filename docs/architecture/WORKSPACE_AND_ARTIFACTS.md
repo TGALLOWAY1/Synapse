@@ -36,7 +36,7 @@ never gate user-facing readiness or trigger an invisible retry loop.**
 its last member and was **unhidden by W4** of
 [docs/ARTIFACT_READINESS_RESOLUTION_PLAN.md](../ARTIFACT_READINESS_RESOLUTION_PLAN.md):
 it feeds every mockup through `MOCKUP_DEPENDENCIES` (`generateMockup` tags
-per-screen `componentRefs` from it, which reach the gpt-image prompts), so an
+per-screen `componentRefs` from it, which reach the image-model prompts), so an
 invisible failure silently degraded the product. The mechanism above is retained
 (empty, not deleted) so a future subtype can be hidden without re-deriving the
 rule; `expandWithHiddenDependencyClosure` takes an injectable `isHidden`
@@ -259,7 +259,9 @@ unit-tested in `src/lib/__tests__/coreArtifactPipeline.test.ts`),
 
 Mockup generation is two-phase: a **spec phase** (`generateMockup`, no LLM —
 derives the per-screen list from `screen_inventory` + `component_inventory` +
-`design_system`) and a **visual phase** (OpenAI `gpt-image-2` per screen).
+`design_system`) and a **visual phase** (one image per screen on the Settings
+primary image model — OpenAI `gpt-image-2` or Google Nano Banana 2.1 — with an
+automatic fallback; see LLM_PIPELINE.md).
 `runMockupSlot` produces the spec as part of the normal asset run but **no
 longer fires image generation** — the costly visual step waits behind an
 explicit flow-approval gate so the user reviews the user flows and approves
@@ -281,7 +283,11 @@ which screens are worth rendering before any image is generated.
   UI: a compact flows review (parsed `user_flows` + an "Open Flows" jump + an
   "I've reviewed the flows" acknowledgement) and the recommendation-seeded screen
   checklist. On approve, `ArtifactWorkspace` writes the overlay (with a history
-  description) and fires `mockupImageStore.generate` for the selected screens.
+  description) and — when a mockup image model has a key
+  (`hasMockupImageModel`) — fires `mockupImageStore.generate` for the selected
+  screens on the Settings primary → fallback chain. The gate's footer names that
+  routing (`imageModelSummary`, e.g. "GPT Image 2, falling back to Nano Banana
+  2.1") next to the cost note.
 - **When the gate shows.** `ArtifactWorkspace`'s mockup branch renders the gate
   instead of `MockupViewer` only when the version has **no approval overlay and
   no images yet** *and* the project can generate. So demo/snapshot mockups (read

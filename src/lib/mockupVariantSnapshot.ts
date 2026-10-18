@@ -64,6 +64,8 @@ export interface MockupVariantImageSnapshotHistoryEntry {
     imageByteLength?: number;
     quality?: MockupImageQuality;
     prompt?: string;
+    /** Exact image model id of the render (absent on pre-provider renders). */
+    model?: string;
     manifest?: MockupCoverageManifest;
     sourceSignature?: MockupVariantSourceSignature;
     generatedAt?: number;
@@ -87,6 +89,8 @@ export interface MockupVariantImageSnapshotRecord {
     imageMimeType?: string;
     imageByteLength?: number;
     prompt?: string;
+    /** Exact image model id of the render (absent on pre-provider renders). */
+    model?: string;
     manifest?: MockupCoverageManifest;
     sourceSignature?: MockupVariantSourceSignature;
     generatedFrom?: {
@@ -208,6 +212,7 @@ export function buildMockupVariantImageSnapshot(
             viewport: record.viewport,
             stateName: record.stateName,
             prompt: record.prompt || undefined,
+            model: record.model,
             manifest: record.coverageManifest,
             sourceSignature: record.sourceSignature as MockupVariantSourceSignature | undefined,
             generatedFrom: record.generatedFrom,
@@ -268,6 +273,7 @@ export function buildMockupVariantImageSnapshot(
                 imageByteLength: hp.approxBytes,
                 quality: entry.quality,
                 prompt: entry.prompt,
+                model: entry.model,
                 manifest: entry.coverageManifest,
                 sourceSignature: entry.sourceSignature as MockupVariantSourceSignature | undefined,
                 generatedAt: entry.generatedAt,
@@ -490,6 +496,11 @@ export function joinVariantSnapshotImages(
 const historyDedupeKey = (entry: { dataUrl?: string; imageDataUrl?: string; generatedAt?: number }): string =>
     `${entry.dataUrl ?? entry.imageDataUrl ?? ''}|${entry.generatedAt ?? 0}`;
 
+/** The `model` field to restore — only a non-empty string; pre-provider
+ * snapshots carry none and restore exactly as before. */
+const modelField = (model: unknown): { model?: string } =>
+    typeof model === 'string' && model ? { model } : {};
+
 /** Convert a portable history entry into a store history entry, inheriting the
  * parent record's quality when the entry omits one. Returns null when the entry
  * carries no safe image (a store history entry requires a real dataUrl). */
@@ -502,6 +513,7 @@ function toStoreHistoryEntry(
         dataUrl: entry.imageDataUrl as string,
         quality: entry.quality ?? fallbackQuality,
         prompt: entry.prompt,
+        ...modelField(entry.model),
         coverageManifest: entry.manifest,
         sourceSignature: entry.sourceSignature,
         generatedAt: entry.generatedAt ?? 0,
@@ -549,6 +561,7 @@ function toStoreRecord(
         dataUrl: parsed ? (snap.imageDataUrl as string) : '',
         quality,
         prompt: snap.prompt ?? '',
+        ...modelField(snap.model),
         coverageManifest: snap.manifest,
         sourceSignature: snap.sourceSignature,
         generatedFrom: snap.generatedFrom,
@@ -604,6 +617,7 @@ const asHistoryEntry = (
         dataUrl: record.dataUrl,
         quality: record.quality,
         prompt: record.prompt,
+        ...modelField(record.model),
         coverageManifest: record.coverageManifest,
         sourceSignature: record.sourceSignature,
         generatedAt: record.generatedAt,

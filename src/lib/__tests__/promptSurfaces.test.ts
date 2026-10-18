@@ -14,7 +14,8 @@ import { buildQuestionSystemInstruction, SUMMARY_SYSTEM_INSTRUCTION } from '../p
 import { renderClassifierInstruction } from '../safety/safetyPolicy';
 import { buildRestrictionDirective } from '../safety/safetyReviewArtifact';
 import { CORE_ARTIFACT_PROMPTS } from '../services/coreArtifactService';
-import { buildScreenImagePrompt } from '../services/mockupImageService';
+import { buildGeminiScreenImagePrompt, buildScreenImagePrompt } from '../services/mockupImageService';
+import { buildGeminiVariantImagePrompt, type MockupVariantGenerationRequest } from '../mockupVariantRequest';
 import { buildExternalMockupPrompt } from '../services/screenInventoryImageService';
 import { normalizeDesignTokens } from '../designTokens';
 import { DEFAULT_PRD_SECTIONS } from '../services/progressivePrdGeneration';
@@ -124,6 +125,54 @@ describe('prompt surfaces — snapshot net', () => {
 
         expect(buildScreenImagePrompt(payload, screen, settings)).toMatchSnapshot('no design system');
         expect(buildScreenImagePrompt(payload, screen, settings, tokens)).toMatchSnapshot('with design system');
+    });
+
+    it('screen image prompts (internal Nano Banana path)', () => {
+        const payload = {
+            title: 'TrailPlan',
+            summary: 'Weekend hiking routes from difficulty and season.',
+        } as MockupPayload;
+        const screen = {
+            id: 'scr-route-builder',
+            name: 'Route Builder',
+            purpose: 'Compose a route from difficulty, distance, and season.',
+            userIntent: 'Get a safe route fast',
+            coreUIElements: ['Difficulty selector', 'Season picker', 'Route map preview'],
+            componentRefs: ['FilterBar', 'MapCanvas'],
+            priority: 'P0',
+        } as unknown as MockupScreen;
+        const settings = { platform: 'mobile', fidelity: 'high', scope: 'all' } as unknown as MockupSettings;
+        const tokens = normalizeDesignTokens({});
+
+        expect(buildGeminiScreenImagePrompt(payload, screen, settings)).toMatchSnapshot('no design system');
+        expect(buildGeminiScreenImagePrompt(payload, screen, settings, tokens)).toMatchSnapshot('with design system');
+        expect(
+            buildGeminiScreenImagePrompt(payload, screen, { ...settings, fidelity: 'low' } as MockupSettings),
+        ).toMatchSnapshot('low-fidelity wireframe');
+    });
+
+    it('variant image prompt (internal Nano Banana path)', () => {
+        const request: MockupVariantGenerationRequest = {
+            projectName: 'TrailPlan',
+            productSummary: 'Weekend hiking routes from difficulty and season.',
+            screenId: 'scr-route-builder',
+            screenName: 'Route Builder',
+            screenPurpose: 'Compose a route from difficulty, distance, and season.',
+            userIntent: 'Get a safe route fast',
+            priority: 'P0',
+            variantId: 'state:empty-history',
+            viewport: 'mobile',
+            stateName: 'Empty History',
+            stateType: 'empty',
+            stateTrigger: 'User has no saved routes',
+            coreUIRegions: ['Route list', 'Filter bar'],
+            userActions: ['Create a route'],
+            acceptanceCriteria: ['Shows a "Plan your first hike" button'],
+            risks: ['Offline on the trail'],
+            fidelity: 'mid',
+        };
+        expect(buildGeminiVariantImagePrompt(request)).toMatchSnapshot('empty state, mobile');
+        expect(buildGeminiVariantImagePrompt(request, normalizeDesignTokens({}))).toMatchSnapshot('with design system');
     });
 
     it('screen image prompts (external copy path)', () => {

@@ -232,7 +232,9 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
 - **Ref store** (`api/_lib/imageRefsStore.js`, collection `project_images`). One
   doc per `(userId, projectId, key)`. A ref carries `{ key, hash, blobUrl,
   byteSize, kind, versionId?, screenId?, quality?, meta }` where `meta` is the
-  dataUrl-less image record (so the client can reconstruct it on pull) — generic
+  dataUrl-less image record (so the client can reconstruct it on pull, incl.
+  its `model` — `mockupRecordFromRef` carries it; Nano Banana renders are
+  JPEG, already an allowed Blob type) — generic
   over `kind` (`mockup` | `screen_inventory`) so a second image type can reuse
   it. **RLS-equivalent** exactly like `projectsStore.js`: every function pins
   `{ userId }` (from `requireUser`, never the body). Indexes
@@ -253,7 +255,9 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
 - **Dual ref-persist (both idempotent).** The client's `image-ref-put` is the
   **authoritative** path (works everywhere, incl. localhost where Vercel can't
   reach `onUploadCompleted`). `onUploadCompleted` is a best-effort backup for the
-  tab-closed-early case and persists a minimal ref (routing parsed from the key).
+  tab-closed-early case and persists a minimal ref (routing parsed from the key
+  by `api/_lib/imageRefKey.js` `routingFromKey`, which reads segments from the
+  end and drops the trailing `:gemini` provider slot of a Nano Banana key).
 - **Push** (`pushProjectImages`, fired after each text save AND from
   `mockupImageStore.generate` via `notifyMockupImageGenerated` — generation
   writes IDB directly and would otherwise never trigger a push). The **server

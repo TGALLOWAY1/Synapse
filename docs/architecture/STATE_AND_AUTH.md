@@ -531,9 +531,15 @@ rules:
   primed flag, not localStorage). **Gemini stays client-side** (streaming would
   hit serverless `maxDuration`): `geminiKeyVault.ts` fetches the user's key into
   memory via `GET /api/provider-keys?material=gemini` (never persisted), with a
-  legacy localStorage fallback. `providerSession.ts` primes/clears this runtime
+  legacy localStorage fallback. The same in-memory key also renders **Nano
+  Banana 2.1 mockup images** (`geminiClient.callGeminiImage`, browser-direct —
+  same resolution, headers and retry policy as text calls). Mockup image
+  routing asks `isMockupImageProviderAvailable` (`hasOpenAIKey()` for GPT Image
+  2, `hasGeminiKey()` for Nano Banana) — see LLM_PIPELINE.md.
+  `providerSession.ts` primes/clears this runtime
   state on auth changes and Settings edits. Missing-key errors are explicit
-  ("Add a Gemini API key in Settings to generate PRDs." / "…OpenAI…mockups.").
+  ("Add a Gemini API key in Settings to generate PRDs." / "…to generate mockup
+  images." / "…OpenAI…mockups.").
   New provider call sites must route through the vault, never expose a key, and
   never log one. **Pre-generation "has a key?" gates** (e.g. the HomePage
   submit/enhance buttons) must call `hasGeminiKey()` (vault-in-memory **OR**

@@ -2,8 +2,15 @@ import { useState } from 'react';
 import { Box, FileText, Image as ImageIcon, ChevronDown, Sparkles, Zap, Brain } from 'lucide-react';
 import { MODEL_CATALOG, modelDisplayName } from '../../lib/modelCatalog';
 import { CORE_ARTIFACT_DISPLAY_ORDER, isRetiredArtifactSubtype } from '../../lib/coreArtifactPipeline';
-import { CORE_ARTIFACT_COMPLEXITY } from '../../lib/artifactModelSettings';
+import { CORE_ARTIFACT_COMPLEXITY, isMockupImageProviderAvailable } from '../../lib/artifactModelSettings';
 import type { MockupImageMode } from '../../lib/artifactModelSettings';
+import {
+    MOCKUP_IMAGE_MODELS,
+    MOCKUP_IMAGE_PROVIDERS,
+    isMockupImageProvider,
+    otherMockupImageProvider,
+    type MockupImageModelPrefs,
+} from '../../lib/mockupImageModels';
 import { DEFAULT_PRD_SECTIONS, selectModelTier } from '../../lib/services/progressivePrdGeneration';
 import type { CoreArtifactSubtype } from '../../types';
 
@@ -24,6 +31,9 @@ interface ArtifactModelsSectionProps {
     /** Mockup image source mode (controlled). */
     mockupMode: MockupImageMode;
     onMockupModeChange: (mode: MockupImageMode) => void;
+    /** Primary / fallback mockup image models (controlled). */
+    imageModels: MockupImageModelPrefs;
+    onImageModelsChange: (next: MockupImageModelPrefs) => void;
 }
 
 const selectClass =
@@ -68,8 +78,27 @@ export function ArtifactModelsSection({
     onOverridesChange,
     mockupMode,
     onMockupModeChange,
+    imageModels,
+    onImageModelsChange,
 }: ArtifactModelsSectionProps) {
     const [prdExpanded, setPrdExpanded] = useState(false);
+
+    // Picking the other model as primary moves the old primary into the
+    // fallback slot (unless the fallback is off) — with two models, an active
+    // fallback is always "the one that isn't primary".
+    const setImagePrimary = (value: string) => {
+        if (!isMockupImageProvider(value)) return;
+        onImageModelsChange({
+            primary: value,
+            fallback: imageModels.fallback === null ? null : otherMockupImageProvider(value),
+        });
+    };
+    const setImageFallback = (value: string) => {
+        onImageModelsChange({
+            primary: imageModels.primary,
+            fallback: isMockupImageProvider(value) && value !== imageModels.primary ? value : null,
+        });
+    };
 
     const recommendedModel = (subtype: CoreArtifactSubtype): string =>
         CORE_ARTIFACT_COMPLEXITY[subtype] === 'high' ? strongModel : fastModel;
@@ -229,7 +258,7 @@ export function ArtifactModelsSection({
                     );
                 })}
 
-                {/* Mockups — image source, not a text model. */}
+                {/* Mockups — image source + image models, not a text model. */}
                 <ArtifactRow
                     icon={<ImageIcon size={18} />}
                     title="Mockups"
@@ -246,13 +275,63 @@ export function ArtifactModelsSection({
                         className={selectClass}
                         aria-label="Mockup image source"
                     >
-                        <option value="gpt_image">GPT Image 2</option>
+                        <option value="ai_generated">AI generated</option>
                         <option value="user_uploaded">User Uploaded</option>
                     </select>
+                    {mockupMode === 'ai_generated' && (
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1.5">
+                                <label htmlFor="mockup-image-primary" className="block text-[11px] font-semibold text-neutral-300">
+                                    Primary model
+                                </label>
+                                <select
+                                    id="mockup-image-primary"
+                                    value={imageModels.primary}
+                                    onChange={(e) => setImagePrimary(e.target.value)}
+                                    className={selectClass}
+                                >
+                                    {MOCKUP_IMAGE_PROVIDERS.map((p) => (
+                                        <option key={p} value={p}>{MOCKUP_IMAGE_MODELS[p].label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label htmlFor="mockup-image-fallback" className="block text-[11px] font-semibold text-neutral-300">
+                                    Fallback model
+                                </label>
+                                <select
+                                    id="mockup-image-fallback"
+                                    value={imageModels.fallback ?? 'none'}
+                                    onChange={(e) => setImageFallback(e.target.value)}
+                                    className={selectClass}
+                                >
+                                    {MOCKUP_IMAGE_PROVIDERS.filter((p) => p !== imageModels.primary).map((p) => (
+                                        <option key={p} value={p}>{MOCKUP_IMAGE_MODELS[p].label}</option>
+                                    ))}
+                                    <option value="none">None</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
+                    {mockupMode === 'ai_generated' && (
+                        <ul className="space-y-0.5 text-[10px] text-neutral-400">
+                            {MOCKUP_IMAGE_PROVIDERS.map((p) => (
+                                <li key={p}>
+                                    {MOCKUP_IMAGE_MODELS[p].label} ({MOCKUP_IMAGE_MODELS[p].vendor}) — uses your{' '}
+                                    {MOCKUP_IMAGE_MODELS[p].keyName} key
+                                    {isMockupImageProviderAvailable(p)
+                                        ? <span className="text-emerald-400"> · key added</span>
+                                        : <span className="text-amber-300/80"> · no key yet</span>}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                     <p className="text-[10px] text-neutral-500 leading-relaxed">
-                        GPT Image 2 needs an OpenAI key (added above). “User Uploaded” gives you a
-                        per-screen prompt sheet to create and upload your own mockups. If no OpenAI
-                        key is configured, Synapse falls back to the upload sheet automatically.
+                        Mockup images use the primary model; if it has no key or a render fails,
+                        Synapse retries once with the fallback. You can also pick either model per
+                        screen on the mockup pages. “User Uploaded” gives you a per-screen prompt
+                        sheet to create and upload your own mockups — and is used automatically when
+                        neither selected model has a key.
                     </p>
                 </ArtifactRow>
             </div>
