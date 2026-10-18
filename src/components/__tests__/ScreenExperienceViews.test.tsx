@@ -503,13 +503,13 @@ describe('Phase 2 contract rendering', () => {
         expect(getAllByText('Not generated').length).toBe(3);
         expect(getAllByText('Available on demand').length).toBe(3);
         // Selecting a missing variant offers a Phase 3B "Generate variant"
-        // action — disabled here because the test env has no OpenAI key — with
-        // a clear, non-alarming explanation rather than a silent failure.
+        // action — disabled here because the test env has no OpenAI or Gemini
+        // key — with a clear, non-alarming explanation rather than a silent failure.
         fireEvent.click(getByText('Mobile · Default'));
         const generateBtn = getByText('Generate variant').closest('button');
         expect(generateBtn).toBeTruthy();
         expect(generateBtn?.disabled).toBe(true);
-        expect(getAllByText(/requires your own OpenAI API key/).length).toBeGreaterThan(0);
+        expect(getAllByText(/requires your own OpenAI or Gemini API key/).length).toBeGreaterThan(0);
     });
 
     it('marking a variant not needed persists through the edit overlay', () => {
@@ -889,7 +889,9 @@ describe('Phase 3C variant freshness & history UI', () => {
         const historyToggle = getByText(/Variant history \(1 previous\)/);
         expect(historyToggle).toBeTruthy();
         fireEvent.click(historyToggle);
-        expect(getByText('Previous render 1')).toBeTruthy();
+        // Each previous render names the model that made it (a pre-provider
+        // render with no recorded model was gpt-image-2).
+        expect(getByText('Previous render 1 · GPT Image 2')).toBeTruthy();
     });
 });
 

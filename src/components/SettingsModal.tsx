@@ -13,8 +13,11 @@ import {
     setArtifactModelOverrides,
     getMockupImageMode,
     setMockupImageMode,
+    getMockupImageModelPrefs,
+    setMockupImageModelPrefs,
     type MockupImageMode,
 } from '../lib/artifactModelSettings';
+import type { MockupImageModelPrefs } from '../lib/mockupImageModels';
 import type { CoreArtifactSubtype } from '../types';
 import {
     getLocalCredential,
@@ -125,6 +128,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         () => getArtifactModelOverrides(),
     );
     const [mockupMode, setMockupMode] = useState<MockupImageMode>(() => getMockupImageMode());
+    const [imageModels, setImageModels] = useState<MockupImageModelPrefs>(() => getMockupImageModelPrefs());
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
@@ -141,6 +145,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         localStorage.setItem('GEMINI_STRONG_MODEL', strongModel);
         setArtifactModelOverrides(artifactOverrides);
         setMockupImageMode(mockupMode);
+        setMockupImageModelPrefs(imageModels);
         const trimmedProjectId = projectId.trim();
         if (trimmedProjectId) {
             localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
@@ -354,6 +359,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             onOverridesChange={setArtifactOverrides}
                             mockupMode={mockupMode}
                             onMockupModeChange={setMockupMode}
+                            imageModels={imageModels}
+                            onImageModelsChange={setImageModels}
                         />
                     </div>
 

@@ -37,6 +37,7 @@ import {
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
 import { buildVariantGenerationRequest, type VariantRequestContext } from '../../lib/mockupVariantRequest';
 import { buildVariantImageKey } from '../../lib/mockupVariantImageStore';
+import { imageModelLabel } from '../../lib/mockupImageModels';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { ScreenExperienceItem } from '../../lib/screenExperience';
 import { MockupScreenImage } from '../mockups/MockupScreenImage';
@@ -400,6 +401,7 @@ function VariantDetail({
             dataUrl: '',
             quality: record.quality,
             prompt: '',
+            ...(record.model ? { model: record.model } : {}),
             // Manifest reflects ONLY what the legacy default prompt requested (the
             // mockup screen's UI elements) — never the inventory screen's user
             // actions / acceptance criteria, which the legacy render never used.
@@ -648,7 +650,7 @@ function SourceComparison({
 function VariantHistory({
     current, history,
 }: {
-    current: { dataUrl: string; coverageManifest?: MockupCoverageManifest; generatedAt: number };
+    current: { dataUrl: string; model?: string; coverageManifest?: MockupCoverageManifest; generatedAt: number };
     history: NonNullable<MockupVariantImageRecord['history']>;
 }) {
     const [open, setOpen] = useState(false);
@@ -665,7 +667,7 @@ function VariantHistory({
             {open && (
                 <div className="mt-2 space-y-2">
                     <div className="text-[11px] text-neutral-500">
-                        Current — coverage {current.coverageManifest
+                        Current ({imageModelLabel(current.model)}) — coverage {current.coverageManifest
                             ? COVERAGE_STATUS_LABELS[current.coverageManifest.overallStatus].toLowerCase()
                             : 'unknown'}
                     </div>
@@ -677,7 +679,7 @@ function VariantHistory({
                                 className="h-12 w-12 rounded object-cover border border-neutral-200 bg-neutral-50"
                             />
                             <div className="min-w-0 text-[11px] text-neutral-500">
-                                <div className="text-neutral-700">Previous render {i + 1}</div>
+                                <div className="text-neutral-700">Previous render {i + 1} · {imageModelLabel(entry.model)}</div>
                                 <div>
                                     Coverage {entry.coverageManifest
                                         ? COVERAGE_STATUS_LABELS[entry.coverageManifest.overallStatus].toLowerCase()

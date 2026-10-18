@@ -4,6 +4,7 @@ import { json, methodNotAllowed } from './_lib/response.js';
 import { readJsonBody } from './_lib/body.js';
 import { requireUser } from './_lib/requireUser.js';
 import { enforceRateLimit } from './_lib/rateLimit.js';
+import { routingFromKey } from './_lib/imageRefKey.js';
 import {
   isValidProjectId,
   listProjects,
@@ -60,18 +61,6 @@ function blobNotConfigured(res) {
     message:
       'Vercel Blob is not connected to this project. In the Vercel dashboard go to Storage, then connect the Blob store to this project (this adds BLOB_READ_WRITE_TOKEN to the environment), then redeploy.',
   });
-}
-
-// Derive the mockup routing fields from a composite key so a ref persisted only
-// by the (server-to-server) onUploadCompleted callback — which carries no full
-// metadata — is still hydratable. Mockup keys are `versionId:screenId:quality`.
-function routingFromKey(key) {
-  const parts = String(key).split(':');
-  if (parts.length < 3) return {};
-  const quality = parts[parts.length - 1];
-  const screenId = parts[parts.length - 2];
-  const versionId = parts.slice(0, parts.length - 2).join(':');
-  return { versionId, screenId, quality };
 }
 
 // Mint a client-direct upload token (and handle the upload-completed callback).

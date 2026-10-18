@@ -6,6 +6,7 @@ import {
     buildVariantCoverageManifest,
     buildVariantGenerationRequest,
     buildVariantImagePrompt,
+    buildGeminiVariantImagePrompt,
     type VariantRequestContext,
 } from '../mockupVariantRequest';
 
@@ -100,6 +101,31 @@ describe('buildVariantImagePrompt', () => {
         const prompt = buildVariantImagePrompt(req);
         expect(prompt).toContain('mobile app screen');
         expect(prompt).toContain('do not simply shrink a desktop layout');
+    });
+});
+
+describe('buildGeminiVariantImagePrompt', () => {
+    it('scopes a Nano Banana prompt to the exact state, with the state guidance and a quoted title', () => {
+        const { item, variants } = variantsFor(richScreen);
+        const empty = variants.find(v => v.stateName === 'Empty History')!;
+        const req = buildVariantGenerationRequest(item.screen, item.id, empty, CTX);
+        const prompt = buildGeminiVariantImagePrompt(req);
+        expect(prompt).toMatch(/^Create a UI design mockup: a flat, straight-on screen capture of /);
+        expect(prompt).toContain('in its "Empty History" state');
+        expect(prompt).toContain('EMPTY state');
+        expect(prompt).toContain('Depict exactly this one variant');
+        expect(prompt).toContain(`it reads "${req.screenName}"`);
+        expect(prompt).toContain('not on-screen copy');
+    });
+
+    it('asks for a mobile-first layout on mobile variants and frames a default state without a state label', () => {
+        const { item, variants } = variantsFor(richScreen);
+        const mobile = variants.find(v => v.id === 'mobile:default')!;
+        const req = buildVariantGenerationRequest(item.screen, item.id, mobile, CTX);
+        const prompt = buildGeminiVariantImagePrompt(req);
+        expect(prompt).toContain('mobile app screen, portrait orientation');
+        expect(prompt).toContain('mobile-first');
+        expect(prompt).not.toContain('" state');
     });
 });
 

@@ -28,7 +28,7 @@ import type {
     ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
-import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
+import { buildImageKey, imageKeyProvider, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
 import {
     buildScreenImageKey,
     listScreenImagesForArtifactVersion,
@@ -929,8 +929,13 @@ export const namespaceSnapshotForRestore = (
     const images = snapshot.images.map((record) => {
         const next = rewriteIds(record, idMap);
         // The composite `key` embeds the versionId, so rebuild it from the
-        // remapped fields rather than relying on exact-string replacement.
-        return { ...next, key: buildImageKey(next.versionId, next.screenId, next.quality) };
+        // remapped fields rather than relying on exact-string replacement —
+        // keeping the source key's provider slot (`:gemini`), so a screen's
+        // GPT Image 2 and Nano Banana renders stay distinct records.
+        return {
+            ...next,
+            key: buildImageKey(next.versionId, next.screenId, next.quality, imageKeyProvider(record.key)),
+        };
     });
     // Screen Inventory images are keyed in IDB by `artifactVersionId`, so they
     // need the same remap as mockup images — otherwise a demo restored from a

@@ -25,8 +25,9 @@ import { primeProviderSession } from '../../lib/providerSession';
 // Encrypted, server-side provider-key management. Talks only to
 // /api/provider-keys, which returns masked status (never key material). This is
 // the recommended way to store keys: they are encrypted at rest and used
-// server-side (OpenAI image generation is fully proxied; the Gemini key is
-// served to the authenticated client at call time only).
+// server-side (OpenAI image generation is fully proxied; the Gemini key — text
+// and Nano Banana images — is served to the authenticated client at call time
+// only).
 
 interface ProviderMeta {
   id: ProviderId;
@@ -43,16 +44,16 @@ const PROVIDERS: ProviderMeta[] = [
     label: 'Google Gemini',
     placeholder: 'Paste your AIzaSy… key',
     getKeyUrl: 'https://aistudio.google.com/app/apikey',
-    blurb: 'Powers PRD generation and all text artifacts.',
+    blurb: 'Powers PRD generation, all text artifacts, and Nano Banana 2.1 mockup images.',
     paidWarning:
-      'Gemini usage is billed to your Google account. Generous free tier exists, but heavy use may incur charges.',
+      'Gemini usage is billed to your Google account. Text generation has a free tier; Nano Banana mockup images are a paid operation — typically a few cents per image.',
   },
   {
     id: 'openai',
     label: 'OpenAI (image generation)',
     placeholder: 'Paste your sk-… key',
     getKeyUrl: 'https://platform.openai.com/api-keys',
-    blurb: 'Powers AI mockup image previews (gpt-image-2).',
+    blurb: 'Powers GPT Image 2 mockup image previews (gpt-image-2).',
     paidWarning:
       'Image generation is a paid OpenAI operation billed to your account — typically a few cents per image. No free tier.',
   },

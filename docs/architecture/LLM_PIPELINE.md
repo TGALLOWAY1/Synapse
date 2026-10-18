@@ -44,7 +44,11 @@
   which Gemini prices at the output rate. Counting the answer alone
   understated every thinking model's tokens and cost.
   `callGemini`/`callGeminiStream` are the **single chokepoint** for every LLM
-  call in the app; both are instrumented by the LLM Trace Viewer (see below).
+  text call in the app; both are instrumented by the LLM Trace Viewer (see
+  below). The third entry point, `callGeminiImage` (Nano Banana mockup images —
+  see "Image generation" below), shares the same transport but is deliberately
+  **not** traced: its response is megabytes of base64 (the OpenAI image proxy
+  isn't traced either).
   **Truncation is detected, never silently accepted:** both modes surface the
   response's `finishReason` (`callGemini` via `JsonModeConfig.onFinish`, the
   stream via `StreamCallbacks.onFinish`). A `MAX_TOKENS` finish returns the
@@ -104,6 +108,34 @@
   32,768, so there the retry is a fresh attempt at the ceiling rather than a
   larger budget. The retry-budget invariant above still holds for every model
   without a floor.
+
+  **Image generation (`callGeminiImage`, Nano Banana 2.1).** Mockup images can
+  render on Google's `gemini-nano-banana-2.1` (GA Oct 2026, successor to Nano
+  Banana 2 / `gemini-3.1-flash-image`) as well as OpenAI `gpt-image-2`. The
+  Gemini path is **browser-direct** like every Gemini call, so it reuses
+  `getApiKey` (vault-in-memory, else the local fallback — with its own
+  "…to generate mockup images." missing-key message), `buildHeaders` (incl. the
+  `x-goog-user-project` billing header), `fetchWithRetry` and the watchdog
+  (`GEMINI_IMAGE_TIMEOUT_MS`, 3 min — nothing streams back until the image is
+  done). Request: non-streaming `generateContent` with
+  `generationConfig: { responseModalities: ['IMAGE'], imageConfig: {
+  aspectRatio, imageSize }, thinkingConfig? }` — the documented `imageConfig`
+  shape, verified against the live endpoint (the newer
+  `responseFormat.image` field exists but takes enum names, so don't switch to
+  it blindly). Response: the **last non-`thought`** `inlineData` (or
+  `inline_data`) image part wins — thinking image models can emit interim
+  "thought" images. Nano Banana 2.1 returns **`image/jpeg`**, so callers build
+  the data URL from the returned MIME type, never a hard-coded PNG. With no
+  image the error names why: blocked prompt, a policy `finishReason`
+  (`IMAGE_SAFETY`, `PROHIBITED_CONTENT`, …), or text instead of an image
+  (quoted, credential-scrubbed). A free-tier key fails with a quota error whose
+  limit is 0; `formatGeminiImageError` says image generation has no free tier
+  instead of "wait and retry". Sizing lives in `mockupImageService.ts`:
+  `pickGeminiAspectRatio` (mobile 9:16, desktop 16:9, tablet 4:3, responsive
+  1:1) and `pickGeminiImageConfig` (low → 1K, medium → 2K, high → 2K +
+  `thinkingLevel: 'HIGH'`). **Never request 4K:** a 1K render measured
+  ~0.7 MB base64 and a 2K one ~3.1 MB, so 4K would blow the ~4.5 MB
+  per-image snapshot request and approach the 15 MB Blob sync cap.
 
   **Response schemas: never bound arrays of objects.** Gemini rejects some
   `responseSchema`s outright — HTTP 400 `INVALID_ARGUMENT` ("Request contains
@@ -473,8 +505,9 @@
     prompts).** `buildDesignSystemBrief(tokens)` (`designTokens/promptSnippet.ts`,
     replaced the old `tokensToImagePromptBrief`) is the ONE concise-but-complete
     Design System Brief embedded into every prompt that drives a mockup/screen
-    image. Both the internal gpt-image-2 path (`mockupImageService.buildScreenImagePrompt`)
-    and the user-copied external prompt on the Screen Inventory page
+    image. The internal gpt-image-2 path (`mockupImageService.buildScreenImagePrompt`),
+    the internal Nano Banana path (`buildGeminiScreenImagePrompt`, and
+    `buildGeminiVariantImagePrompt` for variants), and the user-copied external prompt on the Screen Inventory page
     (`screenInventoryImageService.buildExternalMockupPrompt`, formerly
     `buildScreenInventoryImagePrompt`) call it, so an externally generated mockup
     follows the same visual language as the internal one instead of drifting to a
@@ -705,12 +738,34 @@
     `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
     **Mockups are image artifacts, not text:** `artifactModelSettings` also owns
     the mockup **image source mode** (`getMockupImageMode`/`setMockupImageMode`,
-    `SYNAPSE_MOCKUP_IMAGE_MODE`: `gpt_image` | `user_uploaded`, default
-    `gpt_image`). `resolveMockupRender(mode, hasOpenAiKey)` decides per screen:
-    `user_uploaded` (or `gpt_image` with **no** OpenAI key — a non-silent forced
-    fallback) → the manual prompt+upload sheet (`MockupScreenUpload`, reusing the
-    IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
-    otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
+    `SYNAPSE_MOCKUP_IMAGE_MODE`: `ai_generated` | `user_uploaded`, default
+    `ai_generated`; the legacy stored `gpt_image` reads as `ai_generated`) and
+    the **primary / fallback image models** (`getMockupImageModelPrefs`/
+    `setMockupImageModelPrefs`, `SYNAPSE_MOCKUP_IMAGE_PRIMARY` /
+    `SYNAPSE_MOCKUP_IMAGE_FALLBACK`; default GPT Image 2 primary with Nano
+    Banana 2.1 fallback; an unset fallback defaults to the other model, `none`
+    turns it off). The model registry and routing rules are pure, in
+    `src/lib/mockupImageModels.ts` (`MOCKUP_IMAGE_MODELS` — upgrading a slot is a
+    one-line `modelId` change — and `resolveImageProviderChain`):
+    a generation started **without** an explicit model (main Generate action,
+    approval gate, Generate missing mockups, Retry failed images) runs
+    `getMockupImageProviderChain()` — primary then fallback, skipping models
+    without a key (`isMockupImageProviderAvailable`: `hasOpenAIKey()` /
+    `hasGeminiKey()`) — and retries **once** on the next model when an attempt
+    fails (`generateMockupImageWithFallback` in `src/lib/mockupImageGeneration.ts`;
+    a user cancel never starts the fallback). A generation started from an
+    **explicit** model choice (the per-model "Try / Use <model>" buttons,
+    Regenerate) runs on that model only — no silent swap. Each attempt builds
+    its own provider's prompt. `resolveMockupRender(mode, hasAnyMockupImageKey())`
+    decides per screen: `user_uploaded` (or `ai_generated` with **no** keyed
+    image model — a non-silent forced fallback) → the manual prompt+upload sheet
+    (`MockupScreenUpload`, reusing the IDB-backed `screenInventoryImageStore`
+    keyed by the mockup version id); otherwise the AI generator
+    (`MockupScreenImage`). One keyed model is enough for the generator view even
+    when the Settings chain is empty (keyless primary, fallback off): the main
+    action is disabled with an explanation and the per-model buttons still work.
+    Batch flows gate on `hasMockupImageModel()` (the chain) and name the routing
+    in their cost copy (`describeImageProviderChain`).
     **Two-phase completion:** a mockup has a SPEC phase
     (the ArtifactVersion, marked done by the job controller as soon as the spec
     lands) and an independent IMAGE phase (one render per screen, async, can
@@ -732,7 +787,10 @@
     which tier each PRD section actually runs on — this replaced the old,
     separate "PRD Generation Models" block in `SettingsModal` (removing the
     redundancy that made PRD look like it "defaulted to Flash"). Text artifacts
-    have one selector each; Mockups has an "Image Source" select. The `SettingsModal`
+    have one selector each; Mockups has an "Image Source" select plus **Primary
+    model** / **Fallback model** pickers (picking the other model as primary
+    moves the old primary into the fallback slot) and a per-model "key added /
+    no key yet" line. The `SettingsModal`
     itself groups advanced/fallback controls (Gemini billing project, Local
     browser keys, Integrations, Refine & enhance model) behind collapsed
     `Disclosure` sections; the Gemini billing project ID sits with the vault (it
@@ -969,11 +1027,26 @@
   hasDesignSystem)` — the token-aware variant drops the generic "neutral
   palette"/"accent color" claims whenever the Design System Brief is appended,
   so one prompt never asks for a neutral palette AND a brand palette at once).
+  It also holds the **Nano Banana fragments** (`nanoBananaMockupFraming`,
+  `nanoBananaTextRule`, `NANO_BANANA_CLOSING_RULES`) used by
+  `buildGeminiScreenImagePrompt` / `buildGeminiVariantImagePrompt`, which
+  encode Google's image-prompting guidance: narrative paragraphs instead of a
+  keyword run-on, the medium + composition + purpose up front (a flat,
+  straight-on screen capture that fills the frame; a low-fidelity request is
+  framed as a wireframe), the page title as the **only** quoted, literal text,
+  context marked "background, not on-screen copy", and positively framed
+  closing rules ("semantic negative prompts"); aspect ratio and size go through
+  `imageConfig`, not prose. The quoted-title rule is load-bearing: live renders
+  without it printed spec names verbatim (a "MapCanvas" chip, a "Weather
+  Summary Card" heading). The text rule defers to the Design System Brief's
+  typefaces when one is present. The same screen facts reach both builders, so
+  coverage manifests and freshness contracts are provider-independent.
   Do not restate these fragments inline in a task prompt — import them.
   **Every major prompt surface is snapshot-locked** by
   `src/lib/__tests__/promptSurfaces.test.ts` (PRD fragments + all section
   prompts, safety classifier + restriction directive, preflight, all
-  `CORE_ARTIFACT_PROMPTS`, both image builders): an intentional prompt edit
+  `CORE_ARTIFACT_PROMPTS`, the gpt-image-2, Nano Banana and external image
+  builders): an intentional prompt edit
   must update the snapshot in the same change; an unreviewed snapshot diff is
   drift. See `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md` for the full prompt
   architecture map and remaining recommendations.

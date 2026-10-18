@@ -163,6 +163,10 @@ capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
   only in the lazy `/tour` chunk)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
+- Mockup images: OpenAI `gpt-image-2` (server proxy, `api/image/generate.js`)
+  or Google Nano Banana 2.1 (`gemini-nano-banana-2.1`, browser-direct via
+  `geminiClient.callGeminiImage`), with a Settings primary + fallback
+  (`src/lib/mockupImageModels.ts`)
 - React Router v7 (workspace, recruiter portal, admin pages, the interactive
   product tour at `/tour` + `/about` alias, /privacy)
 - Route-level code splitting in `src/App.tsx`: `/tour` (+ `/about`), `/gallery`,
@@ -263,7 +267,7 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 
 | Topic doc | Covers | Read before touching |
 |---|---|---|
-| [docs/architecture/LLM_PIPELINE.md](docs/architecture/LLM_PIPELINE.md) | `geminiClient` transport + LLM Trace Viewer, the PRD DAG pipeline & sections, two-view PRD IA (Overview | Features; decisions route to the Decision Center), consistency review + guards, design-system presets & brief, canonical PRD spine, core artifact services & per-artifact model routing, prompt fragments & the prompt snapshot net, preflight clarification | Anything in `src/lib/services/`, `src/lib/prompts/`, prompts/schemas, PRD generation or rendering, model routing |
+| [docs/architecture/LLM_PIPELINE.md](docs/architecture/LLM_PIPELINE.md) | `geminiClient` transport + LLM Trace Viewer, the PRD DAG pipeline & sections, two-view PRD IA (Overview | Features; decisions route to the Decision Center), consistency review + guards, design-system presets & brief, canonical PRD spine, core artifact services & per-artifact model routing, mockup image models (GPT Image 2 / Nano Banana 2.1 primary + fallback, `callGeminiImage`), prompt fragments & the prompt snapshot net, preflight clarification | Anything in `src/lib/services/`, `src/lib/prompts/`, prompts/schemas, PRD generation or rendering, model routing, mockup image generation |
 | [docs/architecture/PLANNING_AND_DECISIONS.md](docs/architecture/PLANNING_AND_DECISIONS.md) | Uncertainty-first planning: the Plan · Decide · Build journey and the one-line planning state bar, the **two separate, advisory readiness evaluators** (planning-reasoning projection vs. build-packet completeness), the removed Finalize/commitment layer and its legacy data, `PlanningRecord` / `DecisionEvent` authority model, assumption import & validation, challenge coverage, decision impact previews, the `compareAndAppendStructuredPRD` write barrier, adversarial review engine, downstream update plans | Anything in `src/lib/planning/`, `src/lib/review/`, `src/components/planning/`, `src/components/review/`, `src/components/downstream/`, the review/downstream store slices (and the legacy-only readiness slice) |
 | [docs/architecture/SAFETY_AND_VALIDATION.md](docs/architecture/SAFETY_AND_VALIDATION.md) | The safety gate/classifier (`src/lib/safety/`), blocking vs advisory artifact validation, automatic traceability repair, dependency sufficiency gate | Safety policy, artifact validation, generation gating |
 | [docs/architecture/STATE_AND_AUTH.md](docs/architecture/STATE_AND_AUTH.md) | The store slices, generation lifecycle, interrupted-run recovery, persistence/quota, per-user project namespacing, legacy import, account linking, encrypted provider-key vault, key-resolution rules | `src/store/`, auth flows, anything reading/writing credentials |

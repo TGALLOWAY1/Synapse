@@ -1,8 +1,8 @@
 /**
- * Manual mockup mode for a single MockupScreen. Shown instead of the OpenAI
- * gpt-image-2 generator when the user has chosen "User Uploaded" in Settings,
- * or when "GPT Image 2" is selected but no OpenAI key is configured (so we
- * never silently fail). Renders a generated, copyable prompt describing the
+ * Manual mockup mode for a single MockupScreen. Shown instead of the AI image
+ * generator when the user has chosen "User Uploaded" in Settings, or when AI
+ * generation is selected but no image model (GPT Image 2 / Nano Banana 2.1)
+ * has a key (so we never silently fail). Renders a generated, copyable prompt describing the
  * screen (goal, layout, visual style, expected upload format) and lets the user
  * upload their own image against it.
  *
@@ -28,7 +28,7 @@ interface Props {
     screen: MockupScreen;
     payload: MockupPayload;
     settings: MockupSettings;
-    /** True when this is a forced fallback (GPT Image 2 chosen but no key). */
+    /** True when this is a forced fallback (AI generation chosen but no image model has a key). */
     forcedFallback?: boolean;
 }
 
@@ -130,9 +130,10 @@ export function MockupScreenUpload({
                         <div className="mb-4 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                             <Info size={13} className="mt-0.5 shrink-0" />
                             <span>
-                                <strong>GPT Image 2</strong> is selected but no OpenAI key is configured, so
-                                automatic generation is unavailable. Use the prompt below to create the
-                                mockup yourself and upload it — or add an OpenAI key in Settings.
+                                <strong>AI generation</strong> is selected but no image model has a key
+                                configured, so automatic generation is unavailable. Use the prompt below
+                                to create the mockup yourself and upload it — or add an OpenAI key (GPT
+                                Image 2) or a Gemini key (Nano Banana 2.1) in Settings.
                             </span>
                         </div>
                     )}

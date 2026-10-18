@@ -72,7 +72,7 @@ in `src/data/demoProject.ts` = the demo id + all `GALLERY_PROJECT_IDS`).
 
 Owner-only project snapshots bundle a project's Zustand slice **plus its
 IndexedDB-backed mockup images** (base64 PNGs from `src/lib/mockupImageStore.ts`,
-keyed `versionId:screenId:quality` where `versionId` is the **artifact version
+keyed `versionId:screenId:quality` (+ `:gemini` for a Nano Banana render — `namespaceSnapshotForRestore` keeps that slot when it rebuilds keys) where `versionId` is the **artifact version
 id**) **and its user-uploaded Screen Inventory images** (from
 `src/lib/screenInventoryImageStore.ts`, a separate IDB store, keyed
 `artifactVersionId:screenSlug:versionNumber`) and push them to Vercel Blob
@@ -87,7 +87,7 @@ gallery, from the dedicated `src/lib/mockupVariantImageStore.ts` IDB store, keye
 Phase 3D bullet under Screens). All three image kinds split out of the JSON
 envelope and ship one request each (reusing the **same** per-image blob channel
 — each blob is keyed by a hash of the image key, and the key shapes never
-collide: mockup `versionId:screenId:quality`, screen `artifactVersionId:screenSlug:versionNumber`,
+collide: mockup `versionId:screenId:quality[:gemini]`, screen `artifactVersionId:screenSlug:versionNumber`,
 variant bytes under `vimg:`-prefixed keys) so neither upload nor download crosses
 Vercel's ~4.5 MB cap. The wire format carries mockup images in `payload.images`,
 screen-inventory images in `payload.screenImages`, and variant image metadata
@@ -283,5 +283,5 @@ in snapshots.
   source mode** (the OpenAI-key-free path that lets the user upload their own
   mockup) persists to `screenInventoryImageStore`, **not** `mockupImageStore` — so
   those uploads now travel in snapshots but still ride the cross-device-sync gap.
-  Only the `gpt_image` (AI-generated) mockups sync across devices today.
+  Only AI-generated mockups (GPT Image 2 or Nano Banana 2.1) sync across devices today.
 

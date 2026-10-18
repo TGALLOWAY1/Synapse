@@ -7,16 +7,20 @@
  * Persistence (the source of truth) lives in src/lib/mockupImageStore.ts
  * (IndexedDB). This store is purely a reactive cache and orchestrator.
  *
- * Records are keyed by `${versionId}:${screenId}:${quality}` so each quality
- * level coexists rather than overwriting earlier renders. `getAllForScreen`
- * returns every variant for one (version, screen) pair so the UI can show a
- * quality switcher when both low- and high-quality images exist.
+ * Records are keyed by `${versionId}:${screenId}:${quality}` (+ `:gemini` for
+ * Nano Banana renders) so each quality level and each image model coexists
+ * rather than overwriting earlier renders. `listForScreen` returns every
+ * render for one (version, screen) pair so the UI can offer a switcher when a
+ * screen has several (e.g. a GPT Image 2 and a Nano Banana 2.1 draft).
  */
 
 import { create } from 'zustand';
-import type { MockupImageQuality, MockupImageRecord, MockupPayload, MockupScreen, MockupSettings } from '../types';
-import { callOpenAIImage } from '../lib/openaiClient';
-import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
+import type {
+    MockupImageProvider, MockupImageQuality, MockupImageRecord, MockupPayload, MockupScreen, MockupSettings,
+} from '../types';
+import { buildGeminiScreenImagePrompt, buildScreenImagePrompt } from '../lib/services/mockupImageService';
+import { generateMockupImageWithFallback, NO_IMAGE_MODEL_MESSAGE } from '../lib/mockupImageGeneration';
+import { getMockupImageProviderChain } from '../lib/artifactModelSettings';
 import { selectPreferredDesignTokens } from '../lib/designTokens';
 import { useProjectStore } from './projectStore';
 import { assertProjectCapability } from '../lib/projectCapabilities';
@@ -61,6 +65,10 @@ interface InFlight {
     quality: MockupImageQuality;
     startedAt: number;
     abort: AbortController;
+    /** The image provider rendering right now. */
+    provider: MockupImageProvider;
+    /** Set when this attempt is the automatic fallback after `fallbackFrom` failed. */
+    fallbackFrom?: MockupImageProvider;
 }
 
 const screenScope = (versionId: string, screenId: string): string =>
@@ -73,6 +81,10 @@ interface ImageStoreState {
     inFlight: Record<string, InFlight>;
     /** Map of `${versionId}:${screenId}` -> error message. */
     errors: Record<string, string>;
+    /** Map of screen scope -> key of the render being viewed (session-only).
+     * Set by the render switcher and by every successful generation, so the
+     * screen image, its page thumbnail and its footer show the same render. */
+    selected: Record<string, string>;
     /** SYN-003: versions whose `loadForVersion` has fully settled (records found
      * OR the version genuinely has none). Lets a consumer distinguish "no image
      * yet, still hydrating" from "no image, provably absent" so the Screens
@@ -82,17 +94,21 @@ interface ImageStoreState {
     /** Hydrate this version's images from IndexedDB into the reactive cache. */
     loadForVersion: (versionId: string) => Promise<void>;
 
-    /** Look up a single record at a specific quality (cache first, then IDB). */
+    /** Look up a single record at a specific quality + provider (cache first, then IDB). */
     getRecord: (
         versionId: string,
         screenId: string,
         quality: MockupImageQuality,
+        provider?: MockupImageProvider,
     ) => Promise<MockupImageRecord | undefined>;
 
-    /** Synchronous lookup — returns every cached quality variant for one screen. */
+    /** Synchronous lookup — returns every cached render for one screen. */
     listForScreen: (versionId: string, screenId: string) => MockupImageRecord[];
 
-    /** Generate (or regenerate at higher quality) an image for one screen. */
+    /** Show this render for the screen (the render switcher). */
+    select: (versionId: string, screenId: string, key: string) => void;
+
+    /** Generate (or regenerate) an image for one screen. */
     generate: (args: {
         projectId: string;
         artifactId: string;
@@ -101,6 +117,10 @@ interface ImageStoreState {
         payload: MockupPayload;
         settings: MockupSettings;
         quality: MockupImageQuality;
+        /** An explicit model choice runs on that model only. Omitted, the
+         * Settings chain runs: the primary model, then the fallback if the
+         * primary fails. */
+        provider?: MockupImageProvider;
         /** Phase 3C: fired after a successful render is stored, so a caller can
          * capture a coverage sidecar for the default variant without changing
          * this legacy image path. Best-effort — thrown callbacks are swallowed. */
@@ -126,6 +146,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     images: {},
     inFlight: {},
     errors: {},
+    selected: {},
     loadedVersions: {},
 
     loadForVersion: async (versionId) => {
@@ -162,8 +183,8 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         });
     },
 
-    getRecord: async (versionId, screenId, quality) => {
-        const key = buildImageKey(versionId, screenId, quality);
+    getRecord: async (versionId, screenId, quality, provider) => {
+        const key = buildImageKey(versionId, screenId, quality, provider);
         const cached = get().images[key];
         if (cached) return cached;
         const fromIdb = await idbGetImage(key);
@@ -183,33 +204,59 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         return out;
     },
 
-    generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated }) => {
+    select: (versionId, screenId, key) => {
+        const scope = screenScope(versionId, screenId);
+        set((state) => (state.selected[scope] === key
+            ? state
+            : { selected: { ...state.selected, [scope]: key } }));
+    },
+
+    generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, provider, onGenerated }) => {
         assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = screenScope(versionId, screen.id);
         if (get().inFlight[scope]) return; // already generating something for this screen
 
+        const chain = provider ? [provider] : getMockupImageProviderChain();
+        if (chain.length === 0) {
+            set((state) => ({ errors: { ...state.errors, [scope]: NO_IMAGE_MODEL_MESSAGE } }));
+            return;
+        }
+
         const abort = new AbortController();
         set((state) => ({
-            inFlight: { ...state.inFlight, [scope]: { quality, startedAt: Date.now(), abort } },
+            inFlight: { ...state.inFlight, [scope]: { quality, startedAt: Date.now(), abort, provider: chain[0] } },
             errors: { ...state.errors, [scope]: '' },
         }));
 
         const designTokens = selectPreferredDesignTokens(useProjectStore.getState(), projectId);
-        const prompt = buildScreenImagePrompt(payload, screen, settings, designTokens);
-        const size = pickImageSize(settings.platform);
 
         try {
-            const b64 = await callOpenAIImage(prompt, { quality, size, signal: abort.signal });
-            const key = buildImageKey(versionId, screen.id, quality);
+            const render = await generateMockupImageWithFallback({
+                chain,
+                quality,
+                shape: { platform: settings.platform },
+                signal: abort.signal,
+                buildPrompt: (p) => (p === 'gemini'
+                    ? buildGeminiScreenImagePrompt(payload, screen, settings, designTokens)
+                    : buildScreenImagePrompt(payload, screen, settings, designTokens)),
+                // Surface which model is running (and that it is the fallback).
+                onAttempt: (p, fallbackFrom) => set((state) => {
+                    const current = state.inFlight[scope];
+                    if (!current || current.abort !== abort) return state;
+                    return { inFlight: { ...state.inFlight, [scope]: { ...current, provider: p, fallbackFrom } } };
+                }),
+            });
+            const key = buildImageKey(versionId, screen.id, quality, render.provider);
             const record: MockupImageRecord = {
                 key,
                 projectId,
                 artifactId,
                 versionId,
                 screenId: screen.id,
-                dataUrl: `data:image/png;base64,${b64}`,
+                dataUrl: render.dataUrl,
                 quality,
-                prompt,
+                prompt: render.prompt,
+                model: render.model,
                 generatedAt: Date.now(),
             };
             await idbPutImage(record);
@@ -219,6 +266,8 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
                 return {
                     images: { ...state.images, [key]: record },
                     inFlight: nextInFlight,
+                    // Show the fresh render, whichever model produced it.
+                    selected: { ...state.selected, [scope]: key },
                 };
             });
             // Sync the freshly generated render to Blob (best-effort; no-op when
@@ -232,7 +281,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             const aborted = (err as { name?: string })?.name === 'AbortError' || abort.signal.aborted;
             const message = aborted
                 ? ''
-                : err instanceof Error ? err.message : 'OpenAI image generation failed.';
+                : err instanceof Error ? err.message : 'Image generation failed.';
             set((state) => {
                 const nextInFlight = { ...state.inFlight };
                 delete nextInFlight[scope];
@@ -270,7 +319,11 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             }
             const loadedVersions = { ...state.loadedVersions };
             for (const id of versionIds) delete loadedVersions[id];
-            return { images, loadedVersions };
+            const selected = { ...state.selected };
+            for (const scope of Object.keys(selected)) {
+                if (versionIds.some((id) => scope.startsWith(`${id}:`))) delete selected[scope];
+            }
+            return { images, loadedVersions, selected };
         });
     },
 }));

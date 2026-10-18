@@ -13,13 +13,13 @@
 
 import { create } from 'zustand';
 import type {
-    MockupImageQuality, MockupVariantImageRecord, MockupVariantImageHistoryEntry,
+    MockupImageProvider, MockupImageQuality, MockupVariantImageRecord, MockupVariantImageHistoryEntry,
 } from '../types';
 import type { MockupVariantSourceSignature } from '../lib/mockupVariantTrust';
-import { callOpenAIImage } from '../lib/openaiClient';
-import { pickImageSize } from '../lib/services/mockupImageService';
+import { generateMockupImageWithFallback, NO_IMAGE_MODEL_MESSAGE } from '../lib/mockupImageGeneration';
+import { getMockupImageProviderChain } from '../lib/artifactModelSettings';
 import {
-    buildVariantCoverageManifest, buildVariantImagePrompt,
+    buildGeminiVariantImagePrompt, buildVariantCoverageManifest, buildVariantImagePrompt,
     type MockupVariantGenerationRequest,
 } from '../lib/mockupVariantRequest';
 import type { MockupPlatform } from '../types';
@@ -36,6 +36,10 @@ interface InFlight {
     quality: MockupImageQuality;
     startedAt: number;
     abort: AbortController;
+    /** The image provider rendering right now. */
+    provider: MockupImageProvider;
+    /** Set when this attempt is the automatic fallback after `fallbackFrom` failed. */
+    fallbackFrom?: MockupImageProvider;
 }
 
 /** Per-(version, screen, variant) scope key for in-flight / error tracking. */
@@ -66,6 +70,9 @@ interface VariantImageStoreState {
         platform: MockupPlatform;
         request: MockupVariantGenerationRequest;
         quality: MockupImageQuality;
+        /** An explicit model choice runs on that model only. Omitted, the
+         * Settings chain runs (primary, then fallback on failure). */
+        provider?: MockupImageProvider;
         /** Phase 3C: source signature to store with this render (freshness). */
         sourceSignature?: MockupVariantSourceSignature;
         /** Phase 3C: version provenance for this render. */
@@ -111,6 +118,7 @@ const buildRegenHistory = (
         dataUrl: previous.dataUrl,
         quality: previous.quality,
         prompt: previous.prompt,
+        ...(previous.model ? { model: previous.model } : {}),
         coverageManifest: previous.coverageManifest,
         sourceSignature: previous.sourceSignature,
         generatedAt: previous.generatedAt,
@@ -161,41 +169,56 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
     },
 
     generate: async ({
-        projectId, artifactId, versionId, platform, request, quality,
+        projectId, artifactId, versionId, platform, request, quality, provider,
         sourceSignature, generatedFrom,
     }) => {
         assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = variantScope(versionId, request.screenId, request.variantId);
         if (get().inFlight[scope]) return; // one generation per variant at a time
 
+        const chain = provider ? [provider] : getMockupImageProviderChain();
+        if (chain.length === 0) {
+            set((state) => ({ errors: { ...state.errors, [scope]: NO_IMAGE_MODEL_MESSAGE } }));
+            return;
+        }
+
         const abort = new AbortController();
         set((state) => ({
-            inFlight: { ...state.inFlight, [scope]: { quality, startedAt: Date.now(), abort } },
+            inFlight: { ...state.inFlight, [scope]: { quality, startedAt: Date.now(), abort, provider: chain[0] } },
             errors: { ...state.errors, [scope]: '' },
         }));
 
         const designTokens = selectPreferredDesignTokens(useProjectStore.getState(), projectId);
-        const prompt = buildVariantImagePrompt(request, designTokens);
         const manifest = buildVariantCoverageManifest(request);
-        // Size follows the variant's own viewport (a desktop variant stays
-        // landscape even if the mockup set's platform is mobile, and vice versa);
-        // 'tablet' falls back to the responsive/square crop via the platform.
-        const sizePlatform: MockupPlatform =
-            request.viewport === 'mobile' ? 'mobile'
-            : request.viewport === 'desktop' ? 'desktop'
-            : platform;
-        const size = pickImageSize(sizePlatform);
 
         // Capture the prior successful render (same key first, else best quality
         // for this variant) BEFORE the network call so a successful regeneration
         // can preserve it in history. A failed regen never reaches the write path
-        // below, so the existing record is untouched.
+        // below, so the existing record is untouched. Variant keys carry no
+        // provider: a render from the other model replaces the current one and
+        // the previous render moves to history, where it stays viewable.
         const key = buildVariantImageKey(versionId, request.screenId, request.variantId, quality);
         const previous = get().images[key]
             ?? get().getBestRecord(versionId, request.screenId, request.variantId);
 
         try {
-            const b64 = await callOpenAIImage(prompt, { quality, size, signal: abort.signal });
+            // The render follows the variant's own viewport (a desktop variant
+            // stays landscape even if the mockup set's platform is mobile, and
+            // vice versa) — see pickOpenAIImageSize / pickGeminiAspectRatio.
+            const render = await generateMockupImageWithFallback({
+                chain,
+                quality,
+                shape: { platform, viewport: request.viewport },
+                signal: abort.signal,
+                buildPrompt: (p) => (p === 'gemini'
+                    ? buildGeminiVariantImagePrompt(request, designTokens)
+                    : buildVariantImagePrompt(request, designTokens)),
+                onAttempt: (p, fallbackFrom) => set((state) => {
+                    const current = state.inFlight[scope];
+                    if (!current || current.abort !== abort) return state;
+                    return { inFlight: { ...state.inFlight, [scope]: { ...current, provider: p, fallbackFrom } } };
+                }),
+            });
             const history = buildRegenHistory(previous);
             const record: MockupVariantImageRecord = {
                 key,
@@ -206,9 +229,10 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
                 variantId: request.variantId,
                 viewport: request.viewport,
                 stateName: request.stateName,
-                dataUrl: `data:image/png;base64,${b64}`,
+                dataUrl: render.dataUrl,
                 quality,
-                prompt,
+                prompt: render.prompt,
+                model: render.model,
                 coverageManifest: manifest,
                 sourceSignature,
                 generatedFrom,
@@ -228,7 +252,7 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
             const aborted = (err as { name?: string })?.name === 'AbortError' || abort.signal.aborted;
             const message = aborted
                 ? ''
-                : err instanceof Error ? err.message : 'OpenAI image generation failed.';
+                : err instanceof Error ? err.message : 'Image generation failed.';
             set((state) => {
                 const nextInFlight = { ...state.inFlight };
                 delete nextInFlight[scope];

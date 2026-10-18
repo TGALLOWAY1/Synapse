@@ -41,7 +41,8 @@ import {
     tryParsePayload, extractMockupSettings, mergeExtraScreens,
     mockupScreenFromInventoryScreen, readExtraMockupScreens,
 } from '../lib/mockupParsing';
-import { hasOpenAIKey } from '../lib/openaiClient';
+import { getMockupImageProviderChain, hasMockupImageModel } from '../lib/artifactModelSettings';
+import { describeImageProviderChain } from '../lib/mockupImageModels';
 import { useMockupImageStore } from '../store/mockupImageStore';
 import { isMockupApproved } from '../lib/mockupApproval';
 import { effectiveImageVersionId } from '../lib/artifactImageVersion';
@@ -914,10 +915,11 @@ export function ArtifactWorkspace({
         addScreensToMockups([screenId]);
     };
 
-    // Confirmed batch: add every uncovered screen, then (only with an OpenAI
-    // key) kick off low-quality draft generation per screen. Each generation
-    // is individually tracked and cancellable via the standard per-screen
-    // panel; failures leave that screen on its generate/upload placeholder.
+    // Confirmed batch: add every uncovered screen, then (only when a mockup
+    // image model has a key) kick off low-quality draft generation per screen
+    // on the Settings primary → fallback chain. Each generation is
+    // individually tracked and cancellable via the standard per-screen panel;
+    // failures leave that screen on its generate/upload placeholder.
     const [missingMockupsConfirm, setMissingMockupsConfirm] = useState<{ count: number } | null>(null);
     const handleGenerateMissingMockups = () => {
         if (!capabilities.canGenerateArtifacts) return;
@@ -928,7 +930,7 @@ export function ArtifactWorkspace({
         }
         const appended = addScreensToMockups(missing);
         setMissingMockupsConfirm(null);
-        if (!hasOpenAIKey()) return; // screens now show the upload sheet instead
+        if (!hasMockupImageModel()) return; // screens now show the upload sheet instead
         const settings = extractMockupSettings(mockupPreferred);
         const payloadForPrompt = { ...mockupPayload, screens: [...mockupPayload.screens, ...appended] };
         const imageStore = useMockupImageStore.getState();
@@ -1874,7 +1876,7 @@ export function ArtifactWorkspace({
                         } for mockups`,
                     },
                 );
-                if (!hasOpenAIKey()) return; // approval recorded; images await a key
+                if (!hasMockupImageModel()) return; // approval recorded; images await a key
                 const imageStore = useMockupImageStore.getState();
                 for (const screen of payload.screens) {
                     if (!selectedScreenIds.includes(screen.id)) continue;
@@ -1941,7 +1943,8 @@ export function ArtifactWorkspace({
                                 key={preferred.id}
                                 payload={payload}
                                 flows={parsedFlows}
-                                hasImageKey={hasOpenAIKey()}
+                                hasImageKey={hasMockupImageModel()}
+                                imageModelSummary={describeImageProviderChain(getMockupImageProviderChain())}
                                 onOpenFlows={() => setSelected('user_flows')}
                                 onApprove={handleApproveMockupFlows}
                             />
@@ -2494,7 +2497,7 @@ export function ArtifactWorkspace({
                 <ConfirmDialog
                     title="Generate missing mockups"
                     cancelLabel="Cancel"
-                    confirmLabel={<><Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}</>}
+                    confirmLabel={<><Image size={13} /> {hasMockupImageModel() ? 'Add & generate' : 'Add screens'}</>}
                     onCancel={() => setMissingMockupsConfirm(null)}
                     onConfirm={handleGenerateMissingMockups}
                 >
@@ -2503,18 +2506,20 @@ export function ArtifactWorkspace({
                         {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
                         mockup set.
                     </p>
-                    {hasOpenAIKey() ? (
+                    {hasMockupImageModel() ? (
                         <p className="text-xs text-amber-700 mt-2">
-                            A low-quality draft image will be generated per screen via OpenAI
-                            gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
+                            A low-quality draft image will be generated per screen with{' '}
+                            {describeImageProviderChain(getMockupImageProviderChain())} —{' '}
+                            {missingMockupsConfirm.count} paid image{' '}
                             {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
                             own key (typically a few cents each). You can cancel any screen
                             while it&rsquo;s generating.
                         </p>
                     ) : (
                         <p className="text-xs text-neutral-500 mt-2">
-                            No OpenAI key is configured, so nothing will be generated — each
-                            added screen shows a copyable prompt and an upload sheet instead.
+                            No mockup image model has a key configured, so nothing will be
+                            generated — each added screen shows a copyable prompt and an upload
+                            sheet instead.
                         </p>
                     )}
                 </ConfirmDialog>

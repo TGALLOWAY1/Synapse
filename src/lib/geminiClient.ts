@@ -115,12 +115,12 @@ export interface ProviderOptions {
     signal?: AbortSignal;
 }
 
-const getApiKey = () => {
+const getApiKey = (missingKeyMessage = 'Add a Gemini API key in Settings to generate PRDs.') => {
     // Prefer the user's vault key (fetched into memory at call time, never
     // persisted client-side); fall back to a local key for dev/offline use.
     const key = getCachedGeminiKey() || getLocalCredential(GEMINI_API_KEY);
     if (!key) {
-        throw new Error('Add a Gemini API key in Settings to generate PRDs.');
+        throw new Error(missingKeyMessage);
     }
     return key;
 };
@@ -850,4 +850,181 @@ export const callGeminiStream = async (
     }
     // Unreachable — the loop either returns or throws — but keeps TS happy.
     throw lastError;
+};
+
+// ---------------------------------------------------------------------------
+// Image generation (Nano Banana) — mockup screen previews
+// ---------------------------------------------------------------------------
+//
+// One non-streaming `generateContent` call per image, browser-direct like every
+// other Gemini call, so it shares the key resolution (vault-in-memory, else the
+// local fallback), the `x-goog-user-project` billing header, the 429/5xx retry
+// policy and the inactivity watchdog. The request uses the documented
+// `generationConfig.imageConfig` shape ({ aspectRatio, imageSize }) with
+// `responseModalities: ['IMAGE']`, so the model answers with the image alone.
+// Calls are not recorded in the LLM trace (an image response is megabytes of
+// base64), matching the OpenAI image path.
+
+export interface GeminiImageOptions {
+    /** Gemini image model id, e.g. `gemini-nano-banana-2.1`. */
+    model: string;
+    /** `imageConfig.aspectRatio`, e.g. '9:16', '16:9', '4:3', '1:1'. */
+    aspectRatio: string;
+    /** `imageConfig.imageSize`: '1K' | '2K' (see `pickGeminiImageConfig`). */
+    imageSize: string;
+    /** Optional `thinkingConfig.thinkingLevel`; omitted = the model's default. */
+    thinkingLevel?: string;
+    signal?: AbortSignal;
+}
+
+export interface GeminiImageResult {
+    /** Raw base64 image bytes (no `data:` prefix). */
+    b64: string;
+    mimeType: string;
+}
+
+const NO_GEMINI_IMAGE_KEY_MESSAGE = 'Add a Gemini API key in Settings to generate mockup images.';
+
+/**
+ * Inactivity watchdog for an image call. Nothing streams back until the image
+ * is done, and a 2K render with extended thinking can run past the 2-minute
+ * text default, so image calls get 3 minutes. The caller can still cancel.
+ */
+export const GEMINI_IMAGE_TIMEOUT_MS = 180_000;
+
+interface GeminiImagePart {
+    text?: string;
+    thought?: boolean;
+    inlineData?: { mimeType?: string; data?: string };
+    inline_data?: { mime_type?: string; data?: string };
+}
+
+interface GeminiImageResponse {
+    candidates?: Array<{ finishReason?: string; content?: { parts?: GeminiImagePart[] } }>;
+    promptFeedback?: { blockReason?: string };
+}
+
+/** Finish reasons that mean the model declined the image on policy grounds. */
+const IMAGE_REFUSAL_FINISH_REASONS: ReadonlySet<string> = new Set([
+    'SAFETY', 'IMAGE_SAFETY', 'PROHIBITED_CONTENT', 'IMAGE_PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII',
+    'RECITATION', 'IMAGE_RECITATION',
+]);
+
+const formatGeminiImageError = (status: number, errorData: unknown, rawBody: string): string => {
+    const raw = (errorData as { error?: { message?: string; status?: string } })?.error;
+    const snippet = bodySnippet(rawBody);
+    const message = raw?.message || (snippet ? `Unexpected response body: ${snippet}` : 'Empty response body');
+    const isQuota = status === 429 || raw?.status === 'RESOURCE_EXHAUSTED' || /quota|resource.exhausted|rate.limit/i.test(message);
+    // Gemini image models have no free tier, so a free-tier key fails with a
+    // quota error whose limit is 0 — say so instead of "wait and retry".
+    if (isQuota && /free.?tier|freetier|limit:\s*0\b/i.test(message)) {
+        return (
+            'Gemini image generation has no free tier — enable billing on the Google Cloud project ' +
+            'behind your Gemini key, or set that project as your billing project in Settings. ' +
+            `Raw: ${message}`
+        );
+    }
+    if (isQuota) {
+        return `Gemini image quota / rate limit hit. Check your usage and billing in Google AI Studio. Raw: ${message}`;
+    }
+    return `Gemini image API error (${status}): ${message}`;
+};
+
+/** Read a failed image response's body once and build the thrown message. */
+const describeImageHttpError = async (response: Response, retries: number): Promise<string> => {
+    const rawBody = await response.text().catch(() => '');
+    let errorData: unknown = null;
+    try {
+        errorData = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+        errorData = null;
+    }
+    const message = formatGeminiImageError(response.status, errorData, rawBody);
+    return retries > 0 ? `${message} (after ${retries} ${retries === 1 ? 'retry' : 'retries'})` : message;
+};
+
+/**
+ * Pull the final image out of a `generateContent` response. Thinking image
+ * models can emit interim "thought" images before the final render, so the
+ * last non-thought image part wins. With no image, say why: a blocked prompt,
+ * a policy refusal, or text instead of an image (quoted, credential-scrubbed).
+ */
+const extractGeminiImage = (data: GeminiImageResponse | undefined): GeminiImageResult => {
+    const candidate = data?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    const parts = candidate?.content?.parts ?? [];
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        if (part.thought) continue;
+        const data64 = part.inlineData?.data ?? part.inline_data?.data;
+        if (!data64) continue;
+        const mimeType = part.inlineData?.mimeType ?? part.inline_data?.mime_type;
+        return { b64: data64, mimeType: mimeType?.startsWith('image/') ? mimeType : 'image/png' };
+    }
+    const blockReason = data?.promptFeedback?.blockReason;
+    if (blockReason) {
+        throw new Error(
+            `Gemini blocked this image request (blockReason: ${blockReason}). Try adjusting the screen description or PRD content.`,
+        );
+    }
+    if (finishReason && IMAGE_REFUSAL_FINISH_REASONS.has(finishReason)) {
+        throw new Error(
+            `Gemini declined to generate this image (finishReason: ${finishReason}). Try adjusting the screen description or PRD content.`,
+        );
+    }
+    const text = parts.filter((p) => !p.thought && p.text).map((p) => p.text).join(' ').trim();
+    if (text) {
+        throw new Error(`Gemini returned text instead of an image: "${bodySnippet(text)}"`);
+    }
+    const reason = finishReason ? ` (finishReason: ${finishReason})` : '';
+    throw new Error(`Gemini returned no image${reason}. Please try again.`);
+};
+
+/**
+ * Generate one image with a Gemini image model (Nano Banana) and return its
+ * raw base64 bytes + MIME type. The caller wraps them as a data URL.
+ */
+export const callGeminiImage = async (prompt: string, opts: GeminiImageOptions): Promise<GeminiImageResult> => {
+    const startTime = performance.now();
+    const apiKey = getApiKey(NO_GEMINI_IMAGE_KEY_MESSAGE);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`;
+    const body = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+            responseModalities: ['IMAGE'],
+            imageConfig: { aspectRatio: opts.aspectRatio, imageSize: opts.imageSize },
+            ...(opts.thinkingLevel ? { thinkingConfig: { thinkingLevel: opts.thinkingLevel } } : {}),
+        },
+    };
+
+    const watchdog = createWatchdog(GEMINI_IMAGE_TIMEOUT_MS, opts.signal);
+    let retries = 0;
+    let data: GeminiImageResponse | undefined;
+    try {
+        const response = await fetchWithRetry(url, {
+            method: 'POST',
+            headers: buildHeaders(apiKey),
+            body: JSON.stringify(body),
+            signal: watchdog.signal,
+        }, {
+            onRetry: (event) => { retries = event.retry; },
+            touch: watchdog.touch,
+        });
+        if (!response.ok) {
+            throw new GeminiHttpError(response.status, await describeImageHttpError(response, retries));
+        }
+        data = await response.json();
+    } catch (e) {
+        if (watchdog.timedOut()) throw new GeminiTimeoutError(GEMINI_IMAGE_TIMEOUT_MS);
+        throw e;
+    } finally {
+        watchdog.dispose();
+    }
+
+    const image = extractGeminiImage(data);
+    const durationMs = performance.now() - startTime;
+    console.log(
+        `[GEN] callGeminiImage(${opts.model}, ${opts.imageSize}, ${opts.aspectRatio}): ${durationMs.toFixed(0)}ms (${image.b64.length} b64 chars${retries > 0 ? `, ${retries} transport retries` : ''})`,
+    );
+    return image;
 };

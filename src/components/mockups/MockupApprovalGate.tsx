@@ -8,8 +8,12 @@ type Props = {
     payload: MockupPayload;
     /** Parsed user_flows (may be empty when the flows artifact is missing). */
     flows: ParsedFlow[];
-    /** OpenAI key present — drives the "images will render" vs "add a key" copy. */
+    /** A mockup image model (primary or fallback) has a key — drives the
+     * "images will render" vs "add a key" copy. */
     hasImageKey: boolean;
+    /** Which model(s) will render, e.g. "GPT Image 2, falling back to Nano
+     * Banana 2.1" — shown next to the action so the cost isn't a surprise. */
+    imageModelSummary?: string;
     /** Jump to the Flows artifact so the user can read the full flows. */
     onOpenFlows: () => void;
     /** Record approval + kick off image generation for the selected screen ids. */
@@ -27,7 +31,7 @@ type Props = {
  * "Generate mockups" action. Nothing is blocked once approved — the user can
  * still add/regenerate screens afterwards from the mockup view.
  */
-export function MockupApprovalGate({ payload, flows, hasImageKey, onOpenFlows, onApprove }: Props) {
+export function MockupApprovalGate({ payload, flows, hasImageKey, imageModelSummary, onOpenFlows, onApprove }: Props) {
     const recommendations = useMemo(
         () => buildMockupScreenRecommendations(payload),
         [payload],
@@ -186,9 +190,14 @@ export function MockupApprovalGate({ payload, flows, hasImageKey, onOpenFlows, o
                         Confirm you've reviewed the flows to continue.
                     </span>
                 )}
+                {flowsReviewed && hasImageKey && imageModelSummary && (
+                    <span className="text-xs text-neutral-500">
+                        Renders with {imageModelSummary} · a few cents per image, billed to your key.
+                    </span>
+                )}
                 {flowsReviewed && !hasImageKey && (
                     <span className="text-xs text-amber-600">
-                        No OpenAI key — screens are approved, but add a key to render images.
+                        No image model key — screens are approved, but add an OpenAI or Gemini key in Settings to render images.
                     </span>
                 )}
             </div>

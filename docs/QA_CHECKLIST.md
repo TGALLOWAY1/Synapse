@@ -35,9 +35,10 @@ npm run dev            # http://localhost:5173
 
 Do not file these:
 
-- [ ] **Mockup images never render locally.** They come from the serverless
-      `/api/image/generate` proxy, which `vite dev` does not run. Screens always
-      shows a wireframe or placeholder here.
+- [ ] **GPT Image 2 mockup images never render locally.** They come from the
+      serverless `/api/image/generate` proxy, which `vite dev` does not run.
+      Nano Banana 2.1 renders go browser-direct on your Gemini key, so they
+      *do* work locally (each one is a real, paid image call).
 - [ ] **`/api/*` requests 404 and the header shows "Cloud save failed."** No
       serverless functions run under `vite dev`.
 - [ ] **Analytics requests are blocked.** Vercel Analytics is not available
@@ -231,6 +232,14 @@ Then check each output is usable:
 - [ ] **Screens** — the list is populated; opening one shows **Overview / Flow /
       Mockups** tabs; **All screens** returns. Screens reference the features
       they serve.
+- [ ] **Mockup image models** — with both an OpenAI and a Gemini key, Settings →
+      Generation Models → Mockups shows **Primary model / Fallback model**, and
+      each model's key status. A screen's **Generate AI image** names the
+      routing (e.g. *GPT Image 2, falling back to Nano Banana 2.1*); **Try /
+      Use <other model>** renders with that model only, and the render switcher
+      flips between both renders without losing either. With the primary's key
+      removed, generation goes straight to the fallback; with neither key,
+      screens show the upload sheet.
 - [ ] **Screens → Components** — the section expands, lists reusable components,
       shows screen back-references and contradiction advisories, and a failed or
       missing inventory has a visible Retry/Generate path.

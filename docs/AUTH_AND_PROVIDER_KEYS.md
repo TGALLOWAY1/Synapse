@@ -120,8 +120,13 @@ required (they already were, for auth — `MONGODB_URI` replaces the retired
    `GET /api/provider-keys?material=gemini` (authenticated) and used directly.
    It is **never written to localStorage**. A local-browser key remains as an
    offline/dev fallback (see Settings → "Local browser keys").
+4. The same key renders **Nano Banana 2.1** mockup images
+   (`gemini-nano-banana-2.1`, `callGeminiImage`), browser-direct like text
+   calls. Image generation is a paid Gemini operation (no free tier); a
+   free-tier key gets an explicit "no free tier" error.
 
-Missing-key UX: *"Add a Gemini API key in Settings to generate PRDs."*
+Missing-key UX: *"Add a Gemini API key in Settings to generate PRDs."* /
+*"Add a Gemini API key in Settings to generate mockup images."*
 
 ## 6. OpenAI key setup
 
@@ -141,9 +146,10 @@ no account and no paid keys. Generation affordances disable themselves with a
 Settings callout when no key is configured. There is **no shared server key**,
 so no path allows unbounded paid usage on someone else's dime.
 
-Cost-safety UX: image generation shows the provider/model (gpt-image-2), an
-explicit "paid OpenAI operation" note, and a confirmation dialog before the
-expensive high-quality render.
+Cost-safety UX: image generation shows the provider/model (GPT Image 2 or
+Nano Banana 2.1, and the primary → fallback routing a default render will
+use), an explicit "paid OpenAI / Google operation" note, and a confirmation
+dialog before the expensive high-quality render.
 
 ## 8. Security considerations
 
@@ -156,7 +162,9 @@ expensive high-quality render.
 - Per-user rate limits on the paid image endpoint blunt session-abuse cost.
 - **Known tradeoff:** the **Gemini** key is returned to the authenticated client
   at call time (in-memory only) because proxying its 60–90s SSE pipeline through
-  Vercel serverless would hit `maxDuration` limits. This is strictly better than
+  Vercel serverless would hit `maxDuration` limits. Nano Banana image calls use
+  that same in-memory key (a 20–40s render would also crowd the 60s Hobby
+  function limit), so they add no new exposure. This is strictly better than
   the previous state (plaintext in localStorage), but it is not as strong as the
   fully-proxied OpenAI path. Closing this gap (a streaming Gemini proxy on an
   Edge/streaming runtime) is future work.

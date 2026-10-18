@@ -689,7 +689,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     now GENERATE / regenerate / retry ONE specific non-default variant
     (`Mobile · Default`, `Desktop · Empty History`, …). The **default variant
     (`id === 'default'`) still RENDERS through the legacy `MockupScreenImage`
-    path** (keys `versionId:screenId:quality`, coverage stays "unknown") — in
+    path** (keys `versionId:screenId:quality`, plus a `:gemini` suffix for a
+    Nano Banana render, so one screen holds a render from each image model side
+    by side with a switcher; coverage stays "unknown") — in
     `MockupVariantsPanel` the `isPrimaryImageSlot` router mounts it even for an
     image-absent (`derived_missing`) default, because that component is also the
     generate/upload CTA. Its `generated` *status*, though, is now gated on real
@@ -701,7 +703,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     risks, derived only from existing screen-contract fields);
     `buildVariantImagePrompt` scopes the gpt-image-2 prompt to that exact viewport
     + state (forbids other states / a generic default; realistic mobile viewport;
-    explicit empty/loading/error/permission/success guidance);
+    explicit empty/loading/error/permission/success guidance), and
+    `buildGeminiVariantImagePrompt` is its Nano Banana counterpart (same scope
+    and state guidance, written per Google's prompting guidance — see
+    LLM_PIPELINE.md);
     `buildVariantCoverageManifest` captures a **generation-time coverage
     manifest** (`MockupCoverageManifest` in `src/types`) — a deterministic,
     structured self-report of what the render was ASKED to include (`estimated:
@@ -714,9 +719,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     from `legacyUnknownMockups`). **Honesty rules stand:** legacy mockups without
     a manifest stay "unknown"; UI copy says "Coverage manifest captured during
     generation … not a visual inspection", never "visually verified"; never show
-    "covered" without structured metadata. Generation is gated on an OpenAI key
-    (`hasOpenAIKey`) + `gpt_image` image mode — demo / keyless users see a
-    disabled action with a clear explanation, never a silent failure. The
+    "covered" without structured metadata. Generation is gated on the
+    `ai_generated` image mode + a keyed image model: the main "Generate variant"
+    runs the Settings primary → fallback chain (`getMockupImageProviderChain`),
+    while "Try / Use <model>" runs one model explicitly (any keyed model —
+    `hasAnyMockupImageKey`); demo / keyless users see a disabled action with a
+    clear explanation, never a silent failure. Variant keys carry no provider:
+    a render from the other model becomes current and the previous one moves to
+    the variant history. Records and history entries carry `model` (the exact
+    image model id; absent = a pre-provider gpt-image-2 render), shown as "Made
+    with <model>" and on each history row. The
     per-variant store's image BYTES stay in its own dedicated IndexedDB store
     (never in `imageRefsStore` or the legacy mockup store); Phase 3D made the
     RECORDS portable through owner snapshots (see the Phase 3D bullet) but the
@@ -927,7 +939,8 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   in-place write.)* Adding coverage is free; **image generation is never
   automatic** — it's the standard per-screen action, or the batch flow which
   fires low-quality drafts only after an explicit cost-labeled confirm and
-  only when an OpenAI key exists (keyless → upload sheets). Every consumer of
+  only when a mockup image model has a key (`hasMockupImageModel`; the confirm
+  names the primary → fallback routing; keyless → upload sheets). Every consumer of
   a mockup payload in the workspace must read the *effective* payload
   (`mergeExtraScreens(tryParsePayload(v), v.metadata)`).
 - **Reference validation is advisory, never blocking.** `buildScreenIndex`

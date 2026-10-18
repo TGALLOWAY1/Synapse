@@ -1,5 +1,15 @@
-import type { CoreArtifactSubtype } from '../types';
+import type { CoreArtifactSubtype, MockupImageProvider } from '../types';
 import { getFastModel, getStrongModel } from './geminiClient';
+import { hasGeminiKey } from './geminiKeyVault';
+import { hasOpenAIKey } from './openaiClient';
+import {
+    DEFAULT_MOCKUP_IMAGE_MODEL_PREFS,
+    MOCKUP_IMAGE_PROVIDERS,
+    isMockupImageProvider,
+    otherMockupImageProvider,
+    resolveImageProviderChain,
+    type MockupImageModelPrefs,
+} from './mockupImageModels';
 
 /**
  * Per-artifact model routing + persistence.
@@ -99,21 +109,25 @@ export const getArtifactModel = (subtype: CoreArtifactSubtype): string => {
 };
 
 // ---------------------------------------------------------------------------
-// Mockup image source mode
+// Mockup image source mode + image model routing
 // ---------------------------------------------------------------------------
 //
 // Mockups are not a text artifact — their "model" is an image source. The user
-// chooses between auto-generating screen images via OpenAI GPT Image, or
-// supplying their own uploads against generated per-screen prompts.
+// chooses between AI-generated screen images or supplying their own uploads
+// against generated per-screen prompts. AI generation then routes through a
+// PRIMARY image model with an optional FALLBACK (GPT Image 2 / Nano Banana
+// 2.1 — see `mockupImageModels.ts` for the routing rules).
 
-export type MockupImageMode = 'gpt_image' | 'user_uploaded';
-export const DEFAULT_MOCKUP_IMAGE_MODE: MockupImageMode = 'gpt_image';
+export type MockupImageMode = 'ai_generated' | 'user_uploaded';
+export const DEFAULT_MOCKUP_IMAGE_MODE: MockupImageMode = 'ai_generated';
 const MOCKUP_IMAGE_MODE_KEY = 'SYNAPSE_MOCKUP_IMAGE_MODE';
+// The stored AI value was 'gpt_image' while GPT Image 2 was the only model; it
+// (like any unrecognized value) reads as the default, AI generation.
 
 export const getMockupImageMode = (): MockupImageMode => {
     try {
         const v = localStorage.getItem(MOCKUP_IMAGE_MODE_KEY);
-        return v === 'user_uploaded' || v === 'gpt_image' ? v : DEFAULT_MOCKUP_IMAGE_MODE;
+        return v === 'user_uploaded' || v === 'ai_generated' ? v : DEFAULT_MOCKUP_IMAGE_MODE;
     } catch {
         return DEFAULT_MOCKUP_IMAGE_MODE;
     }
@@ -127,23 +141,83 @@ export const setMockupImageMode = (mode: MockupImageMode): void => {
     }
 };
 
+const MOCKUP_IMAGE_PRIMARY_KEY = 'SYNAPSE_MOCKUP_IMAGE_PRIMARY';
+const MOCKUP_IMAGE_FALLBACK_KEY = 'SYNAPSE_MOCKUP_IMAGE_FALLBACK';
+const NO_FALLBACK = 'none';
+
+/**
+ * Persisted primary/fallback image models. An unset fallback defaults to the
+ * other model; a fallback equal to the primary (or 'none') means no fallback.
+ */
+export const getMockupImageModelPrefs = (): MockupImageModelPrefs => {
+    try {
+        const storedPrimary = localStorage.getItem(MOCKUP_IMAGE_PRIMARY_KEY);
+        const primary = isMockupImageProvider(storedPrimary)
+            ? storedPrimary
+            : DEFAULT_MOCKUP_IMAGE_MODEL_PREFS.primary;
+        const storedFallback = localStorage.getItem(MOCKUP_IMAGE_FALLBACK_KEY);
+        const fallback = storedFallback === NO_FALLBACK
+            ? null
+            : isMockupImageProvider(storedFallback)
+                ? storedFallback
+                : otherMockupImageProvider(primary);
+        return { primary, fallback: fallback === primary ? null : fallback };
+    } catch {
+        return DEFAULT_MOCKUP_IMAGE_MODEL_PREFS;
+    }
+};
+
+export const setMockupImageModelPrefs = (prefs: MockupImageModelPrefs): void => {
+    try {
+        localStorage.setItem(MOCKUP_IMAGE_PRIMARY_KEY, prefs.primary);
+        const fallback = prefs.fallback && prefs.fallback !== prefs.primary ? prefs.fallback : NO_FALLBACK;
+        localStorage.setItem(MOCKUP_IMAGE_FALLBACK_KEY, fallback);
+    } catch {
+        /* ignore */
+    }
+};
+
+/**
+ * Whether a provider has a usable key right now: the primed vault flag for
+ * OpenAI (its key never reaches the browser), the in-memory vault key OR the
+ * local fallback for Gemini (`hasGeminiKey`, the same resolution the
+ * transport uses).
+ */
+export const isMockupImageProviderAvailable = (provider: MockupImageProvider): boolean =>
+    provider === 'openai' ? hasOpenAIKey() : hasGeminiKey();
+
+/** The providers a default generation tries right now, in order (see
+ * `resolveImageProviderChain`). Empty when no selected model has a key. */
+export const getMockupImageProviderChain = (): MockupImageProvider[] =>
+    resolveImageProviderChain(getMockupImageModelPrefs(), isMockupImageProviderAvailable);
+
+/** Whether a default generation can run at all (the "has an image key?" gate
+ * for the approval gate and batch flows). */
+export const hasMockupImageModel = (): boolean => getMockupImageProviderChain().length > 0;
+
+/** Whether ANY image model has a key — enough for the AI generator view and
+ * its explicit per-model actions, even when the Settings chain can't run (a
+ * keyless primary with the fallback turned off). */
+export const hasAnyMockupImageKey = (): boolean => MOCKUP_IMAGE_PROVIDERS.some(isMockupImageProviderAvailable);
+
 export interface MockupRenderDecision {
-    /** Render the manual prompt + upload sheet instead of the OpenAI generator. */
+    /** Render the manual prompt + upload sheet instead of the AI generator. */
     manual: boolean;
-    /** True when GPT Image 2 was chosen but no key is configured (forced fallback). */
+    /** True when AI generation was chosen but no image model has a key (forced fallback). */
     forcedFallback: boolean;
 }
 
 /**
  * Decide how a mockup screen should render given the selected mode and whether
- * an OpenAI image key is available. 'user_uploaded' always shows the manual
- * sheet; 'gpt_image' shows the generator only when a key exists, otherwise it
- * falls back to the manual sheet (never a silent failure).
+ * any image model has a key (`hasAnyMockupImageKey`). 'user_uploaded' always
+ * shows the manual sheet; 'ai_generated' shows the generator only when a model
+ * is usable, otherwise it falls back to the manual sheet (never a silent
+ * failure).
  */
 export const resolveMockupRender = (
     mode: MockupImageMode,
-    hasOpenAiKey: boolean,
+    hasImageModel: boolean,
 ): MockupRenderDecision => ({
-    manual: mode === 'user_uploaded' || !hasOpenAiKey,
-    forcedFallback: mode === 'gpt_image' && !hasOpenAiKey,
+    manual: mode === 'user_uploaded' || !hasImageModel,
+    forcedFallback: mode === 'ai_generated' && !hasImageModel,
 });

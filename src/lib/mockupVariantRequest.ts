@@ -16,7 +16,14 @@ import type {
     ScreenStateType,
 } from '../types';
 import { buildDesignSystemBrief } from './designTokens';
-import { IMAGE_CLOSING_RULES, fidelityStyleHint } from './prompts/imagePromptFragments';
+import {
+    IMAGE_CLOSING_RULES,
+    IMAGE_PLATFORM_HINTS,
+    NANO_BANANA_CLOSING_RULES,
+    fidelityStyleHint,
+    nanoBananaMockupFraming,
+    nanoBananaTextRule,
+} from './prompts/imagePromptFragments';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import { normalizeScreenPriority, type DerivedMockupVariant, type MockupViewport } from './mockupVariants';
 
@@ -204,6 +211,72 @@ export function buildVariantImagePrompt(
         `Style: ${styleHint}.${tokenBrief}`,
         ...IMAGE_CLOSING_RULES,
     ].filter(Boolean).join(' ');
+}
+
+// The Nano Banana framing names the viewport inside a sentence, so it takes
+// the plain viewport noun; the mobile-first guidance becomes its own sentence.
+const GEMINI_VIEWPORT_HINTS: Record<MockupViewport, string> = {
+    desktop: IMAGE_PLATFORM_HINTS.desktop,
+    mobile: IMAGE_PLATFORM_HINTS.mobile,
+    tablet: 'tablet app screen, landscape orientation',
+};
+
+/**
+ * Nano Banana (Gemini image) counterpart of `buildVariantImagePrompt`: the same
+ * single-variant scope (one viewport × one state, sibling-coherent, design
+ * system preserved), written per Google's image-prompting guidance — narrative
+ * paragraphs, the title quoted with its typography, context marked as
+ * background, and positively framed scope and closing rules.
+ */
+export function buildGeminiVariantImagePrompt(
+    request: MockupVariantGenerationRequest,
+    designTokens?: DesignTokens,
+): string {
+    const hasDesignSystem = Boolean(designTokens);
+    const isDefaultState = !request.stateType || request.stateType === 'default'
+        || request.stateName.trim().toLowerCase() === 'default';
+    const subject = `the "${request.screenName}" screen of the product "${request.projectName}"`
+        + (isDefaultState ? '' : ` in its "${request.stateName}" state`);
+
+    const paragraphs: string[][] = [
+        [
+            nanoBananaMockupFraming(subject, GEMINI_VIEWPORT_HINTS[request.viewport], request.fidelity),
+            'Depict exactly this one variant — this viewport in this state — as a single screen; other states appear only where they are needed as background context.',
+            request.viewport === 'mobile'
+                ? 'Design it mobile-first, with a touch-friendly hierarchy rather than a shrunken desktop layout.'
+                : '',
+        ],
+        [
+            request.screenPurpose ? `Screen purpose: ${request.screenPurpose}` : '',
+            request.userIntent ? `The user's goal here: ${request.userIntent}.` : '',
+            request.priority === 'P0'
+                ? 'This is a P0 screen, essential to the main product loop, so give it a polished, central treatment.'
+                : '',
+        ],
+        [
+            request.coreUIRegions.length
+                ? `Lay the screen out with a clear visual hierarchy that includes these UI regions: ${request.coreUIRegions.join('; ')}.`
+                : '',
+            request.userActions.length ? `Make these primary user actions visible: ${request.userActions.join('; ')}.` : '',
+        ],
+        [
+            buildStateInstruction(request),
+            request.risks.length ? `Design carefully around these known edge cases: ${request.risks.join('; ')}.` : '',
+            request.siblingContext ?? '',
+        ],
+        [nanoBananaTextRule(request.screenName, hasDesignSystem)],
+        [request.productSummary ? `Product context (background for you, not on-screen copy): ${request.productSummary}` : ''],
+        [
+            `Visual style: ${fidelityStyleHint(request.fidelity, hasDesignSystem)}.`,
+            'Keep the visual language consistent with the sibling variants of this screen.',
+            designTokens ? buildDesignSystemBrief(designTokens) : '',
+        ],
+        [...NANO_BANANA_CLOSING_RULES],
+    ];
+    return paragraphs
+        .map((sentences) => sentences.filter(Boolean).join(' '))
+        .filter(Boolean)
+        .join('\n\n');
 }
 
 /**
